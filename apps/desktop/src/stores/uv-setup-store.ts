@@ -3,6 +3,7 @@ import { invoke } from "@/lib/backend";
 import { createLogger } from "@/lib/debug/logger";
 
 const log = createLogger("uv");
+let inspection = 0;
 
 // ─── Types ───
 
@@ -36,6 +37,7 @@ interface UvSetupState {
   checkStatus: () => Promise<void>;
   install: () => Promise<void>;
   setupVenv: (projectPath: string) => Promise<void>;
+  inspectVenv: (projectPath: string) => Promise<void>;
 
   // Internal
   _finishInstall: (success: boolean) => void;
@@ -93,11 +95,31 @@ export const useUvSetupStore = create<UvSetupState>((set, get) => ({
     }
   },
 
+  inspectVenv: async (projectPath: string) => {
+    const request = ++inspection;
+    set({ venvReady: false, venvPath: null, pythonPath: null });
+    try {
+      const info = await invoke<VenvInfo | null>("project_venv_status", {
+        projectPath,
+      });
+      if (request !== inspection) return;
+      set({
+        venvReady: !!info,
+        venvPath: info?.venv_path ?? null,
+        pythonPath: info?.python_path ?? null,
+      });
+    } catch {
+      // Optional environment detection never blocks the workspace.
+    }
+  },
+
   setupVenv: async (projectPath: string) => {
+    const request = ++inspection;
     try {
       const info = await invoke<VenvInfo>("setup_project_venv", {
         projectPath,
       });
+      if (request !== inspection) return;
       log.info(`Venv ready at ${info.venv_path}`);
       set({
         venvReady: true,
@@ -105,6 +127,7 @@ export const useUvSetupStore = create<UvSetupState>((set, get) => ({
         pythonPath: info.python_path,
       });
     } catch (err: any) {
+      if (request !== inspection) return;
       log.error("Failed to setup venv", { error: String(err) });
       // Don't set error status — uv itself is fine, just venv creation failed
       set({

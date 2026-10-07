@@ -19,14 +19,7 @@ pub async fn project_service(
             .map(str::to_string)
             .ok_or_else(|| format!("Missing {key}"))
     };
-    if [
-        "history_restore",
-        "history_snapshot",
-        "setup_project_venv",
-        "uv_add_packages",
-    ]
-    .contains(&operation.as_str())
-    {
+    if ["history_restore", "history_snapshot", "setup_project_venv"].contains(&operation.as_str()) {
         crate::codex::assert_unlocked(&app, &project_id)?;
     }
     match operation.as_str() {
@@ -40,9 +33,7 @@ pub async fn project_service(
             let main = str_arg("mainFile")?;
             projects::resolve(&project.root, &main)?;
             let state = app.state::<latex::LatexCompilerState>();
-            Ok(json!(
-                latex::compile_latex(&state, root, main, args["useTexlive"].as_bool()).await?
-            ))
+            Ok(json!(latex::compile_latex(&state, root, main).await?))
         }
         "synctex_edit" => {
             let state = app.state::<latex::LatexCompilerState>();
@@ -92,14 +83,8 @@ pub async fn project_service(
             history::history_remove_label(root, str_arg("label")?)?;
             Ok(Value::Null)
         }
+        "project_venv_status" => Ok(json!(uv::project_venv_status(root))),
         "setup_project_venv" => Ok(json!(uv::setup_project_venv(root).await?)),
-        "uv_add_packages" => Ok(json!(
-            uv::uv_add_packages(
-                serde_json::from_value(args["packages"].clone()).map_err(|e| e.to_string())?,
-                root
-            )
-            .await?
-        )),
         _ => Err("Unsupported project service".into()),
     }
 }

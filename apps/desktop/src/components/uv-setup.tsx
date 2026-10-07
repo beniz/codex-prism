@@ -46,11 +46,12 @@ export function UvSetupDialog({ open, onClose }: UvSetupDialogProps) {
     if (open && !hasCheckedRef.current) {
       hasCheckedRef.current = true;
       checkStatus();
+      if (projectRoot) void useUvSetupStore.getState().inspectVenv(projectRoot);
     }
     if (!open) {
       hasCheckedRef.current = false;
     }
-  }, [open, checkStatus]);
+  }, [open, checkStatus, projectRoot]);
 
   // Listen for install completion events
   useEffect(() => {
@@ -168,9 +169,7 @@ export function UvSetupDialog({ open, onClose }: UvSetupDialogProps) {
           {/* Info text */}
           {status === "ready" && venvReady && (
             <p className="max-w-full break-words text-muted-foreground text-xs leading-relaxed">
-              Codex and codex-prism terminal tools use this environment
-              when running Python code. OpenAI-compatible providers use it
-              through PowerShell/Bash tool calls. Use{" "}
+              Codex can use this project environment for Python scripts. Use{" "}
               <code className="text-foreground">uv pip install</code> to add
               packages.
             </p>

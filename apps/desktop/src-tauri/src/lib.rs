@@ -7,18 +7,10 @@ mod projects;
 mod services;
 mod skills;
 mod uv;
-mod zotero;
 
 use std::path::Path;
 use tauri::{Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_fs::FsExt;
-
-/// Entry point for the `--tectonic-compile` subprocess mode.
-/// Runs tectonic compilation in an isolated process so that C-level global state
-/// (font cache, etc.) is cleaned up on exit, preventing assertion failures on retry.
-pub fn tectonic_compile_subprocess(work_dir: &Path, main_file: &str) -> Result<(), String> {
-    latex::compile_with_tectonic(work_dir, main_file)
-}
 
 // --- External editor detection & opening ---
 
@@ -447,29 +439,6 @@ fn js_log(msg: String) {
     eprintln!("[js] {}", msg);
 }
 
-// --- Debug window ---
-
-#[tauri::command]
-fn open_debug_window(app: tauri::AppHandle) -> Result<(), String> {
-    // If a debug window already exists, just focus it
-    if let Some(win) = app.get_webview_window("debug") {
-        win.set_focus().map_err(|e| e.to_string())?;
-        return Ok(());
-    }
-
-    let url = WebviewUrl::App("index.html?debug=1".into());
-    WebviewWindowBuilder::new(&app, "debug", url)
-        .title("codex-prism — Debug")
-        .inner_size(560.0, 700.0)
-        .min_inner_size(400.0, 400.0)
-        .zoom_hotkeys_enabled(true)
-        .visible(true)
-        .build()
-        .map_err(|e| format!("Failed to create debug window: {}", e))?;
-
-    Ok(())
-}
-
 // --- System info for debug panel & bug reports ---
 
 #[derive(serde::Serialize)]
@@ -556,19 +525,14 @@ async fn read_clipboard_file_paths() -> Result<Vec<String>, String> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    // Load .env file (walks up from cwd to find it)
-    let _ = dotenvy::dotenv();
-
     #[allow(clippy::expect_used)]
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_shell::init())
-        .plugin(tauri_plugin_process::init())
         .manage(codex::CodexState::default())
         .manage(projects::Projects::default())
         .manage(latex::LatexCompilerState::default())
-        .manage(zotero::ZoteroOAuthState::default())
         .setup(|app| {
             codex::recover(app.handle());
             // Safety net: force-show the main window after a timeout if the
@@ -617,10 +581,6 @@ pub fn run() {
             codex::codex_respond,
             codex::project_review,
             codex::project_resolve_review,
-            zotero::zotero_start_oauth,
-            zotero::zotero_complete_oauth,
-            zotero::zotero_cancel_oauth,
-            skills::install_scientific_skills,
             skills::install_scientific_skills_global,
             skills::import_skill_from_folder,
             skills::check_skills_installed,
@@ -631,9 +591,7 @@ pub fn run() {
             skills::get_skill_content,
             uv::check_uv_status,
             uv::install_uv,
-            uv::uv_run_command,
             get_system_info,
-            open_debug_window,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");

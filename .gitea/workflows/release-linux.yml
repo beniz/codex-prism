@@ -27,13 +27,12 @@ jobs:
           SUDO=()
           if [ "$(id -u)" != 0 ]; then SUDO=(sudo); fi
           "${SUDO[@]}" apt-get update
-          "${SUDO[@]}" apt-get install -y build-essential pkg-config libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev librsvg2-bin patchelf libssl-dev libicu-dev libgraphite2-dev libharfbuzz-dev libfreetype-dev libfontconfig-dev libpng-dev zlib1g-dev file curl wget xdg-utils
+          "${SUDO[@]}" apt-get install -y build-essential pkg-config libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev librsvg2-bin patchelf libssl-dev file curl wget xdg-utils
           corepack enable
       - run: corepack pnpm install --frozen-lockfile
       - name: Check release and run tests
         env:
           RELEASE_TAG: ${{ gitea.ref_name }}
-          CXXFLAGS: -std=c++17
         run: |
           node scripts/release.mjs check "$RELEASE_TAG"
           corepack pnpm test:release

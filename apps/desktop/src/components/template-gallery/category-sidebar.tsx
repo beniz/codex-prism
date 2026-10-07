@@ -1,21 +1,11 @@
 import {
-  FileTextIcon,
   GraduationCapIcon,
   BriefcaseIcon,
   PaletteIcon,
   SparklesIcon,
-  MonitorIcon,
-  LayoutIcon,
-  UserIcon,
-  MailIcon,
-  ClipboardListIcon,
-  BookIcon,
-  NewspaperIcon,
-  FileIcon,
 } from "lucide-react";
 import {
   type TemplateCategory,
-  type TemplateSubcategory,
   CATEGORY_LABELS,
   getCategories,
   getAllTemplates,
@@ -28,19 +18,6 @@ const CATEGORY_ICONS: Record<TemplateCategory, React.ReactNode> = {
   professional: <BriefcaseIcon className="size-4" />,
   creative: <PaletteIcon className="size-4" />,
   starter: <SparklesIcon className="size-4" />,
-};
-
-const _SUBCATEGORY_ICONS: Record<TemplateSubcategory, React.ReactNode> = {
-  papers: <FileTextIcon className="size-3.5" />,
-  theses: <GraduationCapIcon className="size-3.5" />,
-  presentations: <MonitorIcon className="size-3.5" />,
-  posters: <LayoutIcon className="size-3.5" />,
-  cv: <UserIcon className="size-3.5" />,
-  letters: <MailIcon className="size-3.5" />,
-  reports: <ClipboardListIcon className="size-3.5" />,
-  books: <BookIcon className="size-3.5" />,
-  newsletters: <NewspaperIcon className="size-3.5" />,
-  blank: <FileIcon className="size-3.5" />,
 };
 
 export function CategorySidebar() {

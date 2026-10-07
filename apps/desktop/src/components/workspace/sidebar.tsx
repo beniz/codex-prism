@@ -443,7 +443,6 @@ export function Sidebar({
   const requestJumpToPosition = useDocumentStore(
     (s) => s.requestJumpToPosition,
   );
-  const _insertAtCursor = useDocumentStore((s) => s.insertAtCursor);
   const moveFile = useDocumentStore((s) => s.moveFile);
   const moveFolder = useDocumentStore((s) => s.moveFolder);
   const closeProject = useDocumentStore((s) => s.closeProject);
@@ -2000,15 +1999,15 @@ interface SkillsStatus {
   location: string;
 }
 
-function EnvironmentSection({
-  projectPath: _projectPath,
-}: {
-  projectPath: string | null;
-}) {
+function EnvironmentSection({ projectPath }: { projectPath: string | null }) {
   // ── Python / uv ──
   const venvReady = useUvSetupStore((s) => s.venvReady);
   const uvStatus = useUvSetupStore((s) => s.status);
   const [showUvDialog, setShowUvDialog] = useState(false);
+
+  useEffect(() => {
+    if (projectPath) void useUvSetupStore.getState().inspectVenv(projectPath);
+  }, [projectPath]);
 
   // ── Scientific Skills ──
   const [skillsStatus, setSkillsStatus] = useState<SkillsStatus | null>(null);

@@ -44,6 +44,9 @@ import {
 import { HistoryPanel } from "@/components/workspace/history-panel";
 import {
   compileLatex,
+  detectTexlive,
+  detectTexEngine,
+  type TexliveStatus,
   loadExistingPdf,
   synctexEdit,
   resolveCompileTarget,
@@ -90,12 +93,18 @@ const ZOOM_OPTIONS = [
 ];
 
 export function PdfPreview() {
+  const [texliveStatus, setTexliveStatus] = useState<TexliveStatus | null>(
+    null,
+  );
+  useEffect(() => {
+    void detectTexlive()
+      .then(setTexliveStatus)
+      .catch(() => {});
+  }, []);
   const autoRecompile = useSettingsStore((s) => s.autoRecompile);
   const setAutoRecompile = useSettingsStore((s) => s.setAutoRecompile);
   const contentGeneration = useDocumentStore((s) => s.contentGeneration);
   const agentLocked = useAgentChatStore((s) => s.locked);
-  const compilerBackend = useSettingsStore((s) => s.compilerBackend);
-  const setCompilerBackend = useSettingsStore((s) => s.setCompilerBackend);
   const pdfRevision = useDocumentStore((s) => s.pdfRevision);
   const compileError = useDocumentStore((s) => s.compileError);
   const isCompiling = useDocumentStore((s) => s.isCompiling);
@@ -437,9 +446,7 @@ export function PdfPreview() {
           return;
         }
         await saveAllFiles();
-        const texlive =
-          useSettingsStore.getState().compilerBackend === "texlive";
-        const data = await compileLatex(projectRoot, targetPath, texlive);
+        const data = await compileLatex(projectRoot, targetPath);
         if (useDocumentStore.getState().projectRoot === projectRoot)
           setPdfData(data, rootId);
       } catch (error) {
@@ -581,8 +588,7 @@ export function PdfPreview() {
     const compileStart = Date.now();
     try {
       await saveAllFiles();
-      const texlive = useSettingsStore.getState().compilerBackend === "texlive";
-      const data = await compileLatex(state.projectRoot, targetFile, texlive);
+      const data = await compileLatex(state.projectRoot, targetFile);
       if (useDocumentStore.getState().projectRoot === state.projectRoot)
         setPdfData(data, rootId);
     } catch (error) {
@@ -830,6 +836,10 @@ export function PdfPreview() {
     );
   };
 
+  const engine = detectTexEngine(
+    files.find((f) => f.id === currentRootFileId)?.content ?? "",
+  );
+
   return (
     <div
       ref={previewContainerRef}
@@ -837,23 +847,15 @@ export function PdfPreview() {
     >
       <div className="flex h-[calc(var(--workspace-topbar-height)+var(--titlebar-height))] shrink-0 flex-nowrap items-center border-border border-b bg-background px-2">
         <div className="flex min-w-0 shrink-0 items-center gap-1">
-          <Select
-            value={compilerBackend}
-            onValueChange={(v) =>
-              setCompilerBackend(v as "tectonic" | "texlive")
-            }
+          <span
+            className="px-2 text-xs text-muted-foreground"
+            title={`TeX Live: ${engine}. Set % !TEX program = pdflatex, xelatex or lualatex in the main document to choose an engine.${texliveStatus && !texliveStatus.engines.includes(engine) ? ` ${engine} is not installed. Install TeX Live to compile; existing PDFs remain available.` : ""}`}
           >
-            <SelectTrigger
-              size="sm"
-              className="h-7! @[44rem]/pv:w-[8.5rem] w-[6.75rem] text-xs"
-            >
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="tectonic">Tectonic</SelectItem>
-              <SelectItem value="texlive">TeXLive</SelectItem>
-            </SelectContent>
-          </Select>
+            {engine}
+            {texliveStatus && !texliveStatus.engines.includes(engine)
+              ? " (missing)"
+              : ""}
+          </span>
           {isSaving && (
             <div className="flex items-center gap-1.5 rounded-md bg-muted/50 px-2 py-1">
               <LoaderIcon className="size-3.5 animate-spin text-muted-foreground" />

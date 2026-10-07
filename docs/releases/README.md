@@ -14,7 +14,7 @@ corepack pnpm release:prepare 1.3.1
 # Review the version changes; this updates all package/Cargo/Tauri versions.
 corepack pnpm test:release
 corepack pnpm --filter @codex-prism/desktop test
-CXXFLAGS=-std=c++17 cargo test --locked --manifest-path apps/desktop/src-tauri/Cargo.toml --lib
+cargo test --locked --manifest-path apps/desktop/src-tauri/Cargo.toml --lib
 git add package.json apps/desktop/package.json apps/desktop/src-tauri/tauri.conf.json apps/desktop/src-tauri/Cargo.toml apps/desktop/src-tauri/Cargo.lock
 git commit -m "chore: release 1.3.1"
 git tag -a v1.3.1 -m "codex-prism 1.3.1"
@@ -27,7 +27,7 @@ Artifacts go to `dist/releases/v1.3.1/`:
 - `codex-prism-1.3.1-linux-x86_64.AppImage`
 - `SHA256SUMS`, `RELEASE_NOTES.md`, and `release.json` (source commit and artifact hashes)
 
-Smoke-test the actual packages before publishing: launch, connect Codex, open a project, compile a PDF, and try chat plus Keep/Undo. Users must install and authenticate the Codex CLI separately. The installed release contains a built frontend; it does not need Node or Rust at runtime. The `codex-prism` symlink in `~/.local/bin` continues launching your repository checkout; remove or rename that symlink if you want an installed package's executable to take precedence.
+Smoke-test the actual packages before publishing: launch, connect Codex, open a project, compile a PDF, and try chat plus Keep/Undo. Users must install and authenticate the Codex CLI separately and install system TeX Live to compile documents (both `.deb` and AppImage); see the root README for the Ubuntu packages. Existing PDFs can be viewed without TeX Live. Python and external scientific skills are optional. The installed release contains a built frontend; it does not need Node or Rust at runtime. The `codex-prism` symlink in `~/.local/bin` continues launching your repository checkout; remove or rename that symlink if you want an installed package's executable to take precedence.
 
 Push the commit and tag, then upload:
 
@@ -54,6 +54,6 @@ Do not run a local upload and CI upload for the same tag simultaneously. The cur
 
 ## Deferred platforms
 
-`deferred-platforms.yml.disabled` and `deferred-macos.sh.disabled` retain the old platform dependency, signing, and packaging recipes as inactive references. Their old GitHub publishing portions are not active and must be replaced before reuse. `scripts/build-macos.sh` now performs local packaging only; the generic `build:desktop` script retains Windows support.
+`deferred-platforms.yml.disabled` and `deferred-macos.sh.disabled` retain the old platform dependency, signing, and packaging recipes as inactive references. Their Tectonic dependencies and GitHub publishing portions are obsolete and must be replaced before reuse. `scripts/build-macos.sh` now performs local packaging only; the generic `build:desktop` script retains Windows support.
 
 References: [Gitea release API](https://docs.gitea.com/api/1.24/operations/repo-create-release/), [release attachments](https://docs.gitea.com/api/1.25/operations/repo-create-release-attachment/), [Actions token permissions](https://docs.gitea.com/usage/actions/token-permissions/), [Tauri Linux compatibility](https://v2.tauri.app/distribute/appimage/).

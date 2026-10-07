@@ -138,11 +138,3 @@ export function getMupdfClient(): MupdfClient {
   }
   return instance;
 }
-
-/** Terminate the current worker and clear the singleton, forcing recreation on next use. */
-export function resetMupdfClient(): void {
-  if (instance) {
-    instance.destroy();
-    instance = null;
-  }
-}

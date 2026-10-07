@@ -3,7 +3,6 @@ import { invoke } from "@tauri-apps/api/core";
 import {
   readDir,
   readTextFile,
-  rename,
   stat,
   writeTextFile,
 } from "@tauri-apps/plugin-fs";
@@ -17,22 +16,66 @@ import {
 import { useProjectStore } from "@/stores/project-store";
 
 import { backend } from "@/lib/backend";
-vi.mock("@/lib/backend", async importOriginal => {
- const actual = await importOriginal<typeof import("@/lib/backend")>();
- return {...actual, backend:{...actual.backend,projects:{register:vi.fn(async(root:string)=>({id:"project-id",root,name:"Project"})),relocate:vi.fn(async()=>({id:"project-id"})),rename:vi.fn(async()=>({id:"project-id"}))}}};
+vi.mock("@/lib/backend", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/backend")>();
+  return {
+    ...actual,
+    backend: {
+      ...actual.backend,
+      projects: {
+        register: vi.fn(async (root: string) => ({
+          id: "project-id",
+          root,
+          name: "Project",
+        })),
+        relocate: vi.fn(async () => ({ id: "project-id" })),
+        rename: vi.fn(async () => ({ id: "project-id" })),
+      },
+    },
+  };
 });
-vi.mock("@/lib/tauri/fs", async importOriginal => {
- const actual=await importOriginal<typeof import("@/lib/tauri/fs")>();
- const fs=await import("@tauri-apps/plugin-fs");
- return {...actual, readTexFileContent:(ref:any)=>fs.readTextFile(`${useDocumentStore.getState().projectRoot}/${ref.path}`),writeTexFileContent:(ref:any,text:string)=>fs.writeTextFile(`${useDocumentStore.getState().projectRoot}/${ref.path}`,text),
- scanProjectFolder:vi.fn(async(root:string)=>{
-   const entries=await fs.readDir(root);const files=[];const folders=[];
-   for(const e of entries??[]){if(e.isDirectory){if(!actual.shouldSkipProjectDirectory(e.name))folders.push(e.name);continue}
-    const type=actual.getProjectFileType(e.name);if(!type)continue;
-    let fileSize=0;if(type==='image'||type==='other')fileSize=(await fs.stat(root+'/'+e.name)).size;
-    files.push({relativePath:e.name,ref:{projectId:"project-id",path:e.name},type,fileSize});}
-   return {files,folders};
- })};
+vi.mock("@/lib/tauri/fs", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/tauri/fs")>();
+  const fs = await import("@tauri-apps/plugin-fs");
+  return {
+    ...actual,
+    readTexFileContent: (ref: any) =>
+      fs.readTextFile(`${useDocumentStore.getState().projectRoot}/${ref.path}`),
+    writeTexFileContent: (ref: any, text: string) =>
+      fs.writeTextFile(
+        `${useDocumentStore.getState().projectRoot}/${ref.path}`,
+        text,
+      ),
+    scanProjectFolder: vi.fn(async (root: string) => {
+      const entries = await fs.readDir(root);
+      const files = [];
+      const folders = [];
+      for (const e of entries ?? []) {
+        if (e.isDirectory) {
+          if (
+            !e.name.startsWith(".") &&
+            !["node_modules", "__pycache__", "venv", "env"].includes(
+              e.name.toLowerCase(),
+            )
+          )
+            folders.push(e.name);
+          continue;
+        }
+        const type = actual.getProjectFileType(e.name);
+        if (!type) continue;
+        let fileSize = 0;
+        if (type === "image" || type === "other")
+          fileSize = (await fs.stat(root + "/" + e.name)).size;
+        files.push({
+          relativePath: e.name,
+          ref: { projectId: "project-id", path: e.name },
+          type,
+          fileSize,
+        });
+      }
+      return { files, folders };
+    }),
+  };
 });
 
 // Mock history store
@@ -62,7 +105,7 @@ function makeFile(overrides: Partial<ProjectFile> = {}): ProjectFile {
     id: "main.tex",
     name: "main.tex",
     relativePath: "main.tex",
-    ref: {projectId:"project-id",path:"main.tex"},
+    ref: { projectId: "project-id", path: "main.tex" },
     type: "tex",
     content: "Hello World",
     isDirty: false,
@@ -205,12 +248,17 @@ describe("useDocumentStore", () => {
       });
       useDocumentStore.setState({
         projectRoot: "/work/old",
-        files: [makeFile({ ref: {projectId:"project-id",path:"main.tex"} })],
+        files: [
+          makeFile({ ref: { projectId: "project-id", path: "main.tex" } }),
+        ],
       });
 
       await useDocumentStore.getState().renameProject("renamed");
 
-      expect(backend.projects.rename).toHaveBeenCalledWith("project-id", "renamed");
+      expect(backend.projects.rename).toHaveBeenCalledWith(
+        "project-id",
+        "renamed",
+      );
 
       expect(invoke).toHaveBeenCalledWith("allow_project_directory", {
         rootPath: "/work/renamed",
@@ -239,7 +287,7 @@ describe("useDocumentStore", () => {
         projectRoot: "/work/old",
         files: [
           makeFile({
-            ref: {projectId:"project-id",path:"main.tex"},
+            ref: { projectId: "project-id", path: "main.tex" },
             content: "dirty",
             isDirty: true,
           }),
@@ -249,7 +297,10 @@ describe("useDocumentStore", () => {
       await useDocumentStore.getState().renameProject("renamed");
 
       expect(writeTextFile).toHaveBeenCalledWith("/work/old/main.tex", "dirty");
-      expect(backend.projects.rename).toHaveBeenCalledWith("project-id", "renamed");
+      expect(backend.projects.rename).toHaveBeenCalledWith(
+        "project-id",
+        "renamed",
+      );
     });
   });
 
@@ -435,7 +486,7 @@ describe("useDocumentStore", () => {
       const id = useDocumentStore.getState().addFile({
         name: "refs.bib",
         relativePath: "refs.bib",
-        ref: {projectId:"project-id",path:"refs.bib"},
+        ref: { projectId: "project-id", path: "refs.bib" },
         type: "bib",
         content: "@article{...}",
       });
@@ -476,7 +527,7 @@ describe("useDocumentStore", () => {
             id: "analysis.py",
             name: "analysis.py",
             relativePath: "analysis.py",
-            ref: {projectId:"project-id",path:"analysis.py"},
+            ref: { projectId: "project-id", path: "analysis.py" },
             type: "other",
             content: "print('hello')",
           }),
@@ -557,7 +608,7 @@ describe("useDocumentStore", () => {
           makeFile({
             id: "clean.tex",
             name: "clean.tex",
-            ref: {projectId:"project-id",path:"clean.tex"},
+            ref: { projectId: "project-id", path: "clean.tex" },
             relativePath: "clean.tex",
             isDirty: false,
             content: "clean",
@@ -579,7 +630,7 @@ describe("useDocumentStore", () => {
           makeFile({
             id: "slide.tex",
             name: "slide.tex",
-            ref: {projectId:"project-id",path:"slide.tex"},
+            ref: { projectId: "project-id", path: "slide.tex" },
             relativePath: "slide.tex",
             isDirty: true,
             content: "",
@@ -610,10 +661,14 @@ describe("useDocumentStore", () => {
     it("loads an existing PDF without marking source as freshly compiled", () => {
       const store = useDocumentStore.getState();
       store.setPdfData(new Uint8Array([1]), "main.tex");
-      expect(useDocumentStore.getState().lastCompiledGenerations.has("main.tex")).toBe(true);
+      expect(
+        useDocumentStore.getState().lastCompiledGenerations.has("main.tex"),
+      ).toBe(true);
       store.setPdfData(new Uint8Array([2]), "main.tex", false);
       expect(getCurrentPdfBytes()).toEqual(new Uint8Array([2]));
-      expect(useDocumentStore.getState().lastCompiledGenerations.has("main.tex")).toBe(false);
+      expect(
+        useDocumentStore.getState().lastCompiledGenerations.has("main.tex"),
+      ).toBe(false);
     });
     it("setPdfData clears compile error", () => {
       useDocumentStore.setState({ compileError: "some error" });

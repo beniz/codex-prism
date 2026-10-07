@@ -38,7 +38,6 @@ import { useProjectStore } from "@/stores/project-store";
 import { useDocumentStore } from "@/stores/document-store";
 import { useAgentSetupStore } from "@/stores/agent-setup-store";
 import { useUvSetupStore } from "@/stores/uv-setup-store";
-import { useSettingsStore } from "@/stores/settings-store";
 import { compileLatex } from "@/lib/latex-compiler";
 import { getMupdfClient } from "@/lib/mupdf/mupdf-client";
 import { exists, join } from "@/lib/tauri/fs";
@@ -703,10 +702,8 @@ async function loadProjectPreview(
 
     if (texFile) {
       try {
-        const useTexlive =
-          useSettingsStore.getState().compilerBackend === "texlive";
         const pdfBytes = await enqueueProjectPreviewCompile(() =>
-          compileLatex(project.path, texFile.relativePath, useTexlive),
+          compileLatex(project.path, texFile.relativePath),
         );
         const data: ProjectPreviewData = {
           kind: "pdf",

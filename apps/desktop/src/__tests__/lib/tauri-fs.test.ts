@@ -1,11 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { backend } from "@/lib/backend";
 import { readTexFileContent, writeTexFileContent } from "@/lib/tauri/fs";
-import {
-  getProjectFileType,
-  scanProjectFolder,
-  shouldSkipProjectDirectory,
-} from "@/lib/tauri/fs";
+import { getProjectFileType, scanProjectFolder } from "@/lib/tauri/fs";
 
 describe("tauri fs helpers", () => {
   beforeEach(() => {
@@ -40,41 +36,50 @@ describe("tauri fs helpers", () => {
     });
   });
 
-  describe("shouldSkipProjectDirectory", () => {
-    it("skips hidden and generated dependency directories", () => {
-      expect(shouldSkipProjectDirectory(".git")).toBe(true);
-      expect(shouldSkipProjectDirectory(".venv")).toBe(true);
-      expect(shouldSkipProjectDirectory("node_modules")).toBe(true);
-      expect(shouldSkipProjectDirectory("__pycache__")).toBe(true);
-      expect(shouldSkipProjectDirectory("venv")).toBe(true);
-      expect(shouldSkipProjectDirectory("ENV")).toBe(true);
-    });
-
-    it("keeps normal project folders visible", () => {
-      expect(shouldSkipProjectDirectory("chapters")).toBe(false);
-      expect(shouldSkipProjectDirectory("figures")).toBe(false);
-      expect(shouldSkipProjectDirectory("attachments")).toBe(false);
-    });
-  });
-
   describe("project backend adapter", () => {
-    beforeEach(()=>{
-      vi.spyOn(backend.projects,'register').mockResolvedValue({id:'p1',root:'/project',name:'Project'});
-      vi.spyOn(backend.files,'list').mockResolvedValue({folders:['chapters'],files:[{path:'main.tex',size:10},{path:'chapters/intro.tex',size:20},{path:'worker.py',size:128}]});
+    beforeEach(() => {
+      vi.spyOn(backend.projects, "register").mockResolvedValue({
+        id: "p1",
+        root: "/project",
+        name: "Project",
+      });
+      vi.spyOn(backend.files, "list").mockResolvedValue({
+        folders: ["chapters"],
+        files: [
+          { path: "main.tex", size: 10 },
+          { path: "chapters/intro.tex", size: 20 },
+          { path: "worker.py", size: 128 },
+        ],
+      });
     });
-    it('uses project IDs to list nested relative files',async()=>{
-      const result=await scanProjectFolder('/project');
-      expect(backend.files.list).toHaveBeenCalledWith('p1');
-      expect(result.files.map(f=>f.relativePath)).toEqual(['main.tex','chapters/intro.tex','worker.py']);
-      expect(result.folders).toEqual(['chapters']);
+    it("uses project IDs to list nested relative files", async () => {
+      const result = await scanProjectFolder("/project");
+      expect(backend.files.list).toHaveBeenCalledWith("p1");
+      expect(result.files.map((f) => f.relativePath)).toEqual([
+        "main.tex",
+        "chapters/intro.tex",
+        "worker.py",
+      ]);
+      expect(result.folders).toEqual(["chapters"]);
     });
-    it('passes the read revision on save and propagates conflicts',async()=>{
-      await scanProjectFolder('/project');
-      vi.spyOn(backend.files,'read').mockResolvedValue({bytes:[104,105],revision:'r1'});
-      vi.spyOn(backend.files,'write').mockRejectedValue(new Error('File changed'));
-      expect(await readTexFileContent('/project/main.tex')).toBe('hi');
-      await expect(writeTexFileContent('/project/main.tex','new')).rejects.toThrow('File changed');
-      expect(backend.files.write).toHaveBeenCalledWith({projectId:'p1',path:'main.tex'},[110,101,119],'r1');
+    it("passes the read revision on save and propagates conflicts", async () => {
+      await scanProjectFolder("/project");
+      vi.spyOn(backend.files, "read").mockResolvedValue({
+        bytes: [104, 105],
+        revision: "r1",
+      });
+      vi.spyOn(backend.files, "write").mockRejectedValue(
+        new Error("File changed"),
+      );
+      expect(await readTexFileContent("/project/main.tex")).toBe("hi");
+      await expect(
+        writeTexFileContent("/project/main.tex", "new"),
+      ).rejects.toThrow("File changed");
+      expect(backend.files.write).toHaveBeenCalledWith(
+        { projectId: "p1", path: "main.tex" },
+        [110, 101, 119],
+        "r1",
+      );
     });
   });
 });

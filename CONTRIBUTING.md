@@ -11,30 +11,9 @@ Release packaging currently targets Ubuntu 26.04 LTS x86_64; see [the release gu
 - [Node.js](https://nodejs.org/) 22+
 - [pnpm](https://pnpm.io/) 10+
 - [Rust](https://rustup.rs/) (repository-pinned 1.88.0)
-- Platform-specific native dependencies (required by [Tectonic](https://tectonic-typesetting.github.io/)):
-  - **macOS:** `brew install icu4c harfbuzz pkg-config`
-  - **Linux:** `apt install libicu-dev libgraphite2-dev libharfbuzz-dev libfreetype-dev libfontconfig-dev libwebkit2gtk-4.1-dev libayatana-appindicator3-dev`
-  - **Windows:** Visual Studio Build Tools (C++ workload) + vcpkg — see detailed steps below
-
-#### Windows Setup (PowerShell)
-
-```powershell
-# 1. Install Visual Studio Build Tools (if not already installed)
-winget install Microsoft.VisualStudio.2022.BuildTools --override "--add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"
-
-# 2. Install vcpkg
-git clone https://github.com/microsoft/vcpkg.git C:\vcpkg
-C:\vcpkg\bootstrap-vcpkg.bat
-
-# 3. Set environment variables (persistent)
-[Environment]::SetEnvironmentVariable("VCPKG_ROOT", "C:\vcpkg", "User")
-$path = [Environment]::GetEnvironmentVariable("PATH", "User")
-[Environment]::SetEnvironmentVariable("PATH", "$path;C:\vcpkg", "User")
-[Environment]::SetEnvironmentVariable("TECTONIC_DEP_BACKEND", "vcpkg", "User")
-
-# 4. Restart PowerShell, then install native libraries (~10-20 min)
-vcpkg install harfbuzz[graphite2]:x64-windows freetype:x64-windows icu:x64-windows fontconfig:x64-windows
-```
+- Linux Tauri development libraries: see the [README](README.md).
+- System TeX Live for compilation tests; no embedded compiler libraries are needed to build the app.
+- macOS and Windows packaging are deferred. Historical recipes under `docs/releases/` are inactive references and still contain obsolete Tectonic steps; do not use them as current build instructions.
 
 ### Setup
 
@@ -67,14 +46,13 @@ codex-prism/
 │           ├── src/
 │           │   ├── lib.rs           # Tauri plugin registration
 │           │   ├── history.rs       # Git-based version history
-│           │   ├── latex.rs         # Tectonic compilation & SyncTeX
-│           │   ├── claude.rs        # Claude CLI integration & sessions
-│           │   ├── slash_commands.rs # Slash command discovery & CRUD
-│           │   └── zotero.rs        # Zotero OAuth & citations
+│           │   ├── latex.rs         # TeX Live compilation & SyncTeX
+│           │   ├── codex.rs         # Codex app-server integration & review
+│           │   ├── projects.rs      # Project IDs and file operations
+│           │   └── skills.rs        # Optional scientific skills management
 │           └── Cargo.toml
-├── .github/workflows/        # CI/CD (build + release)
-├── biome.json                # Linter config
-└── turbo.json                # Turborepo config
+├── .gitea/workflows/         # Linux release workflow
+└── biome.json                # Linter config
 ```
 
 ## Testing

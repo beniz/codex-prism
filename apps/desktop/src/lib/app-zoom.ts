@@ -55,18 +55,6 @@ export function initializeAppZoom(): Promise<number> {
   return applyAppZoom(DEFAULT_APP_ZOOM);
 }
 
-export function zoomInApp(): Promise<number> {
-  return persistAppZoom(readStoredAppZoom() + APP_ZOOM_STEP);
-}
-
-export function zoomOutApp(): Promise<number> {
-  return persistAppZoom(readStoredAppZoom() - APP_ZOOM_STEP);
-}
-
-export function resetAppZoom(): Promise<number> {
-  return persistAppZoom(DEFAULT_APP_ZOOM);
-}
-
 export function getAppZoomAction(
   event: ZoomShortcutEvent,
 ): AppZoomAction | null {

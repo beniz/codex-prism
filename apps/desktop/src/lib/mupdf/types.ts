@@ -5,24 +5,6 @@ export interface Rect {
   h: number;
 }
 
-export interface FontInfo {
-  family: string;
-  size: number;
-  weight: string;
-  style: string;
-}
-
-export interface StructuredTextChar {
-  c: string;
-  quad: number[];
-  origin: { x: number; y: number };
-}
-
-export interface StructuredTextSpan {
-  font: FontInfo;
-  chars: StructuredTextChar[];
-}
-
 export interface StructuredTextLine {
   bbox: Rect;
   wmode: number;
@@ -62,7 +44,6 @@ export interface PageSize {
   height: number;
 }
 
-export type WorkerRequest = [string, number, unknown[]];
 export type WorkerResponse =
   | ["RESULT", number, unknown]
   | ["ERROR", number, { name: string; message: string }]

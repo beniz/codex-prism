@@ -290,7 +290,13 @@ async function main() {
       throw new Error(
         "Build release packages on Ubuntu 26.04 (use build:desktop for other local builds)",
       );
-    for (const command of ["patchelf", "rsvg-convert", "file", "wget", "curl"]) {
+    for (const command of [
+      "patchelf",
+      "rsvg-convert",
+      "file",
+      "wget",
+      "curl",
+    ]) {
       try {
         execFileSync("which", [command], { stdio: "ignore" });
       } catch {
@@ -327,9 +333,6 @@ async function main() {
         stdio: "inherit",
         env: {
           ...process.env,
-          CXXFLAGS: [process.env.CXXFLAGS, "-std=c++17"]
-            .filter(Boolean)
-            .join(" "),
           APPIMAGE_EXTRACT_AND_RUN: "1",
         },
       },

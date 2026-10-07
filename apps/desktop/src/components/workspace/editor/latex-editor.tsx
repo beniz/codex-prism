@@ -1,6 +1,12 @@
 import { readProjectBytes } from "@/lib/tauri/fs";
 import { useCallback, useEffect, useRef, useState, useMemo } from "react";
-import { Annotation, Compartment, EditorState, Prec, Transaction } from "@codemirror/state";
+import {
+  Annotation,
+  Compartment,
+  EditorState,
+  Prec,
+  Transaction,
+} from "@codemirror/state";
 import {
   EditorView,
   drawSelection,
@@ -408,9 +414,7 @@ export function LatexEditor() {
         .getState()
         .createSnapshot(projectRoot, "[compile] Pre-compile")
         .catch(() => {});
-      const useTexlive =
-        useSettingsStore.getState().compilerBackend === "texlive";
-      const data = await compileLatex(projectRoot, targetPath, useTexlive);
+      const data = await compileLatex(projectRoot, targetPath);
       setPdfData(data, rootId);
     } catch (error) {
       setCompileError(formatCompileError(error), rootId);
@@ -628,7 +632,13 @@ export function LatexEditor() {
     const state = EditorState.create({
       doc: currentContent,
       extensions: [
-        EditorState.transactionFilter.of(tr => tr.docChanged && !tr.annotation(backendReload) && useAgentChatStore.getState().locked ? [] : tr),
+        EditorState.transactionFilter.of((tr) =>
+          tr.docChanged &&
+          !tr.annotation(backendReload) &&
+          useAgentChatStore.getState().locked
+            ? []
+            : tr,
+        ),
         compileKeymap,
         lineNumbers(),
         drawSelection(),

@@ -26,7 +26,6 @@ import { useProjectStore } from "@/stores/project-store";
 import { createLogger } from "@/lib/debug/logger";
 
 const log = createLogger("document");
-const PROJECT_RENAME_LOCK_RETRY_DELAYS_MS = [150, 300, 600, 1000];
 
 export interface ProjectFile {
   id: string; // relativePath is the id
@@ -114,7 +113,11 @@ interface DocumentState {
   requestJumpToPosition: (position: number) => void;
   clearJumpRequest: () => void;
   setThreadOpen: (open: boolean) => void;
-  setPdfData: (data: Uint8Array | null, rootFileId?: string, compiled?: boolean) => void;
+  setPdfData: (
+    data: Uint8Array | null,
+    rootFileId?: string,
+    compiled?: boolean,
+  ) => void;
   setCompileError: (error: string | null, rootFileId?: string) => void;
   setIsCompiling: (isCompiling: boolean) => void;
   setPendingRecompile: (pending: boolean) => void;
@@ -280,45 +283,6 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function isWindowsFolderLockError(error: unknown): boolean {
-  const message = error instanceof Error ? error.message : String(error);
-  return (
-    message.includes("os error 32") ||
-    message.includes("being used by another process") ||
-    message.includes("another program is using") ||
-    message.includes("进程无法访问") ||
-    message.includes("另一个程序正在使用")
-  );
-}
-
-function formatProjectRenameError(error: unknown): string {
-  if (isWindowsFolderLockError(error)) {
-    return [
-      "Project folder is still in use.",
-      "Close any external PDF viewer, terminal, Python process, or file explorer preview using this project, then try again.",
-    ].join(" ");
-  }
-  return error instanceof Error ? error.message : String(error);
-}
-
-async function renameProjectRootWithRetry(
-  oldRoot: string,
-  newRoot: string,
-): Promise<void> {
-  for (let attempt = 0; ; attempt++) {
-    try {
-      await renameFileOnDisk(oldRoot, newRoot);
-      return;
-    } catch (error) {
-      const delay = PROJECT_RENAME_LOCK_RETRY_DELAYS_MS[attempt];
-      if (!isWindowsFolderLockError(error) || delay == null) {
-        throw new Error(formatProjectRenameError(error));
-      }
-      await sleep(delay);
-    }
-  }
-}
-
 async function waitForCompileToFinish(
   getState: () => DocumentState,
 ): Promise<void> {
@@ -481,7 +445,7 @@ export const useDocumentStore = create<DocumentState>()((set, get) => ({
         : [];
     if (streamingTabs.length > 0) {
       await Promise.all(
-        streamingTabs.map((tab) => chatState.cancelExecution().catch(() => {})),
+        streamingTabs.map(() => chatState.cancelExecution().catch(() => {})),
       );
       await sleep(250);
     }
@@ -774,7 +738,8 @@ export const useDocumentStore = create<DocumentState>()((set, get) => ({
         const compileErrorCache = new Map(s.compileErrorCache);
         const lastCompiledGenerations = new Map(s.lastCompiledGenerations);
         compileErrorCache.delete(rootFileId);
-        if (compiled) lastCompiledGenerations.set(rootFileId, s.contentGeneration);
+        if (compiled)
+          lastCompiledGenerations.set(rootFileId, s.contentGeneration);
         else lastCompiledGenerations.delete(rootFileId);
         set((prev) => ({
           pdfRevision: prev.pdfRevision + 1,

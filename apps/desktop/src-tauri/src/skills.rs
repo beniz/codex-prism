@@ -1141,15 +1141,6 @@ fn parse_skill_md(skill_dir: &Path) -> Option<SkillInfo> {
 // ─── Tauri Commands ───
 
 #[tauri::command]
-pub async fn install_scientific_skills(
-    window: WebviewWindow,
-    project_path: String,
-) -> Result<InstallResult, String> {
-    let target = skills_dir(Some(&project_path));
-    install_skills_with_timeout(&window, &target, Some(&project_path)).await
-}
-
-#[tauri::command]
 pub async fn install_scientific_skills_global(
     window: WebviewWindow,
 ) -> Result<InstallResult, String> {
@@ -1242,13 +1233,13 @@ fn ensure_target_writable(target: &Path) -> Result<(), String> {
     {
         let home = dirs::home_dir().ok_or("Could not determine home directory")?;
         let user = std::env::var("USER").unwrap_or_default();
-        let claude_dir = home.join(".agents");
+        let agents_dir = home.join(".agents");
 
         let script = format!(
             "mkdir -p '{}' && chown -R {} '{}'",
             target.display(),
             user,
-            claude_dir.display()
+            agents_dir.display()
         );
 
         let output = std::process::Command::new("osascript")

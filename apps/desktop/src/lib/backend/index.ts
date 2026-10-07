@@ -12,7 +12,7 @@ const projectServices = new Set([
   "history_add_label",
   "history_remove_label",
   "setup_project_venv",
-  "uv_add_packages",
+  "project_venv_status",
 ]);
 export async function invoke<T>(
   command: string,
@@ -197,5 +197,4 @@ export const backend: PrismBackend = {
 // Compatibility transport for existing native services while their typed facades migrate.
 export { listen };
 export { convertFileSrc } from "@tauri-apps/api/core";
-export { emit } from "@tauri-apps/api/event";
 export type { UnlistenFn } from "@tauri-apps/api/event";

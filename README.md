@@ -4,11 +4,11 @@ codex-prism is a scientific writing workspace powered by the **installed Codex a
 
 ## Run locally (Ubuntu 26.04 LTS, x86_64)
 
-1. Install Node.js 20+, Corepack, Git, and the Linux Tauri/Tectonic development libraries (Ubuntu/Debian):
+1. Install Node.js 22+, Corepack, Git, and the Linux Tauri development libraries (Ubuntu/Debian):
    ```sh
-   sudo apt install build-essential pkg-config libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libssl-dev libicu-dev libgraphite2-dev libharfbuzz-dev libfreetype-dev libfontconfig-dev
+   sudo apt install build-essential pkg-config libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libssl-dev
    ```
-2. Install Rust with rustup. This checkout pins Rust 1.88.0. The desktop scripts set the C++17 flag needed by Tectonic on Linux.
+2. Install Rust with rustup. This checkout pins Rust 1.88.0.
 3. Install Codex separately and log in with `codex login`, or use **Connection → Sign in** in the application. A ChatGPT subscription uses Codex's normal login; no API key is required for that login mode. The app shares the installed CLI's account/configuration. Signing out affects that shared login.
 4. From this repository:
    ```sh
@@ -39,15 +39,27 @@ To build an installable desktop package: `corepack pnpm build:desktop`. Automati
 - The agent saves dirty buffers before starting, runs with `workspace-write` and `on-request` approvals, and allows one active turn per project. Unrelated CLI sessions are not imported into its chat list.
 - File editing is locked during a turn and pending review, but pending review does not block the next chat prompt. Sending a new prompt implicitly keeps pending changes once Codex confirms the new turn has started; Undo then applies only to the new turn. A failed start preserves the prior review. At completion, the app reviews the actual project source/asset changes, including command-generated changes. Keep accepts the current disk contents; Undo restores the saved bytes only if the file still matches the completed turn. Text saves likewise refuse to overwrite an external edit.
 - Review baselines and session mappings persist in the application's data directory, separately from project source. Restart recovers interrupted reviews. Prompts are never automatically resubmitted after a disconnect. Generated build files, hidden/environment directories and symlinks are excluded from snapshots; changes outside that scope cannot be undone by project review.
-- Existing LaTeX/PDF, history, Zotero and Python-environment features remain. Existing `.claudeprism/history.git` history is deliberately retained. New project instructions use `AGENTS.md`; scientific skills use `.agents/skills`.
+- LaTeX/PDF and history features remain; Python and external scientific skills are optional. Existing `.claudeprism/history.git` history is deliberately retained. New project instructions use `AGENTS.md`; scientific skills use `.agents/skills`.
 - `apps/desktop/src/lib/backend` is the frontend transport boundary and `desktop-host.ts` owns desktop window/dialog/open-link APIs. The implementation remains Tauri-only at this stage; a hosted transport, browser import/export, authentication and remote isolation remain future work.
+
+## Compiler runtime
+
+Install TeX Live separately, including for packaged `.deb` and AppImage installations:
+
+```sh
+sudo apt install texlive-latex-extra texlive-publishers texlive-fonts-recommended texlive-xetex texlive-luatex texlive-bibtex-extra biber
+```
+
+Additional fonts, publisher classes or language packages may be needed by individual documents. The app does not download TeX packages automatically. Put an engine comment in the main document's first 20 lines when it requires XeLaTeX or LuaLaTeX. Without a comment, pdfLaTeX is used. Existing PDFs can be viewed without a compiler installed.
+
+Python and external scientific skills are optional settings; neither is required to finish Codex setup. Existing project instructions, skills, environments and history are preserved. New project instructions describe TeX Live and optional tools.
 
 ## Verification
 
 ```sh
 corepack pnpm --filter @codex-prism/desktop test
 corepack pnpm --filter @codex-prism/desktop build
-CXXFLAGS=-std=c++17 cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml --lib
+cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml --lib
 node scripts/verify-codex.mjs
 ```
 
@@ -66,12 +78,12 @@ For a hands-on acceptance check, open a disposable LaTeX project, ask Codex to e
 - **Codex assistant** — chat alongside the document, attach project files, select models and reasoning effort, approve tool requests, and resume conversations.
 - **LaTeX editor** — CodeMirror with syntax highlighting, search, multi-file projects and auto-save. Hide the source panel while keeping the chat and PDF visible.
 - **PDF preview** — MuPDF rendering with SyncTeX navigation, zoom and text selection. Existing PDFs load at startup before a new compilation is needed.
-- **Local compilation** — embedded Tectonic downloads packages on first use and caches them for subsequent offline compilation.
+- **Local compilation** — system TeX Live runs pdfLaTeX by default; `% !TEX program = xelatex` or `lualatex` selects another engine. Auto-recompile is optional.
 - **History and proposed changes** — local Git snapshots, comparisons and restoration, plus Keep/Undo review of assistant edits.
-- **Python environment** — integrated [uv](https://docs.astral.sh/uv/) and project virtual environments for scientific scripts and figures.
+- **Python environment** — optional [uv](https://docs.astral.sh/uv/) installation and explicit project environment setup in settings. Opening a project does not create or modify its environment.
 - **Scientific writing instructions** — project `AGENTS.md` guidance, including TikZ for technical drawings, and optional skills from [K-Dense Scientific Skills](https://github.com/K-Dense-AI/claude-scientific-skills).
 - **Templates and project wizard** — start papers, theses, presentations and other LaTeX documents.
-- **Desktop tools** — external editor integration and light/dark themes. The Zotero connection UI is currently hidden.
+- **Desktop tools** — external editor integration and light/dark themes.
 
 ## Data and privacy
 

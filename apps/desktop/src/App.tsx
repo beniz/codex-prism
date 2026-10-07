@@ -11,7 +11,6 @@ import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { invoke, backend } from "@/lib/backend";
 import { getCurrentWindow } from "@/lib/backend/desktop-host";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { useUvSetupStore } from "@/stores/uv-setup-store";
 import { ErrorFallback } from "@/components/error-fallback";
 import { createLogger } from "@/lib/debug/logger";
 import { EnvironmentOnboarding } from "@/components/environment-onboarding";
@@ -23,12 +22,6 @@ const LazyDebugPage = lazy(() =>
     default: m.DebugPage,
   })),
 );
-
-interface AgentSessionInfo {
-  session_id: string;
-  title: string;
-  last_modified: number;
-}
 
 function NativeWindowThemeBridge() {
   const { resolvedTheme, theme } = useTheme();
@@ -95,23 +88,6 @@ function WorkspaceWithAgent() {
     useAgentChatStore.getState().resetForProject(projectRoot ?? null);
   }, [projectRoot]);
 
-  // Auto-setup Python venv when project opens
-  useEffect(() => {
-    if (!initialized || !projectRoot) return;
-    const uvStore = useUvSetupStore.getState();
-    uvStore
-      .checkStatus()
-      .then(() => {
-        const { status } = useUvSetupStore.getState();
-        if (status === "ready") {
-          return uvStore.setupVenv(projectRoot);
-        }
-      })
-      .catch((err) => {
-        log.error("Failed to setup Python venv", { error: String(err) });
-      });
-  }, [initialized, projectRoot]);
-
   // Open the most recent chat when entering a project.
   useEffect(() => {
     if (!projectRoot) {
@@ -127,7 +103,16 @@ function WorkspaceWithAgent() {
     autoResumedProjectRef.current = projectRoot;
     let cancelled = false;
 
-    backend.projects.register(projectRoot).then(p => backend.agent.sessions(p.id)).then(sessions => sessions.map(s => ({session_id:s.id,title:s.title,last_modified:0})))
+    backend.projects
+      .register(projectRoot)
+      .then((p) => backend.agent.sessions(p.id))
+      .then((sessions) =>
+        sessions.map((s) => ({
+          session_id: s.id,
+          title: s.title,
+          last_modified: 0,
+        })),
+      )
       .then((sessions) => {
         if (cancelled) return;
         const latest = sessions
@@ -167,9 +152,7 @@ function WorkspaceWithAgent() {
     if (!initialized) return;
     // Delay to let AgentChatDrawer mount and register event listeners
     const timer = setTimeout(() => {
-      const prompt = useAgentChatStore
-        .getState()
-        .consumePendingInitialPrompt();
+      const prompt = useAgentChatStore.getState().consumePendingInitialPrompt();
       if (prompt) {
         useAgentChatStore.getState().sendPrompt(prompt);
       }

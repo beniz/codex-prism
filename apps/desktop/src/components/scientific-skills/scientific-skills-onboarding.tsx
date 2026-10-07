@@ -35,8 +35,6 @@ import {
 } from "./skill-category-card";
 import { InstallProgress } from "./install-progress";
 
-const STORAGE_KEY = "scientific-skills-installed";
-
 interface InstallResult {
   success: boolean;
   skills_installed: number;
@@ -211,7 +209,6 @@ export function ScientificSkillsOnboarding({
       if (!mountedRef.current) return;
       setInstallResult(result);
       setIsComplete(true);
-      localStorage.setItem(STORAGE_KEY, "true");
       await checkStatus();
     } catch (e) {
       if (noBackendLogTimer !== undefined) {
@@ -232,12 +229,6 @@ export function ScientificSkillsOnboarding({
         projectPath: null,
       });
       await checkStatus();
-      const gsAfter = await invoke<SkillsStatus>("check_skills_installed", {
-        projectPath: null,
-      });
-      if (!gsAfter.installed) {
-        localStorage.removeItem(STORAGE_KEY);
-      }
       toast.success("All skills uninstalled");
     } catch (e) {
       console.error("Failed to uninstall:", e);
@@ -264,7 +255,6 @@ export function ScientificSkillsOnboarding({
         sourcePath: selectedFolder,
       });
 
-      localStorage.setItem(STORAGE_KEY, "true");
       await checkStatus();
       setSelectedId("imported");
       toast.success("Skill imported", {
@@ -840,14 +830,4 @@ function CategoryDetail({
       </div>
     </div>
   );
-}
-
-// ─── Helper ───
-
-export function shouldShowOnboarding(): boolean {
-  return localStorage.getItem(STORAGE_KEY) !== "true";
-}
-
-export function resetOnboardingFlag(): void {
-  localStorage.removeItem(STORAGE_KEY);
 }

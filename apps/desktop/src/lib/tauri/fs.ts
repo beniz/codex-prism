@@ -45,13 +45,6 @@ const STYLE_EXTENSIONS = new Set([
   ".ins",
 ]);
 
-const IGNORED_DIRECTORY_NAMES = new Set([
-  "node_modules",
-  "__pycache__",
-  "venv",
-  "env",
-]);
-
 const IGNORED_EXTENSIONS = new Set([
   // Ignore LaTeX build artifacts, but keep user-imported reference files visible.
   ".aux",
@@ -82,12 +75,6 @@ const IGNORED_EXTENSIONS = new Set([
   ".dll",
 ]);
 
-export function shouldSkipProjectDirectory(name: string): boolean {
-  return (
-    name.startsWith(".") || IGNORED_DIRECTORY_NAMES.has(name.toLowerCase())
-  );
-}
-
 export function getProjectFileType(name: string): ProjectFileType | null {
   const lower = name.toLowerCase();
   // Skip ignored file extensions (build artifacts, binary/non-text files)
@@ -116,7 +103,8 @@ const projects = new Map<string, Project>();
 const revisions = new Map<string, string | null>();
 export async function registerProjectRoot(root: string) {
   const project = await backend.projects.register(root);
-  for(const [key,value] of projects) if(value.id===project.id) projects.delete(key);
+  for (const [key, value] of projects)
+    if (value.id === project.id) projects.delete(key);
   projects.set(root.replace(/[\\/]+$/, ""), project);
   return project;
 }

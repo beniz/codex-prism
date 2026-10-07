@@ -7,7 +7,7 @@ use tokio::sync::{Mutex, Semaphore};
 const MAX_CONCURRENT: usize = 3;
 
 /// Windows CREATE_NO_WINDOW flag to prevent console windows from flashing
-/// when spawning TeXLive/Tectonic child processes from the GUI app.
+/// when spawning TeX Live child processes from the GUI app.
 #[cfg(target_os = "windows")]
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 
@@ -247,7 +247,7 @@ fn find_texlive_binary(name: &str) -> Result<PathBuf, String> {
     }
 
     Err(format!(
-        "{} not found. Install TeXLive or add it to your PATH.",
+        "{} not found. Install TeX Live and add its bin directory to PATH. On Ubuntu, install texlive-latex-extra texlive-xetex texlive-luatex texlive-bibtex-extra texlive-fonts-recommended texlive-publishers biber.",
         name
     ))
 }
@@ -385,93 +385,8 @@ fn lower_thread_priority() {
     }
 }
 
-// --- Tectonic Compilation ---
+// --- TeX Live compilation ---
 
-pub(crate) fn compile_with_tectonic(work_dir: &Path, main_file: &str) -> Result<(), String> {
-    use tectonic::config::PersistentConfig;
-    use tectonic::driver::{OutputFormat, PassSetting, ProcessingSessionBuilder};
-    use tectonic::status::{plain::PlainStatusBackend, ChatterLevel};
-
-    // The parent captures stderr and displays it if this subprocess fails.
-    let mut status = PlainStatusBackend::new(ChatterLevel::Minimal);
-    status.always_stderr(true);
-
-    let config = PersistentConfig::open(false)
-        .map_err(|e| format!("Failed to open tectonic config: {}", e))?;
-
-    let bundle = config.default_bundle(false, &mut status).map_err(|e| {
-        format!(
-            "Failed to load tectonic bundle (check network connection): {}",
-            e
-        )
-    })?;
-
-    let format_cache = config
-        .format_cache_path()
-        .map_err(|e| format!("Failed to get format cache path: {}", e))?;
-
-    let mut builder = ProcessingSessionBuilder::default();
-    builder
-        // Tectonic otherwise defaults to 1970-01-01, including LaTeX's \today.
-        // Use the current date unless SOURCE_DATE_EPOCH explicitly pins the build.
-        .build_date_from_env(false)
-        .bundle(bundle)
-        .primary_input_path(work_dir.join(main_file))
-        .tex_input_name(main_file)
-        .filesystem_root(work_dir)
-        .output_dir(work_dir)
-        .format_name("latex")
-        .format_cache_path(format_cache)
-        .output_format(OutputFormat::Pdf)
-        .pass(PassSetting::Default)
-        .synctex(true)
-        .keep_intermediates(true)
-        .keep_logs(true);
-
-    let mut session = builder
-        .create(&mut status)
-        .map_err(|e| format!("Failed to create tectonic session: {}", e))?;
-
-    session.run(&mut status).map_err(|e| format!("{:#}", e))?;
-
-    Ok(())
-}
-
-/// Run tectonic compilation in an isolated subprocess.
-///
-/// This avoids the font cache assertion failure (`font_cache.fonts == NULL`)
-/// that occurs when tectonic is called multiple times in the same process.
-/// The C-level static `font_cache` in `dpx-pdffont.c` is not cleaned up
-/// on compilation failure, causing subsequent calls to abort.
-///
-/// By spawning a subprocess, each compilation gets a fresh process with
-/// clean global state, and cleanup happens automatically on process exit.
-fn compile_with_tectonic_subprocess(work_dir: &Path, main_file: &str) -> Result<(), String> {
-    let exe = std::env::current_exe()
-        .map_err(|e| format!("Failed to get current executable path: {}", e))?;
-
-    let mut cmd = std::process::Command::new(&exe);
-    cmd.args(["--tectonic-compile", &work_dir.to_string_lossy(), main_file])
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped());
-    #[cfg(target_os = "windows")]
-    cmd.creation_flags(CREATE_NO_WINDOW);
-    let output = cmd
-        .output()
-        .map_err(|e| format!("Failed to spawn tectonic subprocess: {}", e))?;
-
-    if output.status.success() {
-        Ok(())
-    } else {
-        Err(subprocess_failure(&output))
-    }
-}
-
-// --- TeXLive Compilation ---
-
-/// Build a PATH that includes the TeXLive bin directory so that xelatex
-/// can find xdvipdfmx, kpsewhich, and other tools it invokes internally.
-/// GUI apps on macOS have a minimal PATH that doesn't include TeXLive.
 fn texlive_env_path(engine: &Path) -> String {
     let texbin = engine
         .parent()
@@ -492,16 +407,14 @@ fn texlive_env_path(engine: &Path) -> String {
     }
 }
 
-/// Run a single TeX engine pass.  Never returns `Err` for a non-zero exit
-/// code — TeXLive returns non-zero for warnings, font substitutions, etc.
-/// The only `Err` is when the process cannot be *spawned* at all.
-/// The caller decides success by checking whether the PDF was produced.
+/// Keep intermediate pass diagnostics: stale auxiliary files can fail before BibTeX
+/// refreshes them. Only the final engine pass determines compilation success.
 fn run_texlive_pass(
     engine: &Path,
     args: &[&str],
     main_file: &Path,
     work_dir: &Path,
-) -> Result<(), String> {
+) -> Result<std::process::Output, String> {
     let mut cmd = std::process::Command::new(engine);
     cmd.args(args)
         .arg(main_file)
@@ -515,15 +428,7 @@ fn run_texlive_pass(
         .output()
         .map_err(|e| format!("Failed to launch {}: {}", engine.display(), e))?;
 
-    // TeXLive returns non-zero on warnings too — don't fail here.
-    // The caller decides success by checking whether the PDF was produced.
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        if !stderr.trim().is_empty() {
-            eprintln!("[texlive] engine stderr: {}", stderr.trim());
-        }
-    }
-    Ok(())
+    Ok(output)
 }
 
 /// Run from the build directory with a relative job name. BibTeX rejects
@@ -561,13 +466,12 @@ fn compile_with_texlive(
     tex_content: &str,
 ) -> Result<(), String> {
     let engine_name = match engine {
-        Some(TexEngine::XeLaTeX) | None => "xelatex",
-        Some(TexEngine::Latex) => "pdflatex",
+        Some(TexEngine::XeLaTeX) => "xelatex",
+        Some(TexEngine::Latex) | None => "pdflatex",
         Some(TexEngine::LuaLaTeX) => "lualatex",
     };
 
     let engine_path = find_texlive_binary(engine_name)?;
-    let env_path = texlive_env_path(&engine_path);
     eprintln!(
         "[texlive] backend: {} ({})",
         engine_name,
@@ -579,10 +483,7 @@ fn compile_with_texlive(
     // Absolute paths break when they contain ~ (e.g. iCloud's com~apple~CloudDocs)
     // because TeX interprets ~ as a home directory shortcut.
     let output_dir_arg = "-output-directory=.".to_string();
-    // Do NOT use -halt-on-error: xelatex is a pipeline (xetex → .xdv → xdvipdfmx → .pdf).
-    // With -halt-on-error, recoverable warnings (e.g. missing font shapes) cause xetex to
-    // exit non-zero, and the xelatex wrapper skips the xdvipdfmx step — producing .xdv but
-    // no .pdf.  -interaction=nonstopmode alone is sufficient to avoid interactive prompts.
+    // Intermediate passes may need to recover from stale bibliography/auxiliary files.
     let common_args: Vec<&str> = vec!["-synctex=1", "-interaction=nonstopmode", &output_dir_arg];
 
     let main_file_path = Path::new(main_file);
@@ -607,44 +508,21 @@ fn compile_with_texlive(
     }
 
     // Pass 2: resolve references / TOC
-    run_texlive_pass(&engine_path, &common_args, &main_file_path, work_dir)?;
+    let mut final_output = run_texlive_pass(&engine_path, &common_args, &main_file_path, work_dir)?;
 
     // Pass 3: stabilize citations (only if bib was used)
     if !matches!(bib_tool, BibTool::None) {
-        run_texlive_pass(&engine_path, &common_args, &main_file_path, work_dir)?;
+        final_output = run_texlive_pass(&engine_path, &common_args, &main_file_path, work_dir)?;
     }
 
-    let pdf_path = work_dir.join(format!("{}.pdf", main_stem));
-    let xdv_path = work_dir.join(format!("{}.xdv", main_stem));
-
-    // Fallback: if xelatex produced .xdv but no .pdf (e.g. xdvipdfmx was skipped due to
-    // warnings), manually run xdvipdfmx to convert .xdv → .pdf.
-    if !pdf_path.exists() && xdv_path.exists() {
-        eprintln!("[texlive] .xdv exists but no .pdf — running xdvipdfmx manually");
-        if let Ok(xdvipdfmx) = find_texlive_binary("xdvipdfmx") {
-            let mut cmd = std::process::Command::new(&xdvipdfmx);
-            cmd.args(["-o", &pdf_path.to_string_lossy()])
-                .arg(&xdv_path)
-                .current_dir(work_dir)
-                .env("PATH", &env_path)
-                .stdout(std::process::Stdio::piped())
-                .stderr(std::process::Stdio::piped());
-            #[cfg(target_os = "windows")]
-            cmd.creation_flags(CREATE_NO_WINDOW);
-            let output = cmd
-                .output()
-                .map_err(|e| format!("Failed to launch xdvipdfmx: {}", e))?;
-            if !output.status.success() {
-                let stderr = String::from_utf8_lossy(&output.stderr);
-                if !stderr.trim().is_empty() {
-                    eprintln!("[texlive] xdvipdfmx stderr: {}", stderr.trim());
-                }
-            }
-        }
+    if !final_output.status.success() {
+        return Err(subprocess_failure(&final_output));
     }
-
-    // Success is determined by whether the PDF exists, not by exit codes.
-    // The caller (compile_latex) checks pdf_path.exists() and reads the log for errors.
+    let log =
+        std::fs::read_to_string(work_dir.join(format!("{}.log", main_stem))).unwrap_or_default();
+    if has_real_errors(&log) {
+        return Err(extract_error_lines(&log));
+    }
     Ok(())
 }
 
@@ -891,7 +769,6 @@ pub async fn compile_latex(
     state: &LatexCompilerState,
     project_dir: String,
     main_file: String,
-    use_texlive: Option<bool>,
 ) -> Result<Vec<u8>, String> {
     // Acquire semaphore permit (non-blocking)
     let _permit = state
@@ -911,7 +788,6 @@ pub async fn compile_latex(
     let _project_guard = project_lock.lock().await;
 
     let t0 = std::time::Instant::now();
-    let use_texlive = use_texlive.unwrap_or(false);
 
     let main_file_name = Path::new(&main_file)
         .file_stem()
@@ -950,7 +826,7 @@ pub async fn compile_latex(
             "full copy"
         },
         if is_reuse { "reuse" } else { "first build" },
-        if use_texlive { "texlive" } else { "tectonic" }
+        "texlive"
     );
 
     // Remove stale PDF so a failed compile doesn't return the previous result.
@@ -972,107 +848,20 @@ pub async fn compile_latex(
 
     // Save engine name before `engine` is moved into the spawn_blocking closure
     let engine_name_for_label = match &engine {
-        Some(TexEngine::XeLaTeX) | None => "xelatex",
-        Some(TexEngine::Latex) => "pdflatex",
+        Some(TexEngine::XeLaTeX) => "xelatex",
+        Some(TexEngine::Latex) | None => "pdflatex",
         Some(TexEngine::LuaLaTeX) => "lualatex",
     };
-    let backend_label = if use_texlive {
-        format!("TeXLive/{}", engine_name_for_label)
-    } else {
-        "Tectonic".to_string()
-    };
-
-    if !use_texlive {
-        if let Some(TexEngine::LuaLaTeX) = engine {
-            return Err(
-                "Compilation failed\n\nThis document requires LuaLaTeX (% !TEX program = lualatex), \
-                 which is not supported. Prism uses a XeTeX-based engine (Tectonic). \
-                 Please switch to XeLaTeX or remove the magic comment."
-                    .to_string(),
-            );
-        }
-    }
-
-    let mut compile_result = if use_texlive {
-        let work_dir_clone = work_dir.clone();
-        let main_file_clone = main_file.clone();
-        let result = tokio::task::spawn_blocking(move || {
-            lower_thread_priority();
-            compile_with_texlive(&work_dir_clone, &main_file_clone, engine, &main_tex_content)
-        })
-        .await
-        .map_err(|e| format!("Compilation task panicked: {}", e))?;
-        eprintln!(
-            "[latex] +{:.0}ms texlive done (ok={})",
-            t0.elapsed().as_millis(),
-            result.is_ok()
-        );
-        result
-    } else {
-        // Run Tectonic in a subprocess to isolate C-level global state (font cache, etc.).
-        let work_dir_clone = work_dir.clone();
-        let main_file_clone = main_file.clone();
-        let result = tokio::task::spawn_blocking(move || {
-            lower_thread_priority();
-            compile_with_tectonic_subprocess(&work_dir_clone, &main_file_clone)
-        })
-        .await
-        .map_err(|e| format!("Compilation task panicked: {}", e))?;
-        eprintln!(
-            "[latex] +{:.0}ms tectonic done (ok={})",
-            t0.elapsed().as_millis(),
-            result.is_ok()
-        );
-        result
-    };
-
+    let backend_label = format!("TeX Live/{}", engine_name_for_label);
+    let work_dir_clone = work_dir.clone();
+    let main_file_clone = main_file.clone();
+    let compile_result = tokio::task::spawn_blocking(move || {
+        lower_thread_priority();
+        compile_with_texlive(&work_dir_clone, &main_file_clone, engine, &main_tex_content)
+    })
+    .await
+    .map_err(|e| format!("Compilation task panicked: {}", e))?;
     let log_path = work_dir.join(format!("{}.log", main_file_name));
-
-    // Handle "No pages of output" — retry with \AtEndDocument{\null} injection (Tectonic only).
-    // TeXLive multi-pass handles this differently; the injection is Tectonic-specific.
-    if !use_texlive && !pdf_path.exists() {
-        let log_path_clone = log_path.clone();
-        let main_tex = work_dir.join(&main_file);
-        let pdf_path_clone = pdf_path.clone();
-        let main_file_clone = main_file.clone();
-        let work_dir_clone = work_dir.clone();
-
-        let needs_retry = tokio::task::spawn_blocking(move || {
-            let log_content = std::fs::read_to_string(&log_path_clone).unwrap_or_default();
-            if !log_content.contains("No pages of output") || has_real_errors(&log_content) {
-                return Ok(false);
-            }
-            eprintln!("[latex] no pages of output — retrying with \\null injection");
-            if let Ok(content) = std::fs::read_to_string(&main_tex) {
-                if let Some(pos) = content.find("\\begin{document}") {
-                    let modified = format!(
-                        "{}\\AtEndDocument{{\\null}}{}",
-                        &content[..pos],
-                        &content[pos..]
-                    );
-                    let _ = std::fs::write(&main_tex, &modified);
-                    return Ok(true);
-                }
-            }
-            Ok::<bool, String>(false)
-        })
-        .await
-        .map_err(|e| format!("Retry prep panicked: {}", e))??;
-
-        if needs_retry {
-            let retry_result = tokio::task::spawn_blocking(move || {
-                compile_with_tectonic_subprocess(&work_dir_clone, &main_file_clone)
-            })
-            .await
-            .map_err(|e| format!("Retry task panicked: {}", e))?;
-            eprintln!(
-                "[latex] empty-body retry: ok={} pdf_exists={}",
-                retry_result.is_ok(),
-                pdf_path_clone.exists()
-            );
-            compile_result = retry_result;
-        }
-    }
 
     // Store build info
     {
@@ -1101,6 +890,8 @@ pub async fn compile_latex(
         );
         Ok(pdf_bytes)
     } else {
+        // Do not let startup PDF loading pick up a partial failed output.
+        let _ = std::fs::remove_file(&pdf_path);
         let log_content = std::fs::read_to_string(&log_path).unwrap_or_default();
         Err(compilation_failure(
             &backend_label,
@@ -1219,6 +1010,90 @@ mod tests {
         assert!(error.contains("write denied"));
     }
 
+    #[test]
+    #[ignore = "requires system TeX Live engines and BibTeX"]
+    fn texlive_integration_engines_errors_and_bibliography() {
+        let dir = tempfile::tempdir().unwrap();
+        let simple = "\\documentclass{article}\n\\begin{document}Test\\end{document}\n";
+        for engine in [None, Some(TexEngine::XeLaTeX), Some(TexEngine::LuaLaTeX)] {
+            std::fs::write(dir.path().join("main.tex"), simple).unwrap();
+            compile_with_texlive(dir.path(), "main.tex", engine, simple).unwrap();
+            assert!(std::fs::read(dir.path().join("main.pdf"))
+                .unwrap()
+                .starts_with(b"%PDF-"));
+        }
+        let invalid =
+            "\\documentclass{article}\n\\begin{document}\\undefinedPrismCommand\\end{document}";
+        std::fs::write(dir.path().join("main.tex"), invalid).unwrap();
+        let error = compile_with_texlive(dir.path(), "main.tex", None, invalid).unwrap_err();
+        assert!(error.contains("Undefined control sequence"));
+        // A stale bibliography must be replaced before the final engine pass.
+        let bib = "\\documentclass{article}\n\\begin{document}\\cite{known}\\bibliographystyle{plain}\\bibliography{refs}\\end{document}";
+        std::fs::write(dir.path().join("main.tex"), bib).unwrap();
+        std::fs::write(dir.path().join("main.bbl"), "\\obsoleteBibliographyCommand").unwrap();
+        std::fs::write(dir.path().join("refs.bib"), "@article{known,author={A. Writer},title={Verified Entry},journal={Journal},year={2026}}").unwrap();
+        compile_with_texlive(dir.path(), "main.tex", None, bib).unwrap();
+        let log = std::fs::read_to_string(dir.path().join("main.log")).unwrap();
+        assert!(!log.contains("undefined"));
+        assert!(std::fs::read_to_string(dir.path().join("main.bbl"))
+            .unwrap()
+            .contains("Verified"));
+        std::fs::remove_file(dir.path().join("refs.bib")).unwrap();
+        assert!(compile_with_texlive(dir.path(), "main.tex", None, bib)
+            .unwrap_err()
+            .contains("Bibliography tool"));
+    }
+
+    #[tokio::test]
+    #[ignore = "requires system pdfLaTeX"]
+    async fn texlive_integration_failed_pdf_is_not_reused() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_string_lossy().to_string();
+        let state = LatexCompilerState::default();
+        std::fs::write(
+            dir.path().join("main.tex"),
+            "\\documentclass{article}\n\\begin{document}\\undefinedPrismCommand\\end{document}",
+        )
+        .unwrap();
+        assert!(compile_latex(&state, root.clone(), "main.tex".into())
+            .await
+            .is_err());
+        assert!(load_existing_pdf(&state, root.clone(), "main.tex".into())
+            .await
+            .unwrap()
+            .is_none());
+        std::fs::write(
+            dir.path().join("main.tex"),
+            "\\documentclass{article}\n\\begin{document}Recovered\\end{document}",
+        )
+        .unwrap();
+        let pdf = compile_latex(&state, root, "main.tex".into())
+            .await
+            .unwrap();
+        assert!(pdf.starts_with(b"%PDF-"));
+    }
+
+    #[test]
+    fn missing_texlive_tool_names_the_tool_and_installation_action() {
+        let error = find_texlive_binary("prism-nonexistent-tex-tool").unwrap_err();
+        assert!(error.contains("prism-nonexistent-tex-tool"));
+        assert!(error.contains("Install TeX Live"));
+    }
+
+    #[test]
+    #[ignore = "requires PRISM_TEST_PROJECT, compiles only a temporary copy"]
+    fn texlive_integration_project_copy() {
+        let project = std::env::var("PRISM_TEST_PROJECT").unwrap();
+        let main = std::env::var("PRISM_TEST_MAIN").unwrap();
+        let output = std::env::var("PRISM_TEST_OUTPUT").unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        copy_dir_recursive(Path::new(&project), dir.path()).unwrap();
+        let content = std::fs::read_to_string(dir.path().join(&main)).unwrap();
+        compile_with_texlive(dir.path(), &main, detect_tex_engine(&content), &content).unwrap();
+        let stem = Path::new(&main).file_stem().unwrap().to_str().unwrap();
+        std::fs::copy(dir.path().join(format!("{}.pdf", stem)), output).unwrap();
+    }
+
     // --- detect_bib_tool ---
 
     #[test]
@@ -1264,20 +1139,20 @@ mod tests {
     fn test_compilation_failure_preserves_pdf_conversion_error() {
         let result = Err("xdvipdfmx: failed to load image".to_string());
         let log = "Output written on main.xdv (6 pages, 54328 bytes).";
-        let message = compilation_failure("Tectonic", &result, log);
+        let message = compilation_failure("TeX Live/xelatex", &result, log);
         assert!(
-            message.starts_with("Compilation failed (Tectonic)\n\nxdvipdfmx: failed to load image")
+            message.starts_with("Compilation failed (TeX Live/xelatex)\n\nxdvipdfmx: failed to load image")
         );
         assert!(message.contains("---- LaTeX log context ----\nOutput written"));
     }
 
     #[test]
     fn test_compilation_failure_missing_pdf_and_empty_diagnostics() {
-        assert!(compilation_failure("Tectonic", &Ok(()), "").ends_with("No PDF generated"));
-        assert!(compilation_failure("Tectonic", &Err(String::new()), "")
+        assert!(compilation_failure("TeX Live/xelatex", &Ok(()), "").ends_with("No PDF generated"));
+        assert!(compilation_failure("TeX Live/xelatex", &Err(String::new()), "")
             .ends_with("Compiler process failed without diagnostic output"));
         let message = compilation_failure(
-            "Tectonic",
+            "TeX Live/xelatex",
             &Err("engine failed".into()),
             "! Undefined control sequence.",
         );
@@ -1841,7 +1716,7 @@ Postamble:
         std::fs::write(&pdf_path, "old pdf data").unwrap();
         assert!(pdf_path.exists());
 
-        // This is what compile_latex does before running tectonic
+        // This is what compile_latex does before running the compiler
         let _ = std::fs::remove_file(&pdf_path);
         assert!(!pdf_path.exists());
 

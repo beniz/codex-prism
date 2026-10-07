@@ -48,17 +48,13 @@ export async function loadExistingPdf(
 export async function compileLatex(
   projectDir: string,
   mainFile: string = "main.tex",
-  useTexlive: boolean = false,
 ): Promise<Uint8Array> {
-  log.info(
-    `Compiling ${mainFile} (backend: ${useTexlive ? "texlive" : "tectonic"})`,
-  );
+  log.info(`Compiling ${mainFile} (backend: texlive)`);
   const start = performance.now();
   // compile_latex returns raw PDF bytes via Tauri IPC Response
   const buffer = await invoke<ArrayBuffer>("compile_latex", {
     projectDir,
     mainFile,
-    useTexlive,
   });
 
   const result = new Uint8Array(buffer);
@@ -104,4 +100,18 @@ export async function synctexEdit(
     log.debug("SyncTeX lookup failed", { page, error: String(err) });
     return null;
   }
+}
+
+export type TexEngine = "pdflatex" | "xelatex" | "lualatex";
+
+/** Keep aligned with native detection: first directive in the first 20 lines. */
+export function detectTexEngine(content: string): TexEngine {
+  for (const line of content.split("\n").slice(0, 20)) {
+    const match = line.match(/^\s*%\s*!TEX\s*program\s*=\s*(.*?)\s*$/);
+    const engine = match?.[1].toLowerCase();
+    if (engine === "pdflatex" || engine === "latex") return "pdflatex";
+    if (engine === "xelatex" || engine === "lualatex") return engine;
+    if (match) return "pdflatex";
+  }
+  return "pdflatex";
 }

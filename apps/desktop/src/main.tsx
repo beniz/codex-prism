@@ -7,8 +7,6 @@ import { createLogger } from "./lib/debug/logger";
 import { APP_VISIBILITY_RESTORED } from "./lib/debug/log-store";
 import "./styles/globals.css";
 
-const isDebugWindow = new URLSearchParams(window.location.search).has("debug");
-
 const log = createLogger("app");
 
 // Catch unhandled promise rejections to prevent silent failures
@@ -69,18 +67,6 @@ async function bootstrap() {
     await initializeAppZoom();
   } catch (error) {
     log.error("Failed to initialize app zoom", { error: String(error) });
-  }
-
-  if (isDebugWindow) {
-    // Debug window — render standalone debug page
-    const { DebugPage } = await import("./components/debug/debug-page");
-    ReactDOM.createRoot(rootContainer).render(
-      <React.StrictMode>
-        <DebugPage />
-      </React.StrictMode>,
-    );
-    hideLoadingScreen();
-    return;
   }
 
   // Main app window

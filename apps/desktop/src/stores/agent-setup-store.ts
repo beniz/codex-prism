@@ -2,20 +2,12 @@ import { create } from "zustand";
 import { backend, type CodexModel } from "@/lib/backend";
 import { openExternal } from "@/lib/backend/desktop-host";
 interface State {
-  status:
-    | "checking"
-    | "ready"
-    | "not-installed"
-    | "not-authenticated"
-    | "error"
-    | "missing-git";
+  status: "checking" | "ready" | "not-authenticated" | "error";
   version: string | null;
   error: string | null;
   models: CodexModel[];
-  isInstalling: boolean;
   loginInfo: string;
   checkStatus(): Promise<void>;
-  install(): Promise<void>;
   login(device?: boolean): Promise<void>;
   logout(): Promise<void>;
 }
@@ -24,7 +16,6 @@ export const useAgentSetupStore = create<State>((set, get) => ({
   version: null,
   error: null,
   models: [],
-  isInstalling: false,
   loginInfo: "",
   checkStatus: async () => {
     try {
@@ -41,12 +32,6 @@ export const useAgentSetupStore = create<State>((set, get) => ({
     } catch (e) {
       set({ status: "error", error: String(e) });
     }
-  },
-  install: async () => {
-    set({
-      error:
-        "Install Codex CLI separately, then refresh, or set its executable path below.",
-    });
   },
   login: async (device = false) => {
     try {

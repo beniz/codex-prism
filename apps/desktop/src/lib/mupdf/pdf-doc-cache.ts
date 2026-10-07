@@ -108,19 +108,6 @@ export async function getOrOpenDocument(
   return { docId, pageSizes, cacheHit: false };
 }
 
-/** Close and remove a specific document from cache by docId. */
-export function invalidateDoc(docId: number): void {
-  for (const [key, entry] of cache) {
-    if (entry.docId === docId) {
-      cache.delete(key);
-      getMupdfClient()
-        .closeDocument(docId)
-        .catch(() => {});
-      return;
-    }
-  }
-}
-
 /** Close all cached documents (e.g., on project close). */
 export async function clearDocCache(): Promise<void> {
   const entries = [...cache.values()];

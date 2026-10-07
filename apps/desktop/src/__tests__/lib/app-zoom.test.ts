@@ -11,10 +11,7 @@ import {
   initializeAppZoom,
   persistAppZoom,
   readStoredAppZoom,
-  resetAppZoom,
   shouldHandleAppZoomShortcut,
-  zoomInApp,
-  zoomOutApp,
 } from "@/lib/app-zoom";
 
 describe("app zoom", () => {
@@ -55,25 +52,6 @@ describe("app zoom", () => {
 
     expect(webview.setZoom).toHaveBeenCalledWith(DEFAULT_APP_ZOOM);
     expect(localStorage.getItem(APP_ZOOM_STORAGE_KEY)).toBeNull();
-  });
-
-  it("zooms in, zooms out, and resets around the stored value", async () => {
-    const webview = getCurrentWebview();
-    localStorage.setItem(APP_ZOOM_STORAGE_KEY, "1.2");
-
-    await zoomInApp();
-    expect(webview.setZoom).toHaveBeenLastCalledWith(1.3);
-    expect(localStorage.getItem(APP_ZOOM_STORAGE_KEY)).toBe("1.3");
-
-    await zoomOutApp();
-    expect(webview.setZoom).toHaveBeenLastCalledWith(1.2);
-    expect(localStorage.getItem(APP_ZOOM_STORAGE_KEY)).toBe("1.2");
-
-    await resetAppZoom();
-    expect(webview.setZoom).toHaveBeenLastCalledWith(DEFAULT_APP_ZOOM);
-    expect(localStorage.getItem(APP_ZOOM_STORAGE_KEY)).toBe(
-      DEFAULT_APP_ZOOM.toString(),
-    );
   });
 
   it("rounds and clamps zoom values consistently", () => {

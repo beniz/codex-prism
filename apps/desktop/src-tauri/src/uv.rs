@@ -82,13 +82,6 @@ pub struct VenvInfo {
     pub created: bool,
 }
 
-#[derive(serde::Serialize)]
-pub struct UvCommandResult {
-    pub stdout: String,
-    pub stderr: String,
-    pub exit_code: i32,
-}
-
 // ─── Helper: build PATH with venv bin prepended ───
 
 fn venv_bin_dir(venv_dir: &std::path::Path) -> PathBuf {
@@ -409,88 +402,32 @@ pub async fn setup_project_venv(project_path: String) -> Result<VenvInfo, String
     })
 }
 
-#[tauri::command]
-pub async fn uv_add_packages(
-    packages: Vec<String>,
-    project_path: String,
-) -> Result<String, String> {
-    let uv_bin = find_uv_binary().map_err(|e| format!("uv not found: {}", e))?;
+pub fn project_venv_status(project_path: String) -> Option<VenvInfo> {
     let venv_dir = std::path::Path::new(&project_path).join(".venv");
-
-    if !venv_dir.exists() {
-        return Err("No .venv found. Run setup_project_venv first.".to_string());
-    }
-
-    let mut args = vec!["pip".to_string(), "install".to_string()];
-    args.extend(packages);
-
-    let mut pip_cmd = tokio::process::Command::new(&uv_bin);
-    pip_cmd.args(&args);
-    pip_cmd.current_dir(&project_path);
-    pip_cmd.env("VIRTUAL_ENV", &venv_dir);
-    pip_cmd.env("UV_PROJECT_ENVIRONMENT", &venv_dir);
-    pip_cmd.env("PYTHONNOUSERSITE", "1");
-    pip_cmd.env("PATH", path_with_venv(&venv_dir));
-    #[cfg(target_os = "windows")]
-    {
-        pip_cmd.creation_flags(CREATE_NO_WINDOW);
-    }
-    let output = pip_cmd
-        .output()
-        .await
-        .map_err(|e| format!("Failed to run uv pip install: {}", e))?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("uv pip install failed: {}", stderr));
-    }
-
-    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-    Ok(stdout)
+    let python = venv_python(&venv_dir);
+    python.is_file().then(|| VenvInfo {
+        venv_path: venv_dir.to_string_lossy().to_string(),
+        python_path: python.to_string_lossy().to_string(),
+        created: false,
+    })
 }
 
-#[tauri::command]
-pub async fn uv_run_command(
-    command: String,
-    project_path: String,
-) -> Result<UvCommandResult, String> {
-    let venv_dir = std::path::Path::new(&project_path).join(".venv");
-
-    if !venv_dir.exists() {
-        return Err("No .venv found. Run setup_project_venv first.".to_string());
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn inspecting_environment_never_creates_or_repairs_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_string_lossy().to_string();
+        assert!(project_venv_status(root.clone()).is_none());
+        assert!(!dir.path().join(".venv").exists());
+        let python = venv_python(&dir.path().join(".venv"));
+        std::fs::create_dir_all(python.parent().unwrap()).unwrap();
+        std::fs::write(&python, "existing interpreter").unwrap();
+        assert!(project_venv_status(root).is_some());
+        assert_eq!(
+            std::fs::read_to_string(python).unwrap(),
+            "existing interpreter"
+        );
     }
-
-    // Split command into program + args
-    let parts: Vec<&str> = command.split_whitespace().collect();
-    if parts.is_empty() {
-        return Err("Empty command".to_string());
-    }
-
-    let program = parts.first().ok_or("Empty command")?;
-    let args = parts.get(1..).unwrap_or_default();
-
-    let mut run_cmd = tokio::process::Command::new(program);
-    run_cmd.args(args);
-    run_cmd.current_dir(&project_path);
-    run_cmd.env("VIRTUAL_ENV", &venv_dir);
-    run_cmd.env("UV_PROJECT_ENVIRONMENT", &venv_dir);
-    run_cmd.env("PYTHONNOUSERSITE", "1");
-    run_cmd.env("PIP_REQUIRE_VIRTUALENV", "true");
-    run_cmd.env("PATH", path_with_venv(&venv_dir));
-    #[cfg(target_os = "windows")]
-    {
-        run_cmd.creation_flags(CREATE_NO_WINDOW);
-    }
-    let output = run_cmd
-        .output()
-        .await
-        .map_err(|e| format!("Failed to run command: {}", e))?;
-
-    let exit_code = output.status.code().unwrap_or(-1);
-
-    Ok(UvCommandResult {
-        stdout: String::from_utf8_lossy(&output.stdout).to_string(),
-        stderr: String::from_utf8_lossy(&output.stderr).to_string(),
-        exit_code,
-    })
 }
