@@ -6,25 +6,25 @@ The initial release target is **Ubuntu 26.04 LTS, x86_64**. Build on Ubuntu 26.0
 
 Install the dependencies listed in the root README, plus `patchelf`, `librsvg2-bin`, `file`, `curl`, `wget`, `xdg-utils`, `libpng-dev`, and `zlib1g-dev`. Install Node 22 with Corepack and Rust via rustup (the repository pins Rust 1.88.0).
 
-Start from a clean, committed checkout. Replace `1.3.1` below with your chosen version; `1.3.0` is currently inherited from upstream.
+Start from a clean, committed checkout. Replace `1.4.0` below with your chosen version. Version-specific notes in `docs/releases/<version>.md` are included in the artifacts and Gitea release body.
 
 ```sh
 corepack pnpm install --frozen-lockfile
-corepack pnpm release:prepare 1.3.1
+corepack pnpm release:prepare 1.4.0
 # Review the version changes; this updates all package/Cargo/Tauri versions.
 corepack pnpm test:release
 corepack pnpm --filter @codex-prism/desktop test
 cargo test --locked --manifest-path apps/desktop/src-tauri/Cargo.toml --lib
 git add package.json apps/desktop/package.json apps/desktop/src-tauri/tauri.conf.json apps/desktop/src-tauri/Cargo.toml apps/desktop/src-tauri/Cargo.lock
-git commit -m "chore: release 1.3.1"
-git tag -a v1.3.1 -m "codex-prism 1.3.1"
+git commit -m "chore: release 1.4.0"
+git tag -a v1.4.0 -m "codex-prism 1.4.0"
 corepack pnpm release:build
 ```
 
-Artifacts go to `dist/releases/v1.3.1/`:
+Artifacts go to `dist/releases/v1.4.0/`:
 
-- `codex-prism-1.3.1-linux-x86_64.deb`
-- `codex-prism-1.3.1-linux-x86_64.AppImage`
+- `codex-prism-1.4.0-linux-x86_64.deb`
+- `codex-prism-1.4.0-linux-x86_64.AppImage`
 - `SHA256SUMS`, `RELEASE_NOTES.md`, and `release.json` (source commit and artifact hashes)
 
 Smoke-test the actual packages before publishing: launch, connect Codex, open a project, compile a PDF, and try chat plus Keep/Undo. Users must install and authenticate the Codex CLI separately and install system TeX Live to compile documents (both `.deb` and AppImage); see the root README for the Ubuntu packages. Existing PDFs can be viewed without TeX Live. Python and external scientific skills are optional. The installed release contains a built frontend; it does not need Node or Rust at runtime. The `codex-prism` symlink in `~/.local/bin` continues launching your repository checkout; remove or rename that symlink if you want an installed package's executable to take precedence.
@@ -33,7 +33,7 @@ Push the commit and tag, then upload:
 
 ```sh
 git push origin main
-git push origin v1.3.1
+git push origin v1.4.0
 # Set GITEA_TOKEN securely in your shell to a token with repository write access.
 corepack pnpm release:publish
 ```

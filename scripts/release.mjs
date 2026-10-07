@@ -137,7 +137,12 @@ export async function collect(cwd = root) {
       sha256: await hash(destination),
     });
   }
-  const notes = `# codex-prism v${version}\n\nUbuntu 26.04 LTS x86_64 desktop release.\n\nInstall the .deb on an Ubuntu 26.04 system, or make the AppImage executable and run it.\n\nRequires the Codex CLI installed separately and authenticated with codex login. Automatic updates are not enabled.\n`;
+  let notes = `# codex-prism v${version}\n\nUbuntu 26.04 LTS x86_64 desktop release.\n\nInstall the .deb on an Ubuntu 26.04 system, or make the AppImage executable and run it.\n\nRequires the Codex CLI installed separately and authenticated with codex login, and system TeX Live for compilation. Automatic updates are not enabled.\n`;
+  try {
+    notes = await readFile(join(cwd, "docs/releases", `${version}.md`), "utf8");
+  } catch (error) {
+    if (error.code !== "ENOENT") throw error;
+  }
   await writeFile(join(dir, "RELEASE_NOTES.md"), notes);
   artifacts.push({
     name: "RELEASE_NOTES.md",

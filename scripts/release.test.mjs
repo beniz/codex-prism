@@ -79,6 +79,24 @@ test("collect produces versioned installers and source provenance", async (t) =>
     /^[a-f0-9]{64}  codex-prism/,
   );
 });
+test("collect includes version-specific release notes and hashes their exact bytes", async (t) => {
+  const { cwd } = await fixture(t);
+  await mkdir(join(cwd, "docs/releases"), { recursive: true });
+  const notes = "# Release notes\n\nTeX Live is required.\n";
+  await writeFile(join(cwd, "docs/releases/1.3.0.md"), notes);
+  const dir = await collect(cwd);
+  assert.equal(await readFile(join(dir, "RELEASE_NOTES.md"), "utf8"), notes);
+  const manifest = JSON.parse(await readFile(join(dir, "release.json")));
+  const artifact = manifest.artifacts.find(
+    (a) => a.name === "RELEASE_NOTES.md",
+  );
+  assert.equal(artifact.size, Buffer.byteLength(notes));
+  const { createHash } = await import("node:crypto");
+  assert.equal(
+    artifact.sha256,
+    createHash("sha256").update(notes).digest("hex"),
+  );
+});
 test("publisher validates remote tag and uploads a draft through the Gitea API", async (t) => {
   const { cwd, git } = await fixture(t);
   await collect(cwd);
