@@ -2,6 +2,10 @@
 
 codex-prism is a scientific writing workspace powered by the **installed Codex app-server**, with a Tauri desktop editor. It is a local, single-user application; a browser-hosted server and collaboration are not included yet.
 
+![codex-prism workspace with project files, LaTeX source, Codex chat, and a compiled PDF preview](docs/images/codex-prism-workspace.png)
+
+Project files, LaTeX editing, Codex chat, and PDF preview in one workspace.
+
 ## Run locally (Ubuntu 26.04 LTS, x86_64)
 
 1. Install Node.js 22+, Corepack, Git, and the Linux Tauri development libraries (Ubuntu/Debian):
@@ -120,3 +124,5 @@ codex-prism builds on [the original desktop project](https://github.com/delibae/
 ## License
 
 [MIT](./LICENSE)
+
+This project is a fork of [ClaudePrism](https://github.com/delibae/claude-prism) by delibae, adapted to use Codex as its AI backend.
