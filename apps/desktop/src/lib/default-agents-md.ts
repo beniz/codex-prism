@@ -32,6 +32,9 @@ uv run python script.py                          # Run a script
 
 ## Writing Guidelines
 
+- Treat scientific publications as the default writing target unless the user or project specifies another purpose. Use precise, evidence-based academic prose appropriate to the intended discipline and venue, and distinguish established findings from hypotheses and original contributions.
+- Add references to relevant academic works when supporting substantive claims, describing prior work or methods, or comparing results. Prefer primary research and authoritative reviews; cite sources where they support the text and follow the project's existing bibliography and citation style.
+- Verify that each added reference exists, its bibliographic metadata is accurate, and it supports the associated claim, using accessible source material or trusted scholarly records. Never invent papers, authors, DOIs, citations, or findings. If a reference cannot be verified, flag the gap to the user instead of presenting it as verified.
 - Edit \`.tex\` files directly. Codex-Prism auto-compiles and shows a live PDF preview.
 - Use \`\\input{filename}\` or \`\\include{filename}\` to split large documents into multiple files.
 - Place images in a \`figures/\` directory and reference with \`\\includegraphics{figures/name}\`.
