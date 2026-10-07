@@ -42,7 +42,7 @@ export function WorkspaceLayout() {
   const [sidebarCollapsedSize, setSidebarCollapsedSize] = useState(
     SIDEBAR_COLLAPSED_SIZE_FALLBACK,
   );
-  const [codeVisible, setCodeVisible] = useState(true);
+  const [codeVisible, setCodeVisible] = useState(false);
 
   const getCollapsedSidebarSize = useCallback(() => {
     const workspaceWidth =
