@@ -114,7 +114,7 @@ interface DocumentState {
   requestJumpToPosition: (position: number) => void;
   clearJumpRequest: () => void;
   setThreadOpen: (open: boolean) => void;
-  setPdfData: (data: Uint8Array | null, rootFileId?: string) => void;
+  setPdfData: (data: Uint8Array | null, rootFileId?: string, compiled?: boolean) => void;
   setCompileError: (error: string | null, rootFileId?: string) => void;
   setIsCompiling: (isCompiling: boolean) => void;
   setPendingRecompile: (pending: boolean) => void;
@@ -757,7 +757,7 @@ export const useDocumentStore = create<DocumentState>()((set, get) => ({
 
   setThreadOpen: (open) => set({ isThreadOpen: open }),
 
-  setPdfData: (data, rootFileId?) => {
+  setPdfData: (data, rootFileId?, compiled = true) => {
     if (data) {
       const key = rootFileId ?? "__default__";
       _pdfBytesCache.set(key, data);
@@ -774,7 +774,8 @@ export const useDocumentStore = create<DocumentState>()((set, get) => ({
         const compileErrorCache = new Map(s.compileErrorCache);
         const lastCompiledGenerations = new Map(s.lastCompiledGenerations);
         compileErrorCache.delete(rootFileId);
-        lastCompiledGenerations.set(rootFileId, s.contentGeneration);
+        if (compiled) lastCompiledGenerations.set(rootFileId, s.contentGeneration);
+        else lastCompiledGenerations.delete(rootFileId);
         set((prev) => ({
           pdfRevision: prev.pdfRevision + 1,
           compileError: null,

@@ -607,6 +607,14 @@ describe("useDocumentStore", () => {
   });
 
   describe("setPdfData / setCompileError", () => {
+    it("loads an existing PDF without marking source as freshly compiled", () => {
+      const store = useDocumentStore.getState();
+      store.setPdfData(new Uint8Array([1]), "main.tex");
+      expect(useDocumentStore.getState().lastCompiledGenerations.has("main.tex")).toBe(true);
+      store.setPdfData(new Uint8Array([2]), "main.tex", false);
+      expect(getCurrentPdfBytes()).toEqual(new Uint8Array([2]));
+      expect(useDocumentStore.getState().lastCompiledGenerations.has("main.tex")).toBe(false);
+    });
     it("setPdfData clears compile error", () => {
       useDocumentStore.setState({ compileError: "some error" });
       useDocumentStore.getState().setPdfData(new Uint8Array([1, 2, 3]));

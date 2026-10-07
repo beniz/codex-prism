@@ -801,6 +801,65 @@ pub fn detect_texlive() -> TexliveStatus {
     }
 }
 
+/// Load the most recent PDF for this TeX root without invoking a compiler.
+pub async fn load_existing_pdf(
+    state: &LatexCompilerState,
+    project_dir: String,
+    main_file: String,
+) -> Result<Option<Vec<u8>>, String> {
+    let root = PathBuf::from(&project_dir);
+    let found = tokio::task::spawn_blocking(move || find_existing_pdf(&root, &main_file))
+        .await
+        .map_err(|e| e.to_string())??;
+    if let Some((path, bytes)) = found {
+        if let (Some(parent), Some(stem)) =
+            (path.parent(), path.file_stem().and_then(|s| s.to_str()))
+        {
+            state.last_builds.lock().await.insert(
+                project_dir,
+                BuildInfo {
+                    work_dir: parent.to_path_buf(),
+                    main_file_name: stem.to_string(),
+                },
+            );
+        }
+        return Ok(Some(bytes));
+    }
+    Ok(None)
+}
+
+fn find_existing_pdf(root: &Path, main_file: &str) -> Result<Option<(PathBuf, Vec<u8>)>, String> {
+    crate::projects::resolve(root, main_file)?;
+    let main = Path::new(main_file);
+    let stem = main
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .ok_or("Invalid TeX filename")?;
+    let beside_source = main.with_extension("pdf").to_string_lossy().to_string();
+    let mut candidates = Vec::new();
+    for relative in [format!(".prism/build/{stem}.pdf"), beside_source] {
+        let path = crate::projects::resolve(root, &relative)?;
+        match std::fs::metadata(&path) {
+            Ok(meta) if meta.is_file() => candidates.push((
+                meta.modified().unwrap_or(std::time::SystemTime::UNIX_EPOCH),
+                path,
+            )),
+            Ok(_) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(e.to_string()),
+        }
+    }
+    candidates.sort_by(|a, b| b.0.cmp(&a.0));
+    for (_, path) in candidates {
+        let bytes = std::fs::read(&path).map_err(|e| e.to_string())?;
+        // Ignore empty/obviously invalid artifacts from interrupted builds.
+        if bytes.starts_with(b"%PDF-") {
+            return Ok(Some((path, bytes)));
+        }
+    }
+    Ok(None)
+}
+
 pub async fn compile_latex(
     state: &LatexCompilerState,
     project_dir: String,
@@ -1687,5 +1746,54 @@ Postamble:
         let result = std::fs::remove_file(&pdf_path);
         // It's an error but we ignore it with let _ =
         assert!(result.is_err());
+    }
+}
+
+#[cfg(test)]
+mod existing_pdf_tests {
+    use super::*;
+    #[test]
+    fn loads_persistent_build_without_compiling() {
+        let d = tempfile::tempdir().unwrap();
+        let build = d.path().join(".prism/build");
+        std::fs::create_dir_all(&build).unwrap();
+        std::fs::write(build.join("main.pdf"), b"%PDF-1.7 cached").unwrap();
+        let (_, bytes) = find_existing_pdf(d.path(), "main.tex").unwrap().unwrap();
+        assert_eq!(bytes, b"%PDF-1.7 cached");
+    }
+    #[test]
+    fn loads_pdf_beside_nested_source_and_ignores_unrelated_pdfs() {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::create_dir(d.path().join("paper")).unwrap();
+        std::fs::write(d.path().join("paper/article.pdf"), b"%PDF-1.7 external").unwrap();
+        assert!(find_existing_pdf(d.path(), "main.tex").unwrap().is_none());
+        assert!(find_existing_pdf(d.path(), "paper/article.tex")
+            .unwrap()
+            .is_some());
+    }
+    #[test]
+    fn prefers_the_newer_matching_pdf() {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(d.path().join(".prism/build")).unwrap();
+        let cached = d.path().join(".prism/build/main.pdf");
+        std::fs::write(&cached, b"%PDF-1.7 older").unwrap();
+        std::fs::File::open(&cached)
+            .unwrap()
+            .set_modified(std::time::SystemTime::UNIX_EPOCH)
+            .unwrap();
+        std::fs::write(d.path().join("main.pdf"), b"%PDF-1.7 newer").unwrap();
+        assert_eq!(
+            find_existing_pdf(d.path(), "main.tex").unwrap().unwrap().1,
+            b"%PDF-1.7 newer"
+        );
+    }
+    #[test]
+    fn skips_invalid_cached_pdf_and_falls_back_to_project_pdf() {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(d.path().join(".prism/build")).unwrap();
+        std::fs::write(d.path().join(".prism/build/main.pdf"), b"").unwrap();
+        assert!(find_existing_pdf(d.path(), "main.tex").unwrap().is_none());
+        std::fs::write(d.path().join("main.pdf"), b"%PDF-1.7 valid").unwrap();
+        assert!(find_existing_pdf(d.path(), "main.tex").unwrap().is_some());
     }
 }

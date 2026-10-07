@@ -34,6 +34,17 @@ export function formatCompileError(error: unknown): string {
       : "Compilation failed";
 }
 
+export async function loadExistingPdf(
+  projectDir: string,
+  mainFile: string,
+): Promise<Uint8Array | null> {
+  const bytes = await invoke<number[] | null>("load_existing_pdf", {
+    projectDir,
+    mainFile,
+  });
+  return bytes === null ? null : new Uint8Array(bytes);
+}
+
 export async function compileLatex(
   projectDir: string,
   mainFile: string = "main.tex",

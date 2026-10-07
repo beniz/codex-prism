@@ -30,6 +30,12 @@ pub async fn project_service(
         crate::codex::assert_unlocked(&app, &project_id)?;
     }
     match operation.as_str() {
+        "load_existing_pdf" => {
+            let main = str_arg("mainFile")?;
+            projects::resolve(&project.root, &main)?;
+            let state = app.state::<latex::LatexCompilerState>();
+            Ok(json!(latex::load_existing_pdf(&state, root, main).await?))
+        }
         "compile_latex" => {
             let main = str_arg("mainFile")?;
             projects::resolve(&project.root, &main)?;

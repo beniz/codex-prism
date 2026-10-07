@@ -43,6 +43,7 @@ import {
 import { HistoryPanel } from "@/components/workspace/history-panel";
 import {
   compileLatex,
+  loadExistingPdf,
   synctexEdit,
   resolveCompileTarget,
   formatCompileError,
@@ -128,7 +129,7 @@ export function PdfPreview() {
     width: number;
     height: number;
   } | null>(null);
-  const hasInitialCompile = useRef(false);
+  const hasInitialCompile = useRef<string | null>(null);
   const initialized = useDocumentStore((s) => s.initialized);
 
   // Derive pdfData from external cache, re-read whenever pdfRevision bumps
@@ -404,16 +405,15 @@ export function PdfPreview() {
   })();
 
   useEffect(() => {
-    if (hasInitialCompile.current) return;
+    if (hasInitialCompile.current === projectRoot) return;
     if (!initialized || !projectRoot) return;
     if (pdfData || isCompiling || compileError) return;
 
-    hasInitialCompile.current = true;
+    hasInitialCompile.current = projectRoot;
 
     const compile = async () => {
       setIsCompiling(true);
       try {
-        await saveAllFiles();
         const { files: allFiles, activeFileId } = useDocumentStore.getState();
         const resolved = resolveCompileTarget(activeFileId, allFiles);
         if (!resolved) {
@@ -423,12 +423,21 @@ export function PdfPreview() {
           return;
         }
         const { rootId, targetPath } = resolved;
+        const existing = await loadExistingPdf(projectRoot, targetPath);
+        if (useDocumentStore.getState().projectRoot !== projectRoot) return;
+        if (existing) {
+          setPdfData(existing, rootId, false);
+          return;
+        }
+        await saveAllFiles();
         const texlive =
           useSettingsStore.getState().compilerBackend === "texlive";
         const data = await compileLatex(projectRoot, targetPath, texlive);
-        setPdfData(data, rootId);
+        if (useDocumentStore.getState().projectRoot === projectRoot)
+          setPdfData(data, rootId);
       } catch (error) {
-        setCompileError(formatCompileError(error));
+        if (useDocumentStore.getState().projectRoot === projectRoot)
+          setCompileError(formatCompileError(error));
       } finally {
         setIsCompiling(false);
       }
@@ -596,7 +605,11 @@ export function PdfPreview() {
       const binary = atob(base64);
       const bytes = new Uint8Array(binary.length);
       for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-      await backend.files.write({projectId:project.id,path:relativePath},[...bytes],null);
+      await backend.files.write(
+        { projectId: project.id, path: relativePath },
+        [...bytes],
+        null,
+      );
 
       await useDocumentStore.getState().refreshFiles();
 

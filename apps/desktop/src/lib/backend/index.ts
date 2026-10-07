@@ -1,6 +1,7 @@
 import { invoke as nativeInvoke } from "@tauri-apps/api/core";
 const projectServices = new Set([
   "compile_latex",
+  "load_existing_pdf",
   "synctex_edit",
   "history_init",
   "history_snapshot",
