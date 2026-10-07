@@ -526,6 +526,34 @@ fn run_texlive_pass(
     Ok(())
 }
 
+/// Run from the build directory with a relative job name. BibTeX rejects
+/// absolute output paths under TeX Live's default openout_any=p policy.
+fn run_bibliography_pass(
+    executable: &Path,
+    main_stem: &str,
+    work_dir: &Path,
+) -> Result<(), String> {
+    let mut cmd = std::process::Command::new(executable);
+    cmd.arg(main_stem)
+        .current_dir(work_dir)
+        .env("PATH", texlive_env_path(executable))
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+    #[cfg(target_os = "windows")]
+    cmd.creation_flags(CREATE_NO_WINDOW);
+    let output = cmd
+        .output()
+        .map_err(|e| format!("Failed to run {}: {}", executable.display(), e))?;
+    if !output.status.success() {
+        return Err(format!(
+            "Bibliography tool {} failed: {}",
+            executable.display(),
+            subprocess_failure(&output)
+        ));
+    }
+    Ok(())
+}
+
 fn compile_with_texlive(
     work_dir: &Path,
     main_file: &str,
@@ -568,49 +596,14 @@ fn compile_with_texlive(
         .and_then(|s| s.to_str())
         .unwrap_or("document");
 
-    match bib_tool {
-        BibTool::Biber => {
-            let biber_path = find_texlive_binary("biber")?;
-            let mut cmd = std::process::Command::new(&biber_path);
-            cmd.arg(main_stem)
-                .current_dir(work_dir)
-                .env("PATH", &env_path)
-                .stdout(std::process::Stdio::piped())
-                .stderr(std::process::Stdio::piped());
-            #[cfg(target_os = "windows")]
-            cmd.creation_flags(CREATE_NO_WINDOW);
-            let output = cmd
-                .output()
-                .map_err(|e| format!("Failed to run biber: {}", e))?;
-            if !output.status.success() {
-                eprintln!(
-                    "[texlive] biber warning: {}",
-                    String::from_utf8_lossy(&output.stderr)
-                );
-            }
-        }
-        BibTool::BibTeX => {
-            let bibtex_path = find_texlive_binary("bibtex")?;
-            let aux_file = work_dir.join(format!("{}.aux", main_stem));
-            let mut cmd = std::process::Command::new(&bibtex_path);
-            cmd.arg(&aux_file)
-                .current_dir(work_dir)
-                .env("PATH", &env_path)
-                .stdout(std::process::Stdio::piped())
-                .stderr(std::process::Stdio::piped());
-            #[cfg(target_os = "windows")]
-            cmd.creation_flags(CREATE_NO_WINDOW);
-            let output = cmd
-                .output()
-                .map_err(|e| format!("Failed to run bibtex: {}", e))?;
-            if !output.status.success() {
-                eprintln!(
-                    "[texlive] bibtex warning: {}",
-                    String::from_utf8_lossy(&output.stderr)
-                );
-            }
-        }
-        BibTool::None => {}
+    let bibliography_program = match bib_tool {
+        BibTool::Biber => Some("biber"),
+        BibTool::BibTeX => Some("bibtex"),
+        BibTool::None => None,
+    };
+    if let Some(program) = bibliography_program {
+        let executable = find_texlive_binary(program)?;
+        run_bibliography_pass(&executable, main_stem, work_dir)?;
     }
 
     // Pass 2: resolve references / TOC
@@ -1189,6 +1182,42 @@ pub async fn cleanup_all_builds(state: &LatexCompilerState) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn bibliography_pass_uses_relative_job_and_build_directory() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let executable = dir.path().join("bibtex-test");
+        std::fs::write(
+            &executable,
+            "#!/bin/sh\n[ \"$1\" = paper ] && [ -f paper.aux ]\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::fs::write(dir.path().join("paper.aux"), "").unwrap();
+        run_bibliography_pass(&executable, "paper", dir.path()).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn bibliography_pass_reports_failure_instead_of_reusing_stale_output() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let executable = dir.path().join("bibtex-test");
+        std::fs::write(
+            &executable,
+            "#!/bin/sh\necho 'missing bibliography database'\necho 'write denied' >&2\nexit 1\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::fs::write(dir.path().join("paper.bbl"), "stale bibliography").unwrap();
+        let error = run_bibliography_pass(&executable, "paper", dir.path()).unwrap_err();
+        assert!(error.contains("Bibliography tool"));
+        assert!(error.contains("exit status: 1"));
+        assert!(error.contains("missing bibliography database"));
+        assert!(error.contains("write denied"));
+    }
 
     // --- detect_bib_tool ---
 
