@@ -140,6 +140,42 @@ describe("Codex turn lifecycle", () => {
       { id: "a", type: "agentMessage", text: "Hello world", status: undefined },
     ]);
   });
+  it("preserves message phases and structured web actions", () => {
+    const store = useAgentChatStore.getState();
+    useAgentChatStore.setState({
+      tabs: [{ ...store.tabs[0], sessionId: "thread1" }],
+    });
+    const item = {
+      id: "a",
+      type: "agentMessage",
+      text: "Checking sources",
+      phase: "commentary",
+    };
+    store.handleEvent({
+      method: "item/started",
+      params: { threadId: "thread1", item },
+    });
+    store.handleEvent({
+      method: "item/agentMessage/delta",
+      params: { threadId: "thread1", itemId: "a", delta: " now" },
+    });
+    expect(useAgentChatStore.getState().tabs[0].messages[0].phase).toBe(
+      "commentary",
+    );
+    const web = {
+      id: "w",
+      type: "webSearch",
+      query: "TikZ",
+      results: [{ url: "https://example.org" }],
+    };
+    store.handleEvent({
+      method: "item/completed",
+      params: { threadId: "thread1", item: web },
+    });
+    expect(useAgentChatStore.getState().tabs[0].messages[1].activity).toEqual(
+      web,
+    );
+  });
   it("answers approvals without killing the process", async () => {
     const r = {
       id: 7,
@@ -207,14 +243,12 @@ describe("Codex turn lifecycle", () => {
     expect(backend.agent.send).toHaveBeenCalledOnce();
   });
   it("sends captured images as image inputs", async () => {
-    await useAgentChatStore
-      .getState()
-      .sendPrompt("Explain", {
-        label: "capture",
-        filePath: "attachments/a.png",
-        selectedText: "",
-        imageDataUrl: "data:image/png;base64,AA==",
-      });
+    await useAgentChatStore.getState().sendPrompt("Explain", {
+      label: "capture",
+      filePath: "attachments/a.png",
+      selectedText: "",
+      imageDataUrl: "data:image/png;base64,AA==",
+    });
     expect(vi.mocked(backend.agent.send).mock.calls[0][5]).toEqual([
       "data:image/png;base64,AA==",
     ]);

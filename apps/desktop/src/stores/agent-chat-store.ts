@@ -13,6 +13,8 @@ export interface ChatItem {
   type: string;
   text: string;
   status?: string;
+  phase?: "commentary" | "final_answer" | null;
+  activity?: Record<string, any>;
 }
 export interface TabState {
   id: string;
@@ -460,6 +462,10 @@ function toItem(item: any): ChatItem {
     id: item.id,
     type: item.type,
     status: item.status,
+    ...(item.phase != null ? { phase: item.phase } : {}),
+    ...(!["agentMessage", "userMessage", "reasoning"].includes(item.type)
+      ? { activity: item }
+      : {}),
     text:
       item.text ??
       item.aggregatedOutput ??
