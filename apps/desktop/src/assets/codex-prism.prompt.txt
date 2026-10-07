@@ -1,0 +1,7 @@
+Generated with the built-in image_gen tool. Transparent background enabled.
+Reference: https://www.azooptics.com/images/Article_Images/ImageForArticle_723(1).jpg
+
+Prompt:
+Use case: logo-brand. Create one finished square application icon for Codex-Prism, a scientific writing and LaTeX workspace. Loosely inspired by a physical optics photograph of a triangular glass prism on a dark surface: white light enters from the left and emerges from the right as a rainbow spectrum. Reinterpret this as an original compact geometric brand mark, not a reproduction of the photograph. A dark charcoal/navy rounded-square tile with genuinely transparent exterior corners, containing a strong, centered upright triangular prism with clear pale silver-blue edges and subtle restrained glass facets. One clean white beam enters from the left, five or six bold crisp spectrum rays fan gently toward the upper right, red/orange through green cyan blue violet. Precise geometric shapes, restrained luminous accents, polished modern desktop software icon, almost vector-flat rather than photorealistic, ample breathing room around the symbol, legible at 32 pixels. The tile should occupy about 90% of a square 1024x1024 canvas. No text, no letters, no OpenAI knot, no existing brand marks, no watermark, no surrounding mockup, no decorative stars, no fine hairline rays. Deliver exactly one icon.
+
+Desktop and favicon variants were generated with the Tauri icon CLI.
