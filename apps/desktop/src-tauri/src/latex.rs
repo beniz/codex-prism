@@ -380,6 +380,9 @@ pub(crate) fn compile_with_tectonic(work_dir: &Path, main_file: &str) -> Result<
 
     let mut builder = ProcessingSessionBuilder::default();
     builder
+        // Tectonic otherwise defaults to 1970-01-01, including LaTeX's \today.
+        // Use the current date unless SOURCE_DATE_EPOCH explicitly pins the build.
+        .build_date_from_env(false)
         .bundle(bundle)
         .primary_input_path(work_dir.join(main_file))
         .tex_input_name(main_file)
