@@ -801,13 +801,12 @@ pub fn detect_texlive() -> TexliveStatus {
     }
 }
 
-#[tauri::command]
 pub async fn compile_latex(
-    state: tauri::State<'_, LatexCompilerState>,
+    state: &LatexCompilerState,
     project_dir: String,
     main_file: String,
     use_texlive: Option<bool>,
-) -> Result<tauri::ipc::Response, String> {
+) -> Result<Vec<u8>, String> {
     // Acquire semaphore permit (non-blocking)
     let _permit = state
         .semaphore
@@ -1013,7 +1012,7 @@ pub async fn compile_latex(
             backend_label,
             pdf_bytes.len() / 1024
         );
-        Ok(tauri::ipc::Response::new(pdf_bytes))
+        Ok(pdf_bytes)
     } else {
         let log_content = std::fs::read_to_string(&log_path).unwrap_or_default();
         let details = extract_error_lines(&log_content);
@@ -1029,9 +1028,8 @@ pub async fn compile_latex(
     }
 }
 
-#[tauri::command]
 pub async fn synctex_edit(
-    state: tauri::State<'_, LatexCompilerState>,
+    state: &LatexCompilerState,
     project_dir: String,
     page: u32,
     x: f64,

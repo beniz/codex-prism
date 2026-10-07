@@ -1,6 +1,6 @@
 import { create } from "zustand";
-import { invoke } from "@tauri-apps/api/core";
-import { emit, listen } from "@tauri-apps/api/event";
+import { invoke } from "@/lib/backend";
+import { emit, listen } from "@/lib/backend";
 
 export type LogLevel = "debug" | "info" | "warn" | "error";
 

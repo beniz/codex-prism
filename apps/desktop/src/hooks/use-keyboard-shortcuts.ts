@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "@/lib/backend";
 import { getAppZoomAction, shouldHandleAppZoomShortcut } from "@/lib/app-zoom";
 import { useDocumentStore } from "@/stores/document-store";
 

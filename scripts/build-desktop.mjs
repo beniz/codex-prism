@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { join } from "node:path";
 
 const env = { ...process.env };
+if (process.platform === "linux") env.CXXFLAGS = [env.CXXFLAGS, "-std=c++17"].filter(Boolean).join(" ");
 
 function appendEnvFlag(name, flag) {
   const current = env[name] ?? "";
@@ -19,7 +20,7 @@ if (process.platform === "win32") {
   env.CXXFLAGS = [env.CXXFLAGS, "/std:c++17"].filter(Boolean).join(" ");
 }
 
-const args = ["--filter=@claude-prism/desktop", "tauri", "build"];
+const args = ["--filter=@codex-prism/desktop", "tauri", "build"];
 
 if (!env.TAURI_SIGNING_PRIVATE_KEY) {
   args.push("--config", "src-tauri/tauri.local-build.conf.json");
@@ -35,7 +36,7 @@ const child =
           stdio: "inherit",
         },
       )
-    : spawn("pnpm", args, {
+    : spawn("corepack", ["pnpm", ...args], {
         env,
         stdio: "inherit",
       });

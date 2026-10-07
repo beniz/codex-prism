@@ -1,6 +1,6 @@
 import { RefObject, useCallback, useEffect, useState } from "react";
 import type { EditorView } from "@codemirror/view";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "@/lib/backend";
 import {
   BoldIcon,
   ItalicIcon,
@@ -19,7 +19,8 @@ import {
 } from "lucide-react";
 import { TooltipIconButton } from "@/components/assistant-ui/tooltip-icon-button";
 import { Button } from "@/components/ui/button";
-import vscodeIcon from "@/assets/vscode.svg";
+// Load the icon as an image URL, not an SVG module in the desktop webview.
+const vscodeIcon = new URL("../../../assets/vscode.svg", import.meta.url).href;
 import {
   DropdownMenu,
   DropdownMenuContent,

@@ -1,6 +1,6 @@
-export const DEFAULT_CLAUDE_MD = `# ClaudePrism LaTeX Project
+export const DEFAULT_AGENTS_MD = `# Codex-Prism LaTeX Project
 
-Academic writing workspace powered by ClaudePrism. You are assisting with a LaTeX document project.
+Academic writing workspace powered by Codex-Prism. You are assisting with a LaTeX document project.
 
 ## Environment
 
@@ -27,12 +27,12 @@ Academic writing workspace powered by ClaudePrism. You are assisting with a LaTe
 uv pip install numpy matplotlib pandas scipy     # Install packages
 uv run python script.py                          # Run a script
 
-# LaTeX is compiled automatically by ClaudePrism — no manual build commands needed.
+# LaTeX is compiled automatically by Codex-Prism — no manual build commands needed.
 \`\`\`
 
 ## Writing Guidelines
 
-- Edit \`.tex\` files directly. ClaudePrism auto-compiles and shows a live PDF preview.
+- Edit \`.tex\` files directly. Codex-Prism auto-compiles and shows a live PDF preview.
 - Use \`\\input{filename}\` or \`\\include{filename}\` to split large documents into multiple files.
 - Place images in a \`figures/\` directory and reference with \`\\includegraphics{figures/name}\`.
 - For bibliography, add entries to \`references.bib\` and cite with \`\\cite{key}\`.
@@ -40,7 +40,7 @@ uv run python script.py                          # Run a script
 
 ## Scientific Skills
 
-If scientific skills are installed (\`~/.claude/skills/\` or \`.claude/skills/\`), you have access to 100+ domain-specific tools:
+If scientific skills are installed (\`~/.agents/skills/\` or \`.agents/skills/\`), you have access to 100+ domain-specific tools:
 
 - **Data Analysis**: pandas, numpy, scipy, statsmodels, scikit-learn, polars
 - **Visualization**: matplotlib, seaborn, plotly (save figures to \`figures/\` directory)

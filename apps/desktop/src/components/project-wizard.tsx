@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect, useRef } from "react";
-import { open } from "@tauri-apps/plugin-dialog";
+import { open } from "@/lib/backend/desktop-host";
 import { mkdir, writeTextFile } from "@tauri-apps/plugin-fs";
-import { getCurrentWebview } from "@tauri-apps/api/webview";
+import { getCurrentWebview } from "@/lib/backend/desktop-host";
 import { homeDir } from "@tauri-apps/api/path";
 import { toast } from "sonner";
 import {
@@ -21,7 +21,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { useProjectStore } from "@/stores/project-store";
 import { useDocumentStore } from "@/stores/document-store";
-import { useClaudeChatStore } from "@/stores/claude-chat-store";
+import { useAgentChatStore } from "@/stores/agent-chat-store";
 import { exists, join } from "@/lib/tauri/fs";
 import {
   getTemplateById,
@@ -29,7 +29,7 @@ import {
   BIB_TEMPLATE,
 } from "@/lib/template-registry";
 import { TemplateGallery } from "@/components/template-gallery";
-import { DEFAULT_CLAUDE_MD } from "@/lib/default-claude-md";
+import { DEFAULT_AGENTS_MD } from "@/lib/default-agents-md";
 import {
   buildReferenceFilesSection,
   importReferenceFiles,
@@ -109,7 +109,7 @@ function ScratchForm({ onBack }: { onBack: () => void }) {
       setProjectFolder(lastProjectFolder);
     } else {
       homeDir()
-        .then((home) => join(home, "Documents", "ClaudePrism"))
+        .then((home) => join(home, "Documents", "Codex-Prism"))
         .then(async (dir) => {
           await mkdir(dir, { recursive: true }).catch(() => {});
           setProjectFolder(dir);
@@ -204,11 +204,11 @@ function ScratchForm({ onBack }: { onBack: () => void }) {
       }
       await mkdir(projectPath, { recursive: true });
 
-      // Create CLAUDE.md for Claude Code context
-      const claudeMdPath = await join(projectPath, "CLAUDE.md");
-      const claudeMdExists = await exists(claudeMdPath);
-      if (!claudeMdExists) {
-        await writeTextFile(claudeMdPath, DEFAULT_CLAUDE_MD);
+      // Create AGENTS.md for Codex context
+      const agentsMdPath = await join(projectPath, "AGENTS.md");
+      const agentsMdExists = await exists(agentsMdPath);
+      if (!agentsMdExists) {
+        await writeTextFile(agentsMdPath, DEFAULT_AGENTS_MD);
       }
 
       const mainTexPath = await join(projectPath, template.mainFileName);
@@ -250,8 +250,8 @@ function ScratchForm({ onBack }: { onBack: () => void }) {
           `Please generate the full document content based on my description. Keep the existing preamble and fill in the document body (between \`\\begin{document}\` and \`\\end{document}\`) with appropriate title, author, sections, and content. Make it a complete, well-structured **${template.name.toLowerCase()}** ready for me to refine.`,
         ].join("\n");
 
-        useClaudeChatStore.getState().newSession();
-        useClaudeChatStore.getState().setPendingInitialPrompt(prompt);
+        useAgentChatStore.getState().newSession();
+        useAgentChatStore.getState().setPendingInitialPrompt(prompt);
       }
 
       setLastProjectFolder(projectFolder);
@@ -322,7 +322,7 @@ function ScratchForm({ onBack }: { onBack: () => void }) {
                 What are you writing?
               </span>
               <p className="mt-0.5 text-muted-foreground text-xs leading-relaxed">
-                Describe your document and Claude will generate tailored
+                Describe your document and Codex will generate tailored
                 content.
               </p>
             </div>

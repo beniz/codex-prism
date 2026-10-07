@@ -9,7 +9,7 @@ fn main() {
     if args.len() >= 4 && args[1] == "--tectonic-compile" {
         let work_dir = std::path::Path::new(&args[2]);
         let main_file = &args[3];
-        match claude_prism_desktop_lib::tectonic_compile_subprocess(work_dir, main_file) {
+        match codex_prism_desktop_lib::tectonic_compile_subprocess(work_dir, main_file) {
             Ok(()) => std::process::exit(0),
             Err(e) => {
                 eprintln!("{}", e);
@@ -18,5 +18,5 @@ fn main() {
         }
     }
 
-    claude_prism_desktop_lib::run()
+    codex_prism_desktop_lib::run()
 }

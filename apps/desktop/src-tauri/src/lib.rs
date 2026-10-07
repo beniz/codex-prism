@@ -1,12 +1,11 @@
 #![recursion_limit = "512"]
 
-mod anthropic_proxy;
-mod claude;
-mod claude_process;
+mod codex;
+mod projects;
+mod services;
 mod history;
 mod latex;
 mod skills;
-mod slash_commands;
 mod uv;
 mod zotero;
 
@@ -184,7 +183,7 @@ fn create_new_window(app: tauri::AppHandle) -> Result<(), String> {
 
     #[allow(unused_mut)]
     let mut builder = WebviewWindowBuilder::new(&app, &label, WebviewUrl::default())
-        .title("ClaudePrism")
+        .title("Codex-Prism")
         .inner_size(1400.0, 900.0)
         .min_inner_size(800.0, 600.0)
         .zoom_hotkeys_enabled(true)
@@ -407,7 +406,7 @@ fn list_default_projects() -> Result<Vec<ProjectCandidate>, String> {
         return Ok(Vec::new());
     };
 
-    let base = home.join("Documents").join("ClaudePrism");
+    let base = home.join("Documents").join("Codex-Prism");
     if !base.is_dir() {
         return Ok(Vec::new());
     }
@@ -458,7 +457,7 @@ fn open_debug_window(app: tauri::AppHandle) -> Result<(), String> {
 
     let url = WebviewUrl::App("index.html?debug=1".into());
     WebviewWindowBuilder::new(&app, "debug", url)
-        .title("ClaudePrism — Debug")
+        .title("Codex-Prism — Debug")
         .inner_size(560.0, 700.0)
         .min_inner_size(400.0, 400.0)
         .zoom_hotkeys_enabled(true)
@@ -560,15 +559,17 @@ pub fn run() {
 
     #[allow(clippy::expect_used)]
     let app = tauri::Builder::default()
-        .plugin(tauri_plugin_updater::Builder::new().build())
+
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_process::init())
-        .manage(claude::ClaudeProcessState::default())
+        .manage(codex::CodexState::default())
+        .manage(projects::Projects::default())
         .manage(latex::LatexCompilerState::default())
         .manage(zotero::ZoteroOAuthState::default())
         .setup(|app| {
+            codex::recover(app.handle());
             // Safety net: force-show the main window after a timeout if the
             // frontend JS never calls `getCurrentWindow().show()`.
             // This prevents the window from staying permanently hidden when
@@ -596,48 +597,28 @@ pub fn run() {
             open_in_editor,
             js_log,
             read_clipboard_file_paths,
-            latex::compile_latex,
-            latex::synctex_edit,
             latex::detect_texlive,
-            claude::check_claude_status,
-            claude::install_claude_cli,
-            claude::login_claude,
-            claude::save_anthropic_api_key,
-            claude::verify_openai_compatible_api_key,
-            claude::list_openai_compatible_models,
-            claude::list_openai_compatible_credential_models,
-            claude::clear_anthropic_api_key,
-            claude::list_openai_compatible_credentials,
-            claude::delete_openai_compatible_credential,
-            claude::set_active_openai_compatible_credential,
-            claude::execute_claude_code,
-            claude::continue_claude_code,
-            claude::resume_claude_code,
-            claude::cancel_claude_execution,
-            claude::interrupt_claude_execution,
-            claude::run_shell_command,
-            claude::migrate_project_sessions,
-            claude::get_claude_fast_mode,
-            claude::set_claude_fast_mode,
-            claude::list_claude_sessions,
-            claude::generate_claude_session_title,
-            claude::load_session_history,
-            claude::delete_claude_session,
+            services::project_service,
+            projects::project_register,
+            projects::project_relocate,
+            projects::project_rename,
+            projects::project_list,
+            projects::project_mutate,
+            projects::project_read,
+            projects::project_write,
+            codex::codex_status,
+            codex::codex_set_path,
+            codex::codex_account,
+            codex::codex_sessions,
+            codex::codex_thread,
+            codex::codex_send,
+            codex::codex_control,
+            codex::codex_respond,
+            codex::project_review,
+            codex::project_resolve_review,
             zotero::zotero_start_oauth,
             zotero::zotero_complete_oauth,
             zotero::zotero_cancel_oauth,
-            history::history_init,
-            history::history_snapshot,
-            history::history_list,
-            history::history_diff,
-            history::history_file_at,
-            history::history_restore,
-            history::history_add_label,
-            history::history_remove_label,
-            slash_commands::slash_commands_list,
-            slash_commands::slash_command_get,
-            slash_commands::slash_command_save,
-            slash_commands::slash_command_delete,
             skills::install_scientific_skills,
             skills::install_scientific_skills_global,
             skills::import_skill_from_folder,
@@ -649,8 +630,6 @@ pub fn run() {
             skills::get_skill_content,
             uv::check_uv_status,
             uv::install_uv,
-            uv::setup_project_venv,
-            uv::uv_add_packages,
             uv::uv_run_command,
             get_system_info,
             open_debug_window,
@@ -704,24 +683,18 @@ pub fn run() {
                 }
             }
             tauri::RunEvent::WindowEvent {
-                label,
+                label: _,
                 event: tauri::WindowEvent::Destroyed,
                 ..
             } => {
-                // Kill Claude process associated with this window
-                let claude_state = app_handle.state::<claude::ClaudeProcessState>();
-                let label_clone = label.clone();
-                let state_clone = claude_state.inner().clone();
-                tauri::async_runtime::spawn(async move {
-                    claude::kill_process_for_window(&state_clone, &label_clone).await;
-                });
-
                 // Quit the app when the last window is closed
                 if app_handle.webview_windows().is_empty() {
                     app_handle.exit(0);
                 }
             }
             tauri::RunEvent::ExitRequested { .. } => {
+                let handle = app_handle.clone();
+                tauri::async_runtime::block_on(codex::shutdown(&handle));
                 // Clean up LaTeX build temp directories
                 let latex_state = app_handle.state::<latex::LatexCompilerState>();
                 let state_clone = latex_state.inner().clone();

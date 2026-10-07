@@ -1,5 +1,5 @@
 {
-  "name": "@claude-prism/root",
+  "name": "@codex-prism/root",
   "description": "Open-Source AI LaTeX writing workspace",
   "version": "1.3.0",
   "repository": {
@@ -12,7 +12,6 @@
     "packages/*"
   ],
   "scripts": {
-    "dev:web": "pnpm turbo dev --filter=@claude-prism/web --filter=@claude-prism/latex-api",
     "dev:desktop": "node scripts/dev-desktop.mjs",
     "build:desktop": "node scripts/build-desktop.mjs",
     "lint": "pnpm exec biome check",

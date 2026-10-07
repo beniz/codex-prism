@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "@/lib/backend";
 import { BugIcon, CopyIcon, TrashIcon, CheckIcon } from "lucide-react";
 import {
   useLogStore,

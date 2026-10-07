@@ -1,17 +1,7 @@
-import {
-  readTextFile,
-  writeTextFile,
-  readDir,
-  exists,
-  mkdir,
-  readFile,
-  copyFile,
-  remove,
-  rename,
-  stat,
-} from "@tauri-apps/plugin-fs";
+import { exists, readFile } from "@tauri-apps/plugin-fs";
 import { join } from "@tauri-apps/api/path";
-import { convertFileSrc } from "@tauri-apps/api/core";
+import { convertFileSrc } from "@/lib/backend";
+import { backend, type Project, type FileRef } from "@/lib/backend";
 import { createLogger } from "@/lib/debug/logger";
 
 const log = createLogger("fs");
@@ -26,7 +16,7 @@ export type ProjectFileType =
 
 export interface FsProjectFile {
   relativePath: string;
-  absolutePath: string;
+  ref: FileRef;
   type: ProjectFileType;
   fileSize: number;
 }
@@ -122,71 +112,99 @@ export interface ScanResult {
   folders: string[]; // relative paths of all directories
 }
 
-export async function scanProjectFolder(rootPath: string): Promise<ScanResult> {
-  const files: FsProjectFile[] = [];
-  const folders: string[] = [];
-
-  async function walk(dir: string, prefix: string) {
-    const entries = await readDir(dir);
-    for (const entry of entries) {
-      const entryPath = await join(dir, entry.name);
-      const relativePath = prefix ? `${prefix}/${entry.name}` : entry.name;
-
-      if (entry.isDirectory) {
-        // Skip hidden directories and common non-project dirs
-        if (shouldSkipProjectDirectory(entry.name)) {
-          continue;
-        }
-        folders.push(relativePath);
-        await walk(entryPath, relativePath);
-      } else {
-        const type = getProjectFileType(entry.name);
-        if (type) {
-          // Only stat files that may be skipped by the large-file threshold
-          // (image and other). tex/bib/style are always loaded, pdf is always lazy.
-          let fileSize = 0;
-          if (type === "image" || type === "other") {
-            try {
-              const info = await stat(entryPath);
-              fileSize = info.size;
-            } catch {
-              /* stat failed — treat as 0 */
-            }
-          }
-          files.push({
-            relativePath,
-            absolutePath: entryPath,
-            type,
-            fileSize,
-          });
-        }
-      }
-    }
+const projects = new Map<string, Project>();
+const revisions = new Map<string, string | null>();
+export async function registerProjectRoot(root: string) {
+  const project = await backend.projects.register(root);
+  for(const [key,value] of projects) if(value.id===project.id) projects.delete(key);
+  projects.set(root.replace(/[\\/]+$/, ""), project);
+  return project;
+}
+function refFor(path: string | FileRef): FileRef {
+  if (typeof path !== "string") return path;
+  const entries = [...projects.entries()].sort(
+    (a, b) => b[0].length - a[0].length,
+  );
+  for (const [root, project] of entries) {
+    if (
+      path === root ||
+      path.startsWith(root + "/") ||
+      path.startsWith(root + "\\")
+    )
+      return {
+        projectId: project.id,
+        path: path
+          .slice(root.length)
+          .replace(/^[\\/]+/, "")
+          .replace(/\\/g, "/"),
+      };
   }
-
-  await walk(rootPath, "");
-  log.info(`Scanned project: ${files.length} files, ${folders.length} folders`);
-  return { files, folders };
+  throw new Error("File is not in a registered project");
 }
-
+export async function scanProjectFolder(rootPath: string): Promise<ScanResult> {
+  const project = await registerProjectRoot(rootPath);
+  const result = await backend.files.list(project.id);
+  return {
+    folders: result.folders,
+    files: result.files.flatMap((f) => {
+      const type = getProjectFileType(f.path);
+      return type
+        ? [
+            {
+              relativePath: f.path,
+              ref: { projectId: project.id, path: f.path },
+              type,
+              fileSize: f.size,
+            },
+          ]
+        : [];
+    }),
+  };
+}
+function revisionKey(ref: FileRef) {
+  return `${ref.projectId}:${ref.path}`;
+}
+export async function readProjectBytes(
+  path: string | FileRef,
+): Promise<Uint8Array> {
+  const ref = refFor(path);
+  const file = await backend.files.read(ref);
+  revisions.set(revisionKey(ref), file.revision);
+  return new Uint8Array(file.bytes);
+}
+export async function writeProjectBytes(
+  path: string | FileRef,
+  bytes: Uint8Array,
+): Promise<void> {
+  const ref = refFor(path),
+    key = revisionKey(ref);
+  if (!revisions.has(key)) throw new Error("Read the file before updating it");
+  const revision = await backend.files.write(
+    ref,
+    [...bytes],
+    revisions.get(key)!,
+  );
+  revisions.set(key, revision);
+}
 export async function readTexFileContent(
-  absolutePath: string,
+  path: string | FileRef,
 ): Promise<string> {
-  return readTextFile(absolutePath);
+  return new TextDecoder("utf-8", { fatal: true }).decode(
+    await readProjectBytes(path),
+  );
 }
-
 export async function writeTexFileContent(
-  absolutePath: string,
+  path: string | FileRef,
   content: string,
 ): Promise<void> {
-  return writeTextFile(absolutePath, content);
+  await writeProjectBytes(path, new TextEncoder().encode(content));
 }
-
 export async function readImageAsDataUrl(
-  absolutePath: string,
+  absolutePath: string | FileRef,
 ): Promise<string> {
-  const data = await readFile(absolutePath);
-  const ext = absolutePath.split(".").pop()?.toLowerCase() || "png";
+  const data = await readProjectBytes(absolutePath);
+  const ext =
+    refFor(absolutePath).path.split(".").pop()?.toLowerCase() || "png";
   const mimeMap: Record<string, string> = {
     png: "image/png",
     jpg: "image/jpeg",
@@ -206,27 +224,26 @@ export async function readImageAsDataUrl(
   return `data:${mime};base64,${base64}`;
 }
 
-export function getAssetUrl(absolutePath: string): string {
-  return convertFileSrc(absolutePath);
+export function getAssetUrl(ref: FileRef): string {
+  const project = [...projects.values()].find((p) => p.id === ref.projectId);
+  if (!project) throw new Error("Unknown project");
+  return convertFileSrc(`${project.root}/${ref.path}`);
 }
 
 export async function createFileOnDisk(
   rootPath: string,
   name: string,
   content: string,
-): Promise<string> {
+): Promise<FileRef> {
   const fullPath = await join(rootPath, name);
-  // Ensure parent directory exists
-  const lastSep = Math.max(
-    fullPath.lastIndexOf("/"),
-    fullPath.lastIndexOf("\\"),
+  const ref = refFor(fullPath);
+  const revision = await backend.files.write(
+    ref,
+    [...new TextEncoder().encode(content)],
+    null,
   );
-  const parentDir = lastSep > 0 ? fullPath.substring(0, lastSep) : "";
-  if (parentDir && !(await exists(parentDir))) {
-    await mkdir(parentDir, { recursive: true });
-  }
-  await writeTextFile(fullPath, content);
-  return fullPath;
+  revisions.set(revisionKey(ref), revision);
+  return ref;
 }
 
 /**
@@ -261,46 +278,43 @@ export async function copyFileToProject(
   sourcePath: string,
   targetName: string,
 ): Promise<string> {
+  await registerProjectRoot(rootPath);
   // Auto-deduplicate filename
   const uniqueName = await getUniqueTargetName(rootPath, targetName);
   const fullPath = await join(rootPath, uniqueName);
-  // Ensure parent directory exists (e.g., attachments/)
-  const lastSlash = Math.max(
-    fullPath.lastIndexOf("/"),
-    fullPath.lastIndexOf("\\"),
-  );
-  if (lastSlash > 0) {
-    const parentDir = fullPath.substring(0, lastSlash);
-    if (!(await exists(parentDir))) {
-      await mkdir(parentDir, { recursive: true });
-    }
-  }
-  await copyFile(sourcePath, fullPath);
+  const bytes = await readFile(sourcePath);
+  await backend.files.write(refFor(fullPath), [...bytes], null);
   return uniqueName;
 }
 
-export async function deleteFileFromDisk(absolutePath: string): Promise<void> {
+export async function deleteFileFromDisk(
+  absolutePath: string | FileRef,
+): Promise<void> {
   log.debug(`Deleting file: ${absolutePath}`);
-  await remove(absolutePath);
+  await backend.files.mutate(refFor(absolutePath), "delete");
 }
 
 export async function deleteFolderFromDisk(
-  absolutePath: string,
+  absolutePath: string | FileRef,
 ): Promise<void> {
   log.debug(`Deleting folder: ${absolutePath}`);
-  await remove(absolutePath, { recursive: true });
+  await backend.files.mutate(refFor(absolutePath), "delete");
 }
 
 export async function renameFileOnDisk(
-  oldPath: string,
-  newPath: string,
+  oldPath: string | FileRef,
+  newPath: string | FileRef,
 ): Promise<void> {
   log.debug(`Renaming: ${oldPath} → ${newPath}`);
-  await rename(oldPath, newPath);
+  await backend.files.mutate(refFor(oldPath), "rename", refFor(newPath).path);
+  const oldKey = revisionKey(refFor(oldPath)),
+    newKey = revisionKey(refFor(newPath));
+  if (revisions.has(oldKey)) revisions.set(newKey, revisions.get(oldKey)!);
+  revisions.delete(oldKey);
 }
 
 export async function createDirectory(absolutePath: string): Promise<void> {
-  await mkdir(absolutePath, { recursive: true });
+  await backend.files.mutate(refFor(absolutePath), "mkdir");
 }
 
 export { exists, join };

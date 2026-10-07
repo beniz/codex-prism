@@ -29,7 +29,7 @@ fn find_uv_binary() -> Result<String, String> {
         ];
         #[cfg(target_os = "windows")]
         let user_paths = vec![
-            // uv's default install location (same as Claude Code)
+            // uv's default install location (same as Codex)
             home.join(".local").join("bin").join("uv.exe"),
             home.join(".cargo").join("bin").join("uv.exe"),
             // %LOCALAPPDATA%\uv\bin\uv.exe
@@ -316,14 +316,6 @@ pub async fn install_uv(window: WebviewWindow) -> Result<(), String> {
 
     cmd.stdout(std::process::Stdio::piped());
     cmd.stderr(std::process::Stdio::piped());
-
-    // Inherit essential environment variables (shared helper handles case-insensitive matching)
-    for (key, value) in std::env::vars() {
-        if key.eq_ignore_ascii_case("PATH") || crate::claude::is_essential_env_var(&key) {
-            cmd.env(&key, &value);
-        }
-    }
-    crate::claude::apply_proxy_env_to_command(&mut cmd, Some(&window));
 
     let mut child = cmd
         .spawn()

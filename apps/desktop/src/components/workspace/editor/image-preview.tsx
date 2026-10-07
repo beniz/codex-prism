@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { CheckIcon, XIcon } from "lucide-react";
-import { writeFile } from "@tauri-apps/plugin-fs";
+import { writeProjectBytes } from "@/lib/tauri/fs";
 import { toast } from "sonner";
 import { useDocumentStore, type ProjectFile } from "@/stores/document-store";
 import { LOCAL_ZOOM_SHORTCUTS_ATTR } from "@/lib/app-zoom";
@@ -330,7 +330,7 @@ export function ImagePreview({
       const bytes = new Uint8Array(binary.length);
       for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
 
-      await writeFile(file.absolutePath, bytes);
+      await writeProjectBytes(file.ref, bytes);
 
       // Update store
       useDocumentStore.getState().updateImageDataUrl(file.id, dataUrl);
@@ -346,7 +346,7 @@ export function ImagePreview({
   }, [cropRect, file, isSaving, onCropModeChange]);
 
   // Use dataUrl if available (in-memory), otherwise fall back to asset URL (large images)
-  const imageSrc = file.dataUrl || getAssetUrl(file.absolutePath);
+  const imageSrc = file.dataUrl || getAssetUrl(file.ref);
   // Crop requires dataUrl (canvas manipulation needs same-origin data)
   const _canCrop = !!file.dataUrl;
 

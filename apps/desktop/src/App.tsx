@@ -4,12 +4,12 @@ import { Toaster } from "@/components/ui/sonner";
 import { useKeyboardShortcuts } from "@/hooks/use-keyboard-shortcuts";
 
 import { useDocumentStore } from "@/stores/document-store";
-import { useClaudeChatStore } from "@/stores/claude-chat-store";
+import { useAgentChatStore } from "@/stores/agent-chat-store";
 import { ProjectPicker } from "@/components/project-picker";
 import { WorkspaceLayout } from "@/components/workspace/workspace-layout";
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
-import { getCurrentWindow } from "@tauri-apps/api/window";
+import { invoke, backend } from "@/lib/backend";
+import { getCurrentWindow } from "@/lib/backend/desktop-host";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { useUvSetupStore } from "@/stores/uv-setup-store";
 import { ErrorFallback } from "@/components/error-fallback";
@@ -24,7 +24,7 @@ const LazyDebugPage = lazy(() =>
   })),
 );
 
-interface ClaudeSessionInfo {
+interface AgentSessionInfo {
   session_id: string;
   title: string;
   last_modified: number;
@@ -75,7 +75,7 @@ function NativeWindowThemeBridge() {
   return null;
 }
 
-function WorkspaceWithClaude() {
+function WorkspaceWithAgent() {
   const projectRoot = useDocumentStore((s) => s.projectRoot);
   const initialized = useDocumentStore((s) => s.initialized);
   const autoResumedProjectRef = useRef<string | null>(null);
@@ -84,15 +84,15 @@ function WorkspaceWithClaude() {
   // Update window title
   useEffect(() => {
     if (projectRoot) {
-      const name = projectRoot.split(/[/\\]/).pop() || "ClaudePrism";
-      getCurrentWindow().setTitle(`${name} - ClaudePrism`);
+      const name = projectRoot.split(/[/\\]/).pop() || "Codex-Prism";
+      getCurrentWindow().setTitle(`${name} - Codex-Prism`);
     }
   }, [projectRoot]);
 
   useEffect(() => {
     if (chatProjectRef.current === projectRoot) return;
     chatProjectRef.current = projectRoot;
-    useClaudeChatStore.getState().resetForProject(projectRoot ?? null);
+    useAgentChatStore.getState().resetForProject(projectRoot ?? null);
   }, [projectRoot]);
 
   // Auto-setup Python venv when project opens
@@ -121,23 +121,20 @@ function WorkspaceWithClaude() {
     if (!initialized) return;
     if (autoResumedProjectRef.current === projectRoot) return;
 
-    const chatState = useClaudeChatStore.getState();
+    const chatState = useAgentChatStore.getState();
     if (chatState.pendingInitialPrompt) return;
 
     autoResumedProjectRef.current = projectRoot;
     let cancelled = false;
 
-    invoke<ClaudeSessionInfo[]>("list_claude_sessions", {
-      projectPath: projectRoot,
-      generateTitles: false,
-    })
+    backend.projects.register(projectRoot).then(p => backend.agent.sessions(p.id)).then(sessions => sessions.map(s => ({session_id:s.id,title:s.title,last_modified:0})))
       .then((sessions) => {
         if (cancelled) return;
         const latest = sessions
           .slice()
           .sort((a, b) => b.last_modified - a.last_modified)[0];
 
-        const current = useClaudeChatStore.getState();
+        const current = useAgentChatStore.getState();
         if (current.pendingInitialPrompt || current.isStreaming) {
           return;
         }
@@ -168,13 +165,13 @@ function WorkspaceWithClaude() {
   // Consume pending initial prompt from project wizard
   useEffect(() => {
     if (!initialized) return;
-    // Delay to let ClaudeChatDrawer mount and register event listeners
+    // Delay to let AgentChatDrawer mount and register event listeners
     const timer = setTimeout(() => {
-      const prompt = useClaudeChatStore
+      const prompt = useAgentChatStore
         .getState()
         .consumePendingInitialPrompt();
       if (prompt) {
-        useClaudeChatStore.getState().sendPrompt(prompt);
+        useAgentChatStore.getState().sendPrompt(prompt);
       }
     }, 500);
     return () => clearTimeout(timer);
@@ -208,7 +205,7 @@ export function App({ onReady }: { onReady?: () => void }) {
 
   useEffect(() => {
     if (!projectRoot) {
-      getCurrentWindow().setTitle("ClaudePrism");
+      getCurrentWindow().setTitle("Codex-Prism");
     }
   }, [projectRoot]);
 
@@ -229,7 +226,7 @@ export function App({ onReady }: { onReady?: () => void }) {
             data-tauri-drag-region
             className="fixed inset-x-0 top-0 z-[9999] h-[var(--titlebar-height)]"
           />
-          {projectRoot ? <WorkspaceWithClaude /> : <ProjectPicker />}
+          {projectRoot ? <WorkspaceWithAgent /> : <ProjectPicker />}
           <EnvironmentOnboarding />
           {showDebug && (
             <div className="fixed inset-0 z-[9998] flex items-end justify-center">

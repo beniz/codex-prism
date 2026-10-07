@@ -6,8 +6,8 @@ import {
   useRef,
   useState,
 } from "react";
-import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
+import { invoke } from "@/lib/backend";
+import { listen } from "@/lib/backend";
 import { open as shellOpen } from "@tauri-apps/plugin-shell";
 import {
   AlertCircleIcon,
@@ -29,8 +29,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { ClaudeSetup } from "@/components/claude-setup";
-import { useClaudeSetupStore } from "@/stores/claude-setup-store";
+import { AgentSetup } from "@/components/agent-setup";
+import { useAgentSetupStore } from "@/stores/agent-setup-store";
 import { useUvSetupStore } from "@/stores/uv-setup-store";
 import { cn } from "@/lib/utils";
 
@@ -55,17 +55,12 @@ export function EnvironmentOnboarding() {
   const [SkillsOnboardingComponent, setSkillsOnboardingComponent] =
     useState<ComponentType<{ onClose: () => void }> | null>(null);
 
-  const claudeStatus = useClaudeSetupStore((s) => s.status);
-  const claudeVersion = useClaudeSetupStore((s) => s.version);
-  const claudeError = useClaudeSetupStore((s) => s.error);
-  const isClaudeInstalling = useClaudeSetupStore((s) => s.isInstalling);
-  const providerKind = useClaudeSetupStore((s) => s.providerKind);
-  const claudeProviderConfigured = useClaudeSetupStore(
-    (s) => s.claudeProviderConfigured,
-  );
-  const openAiCredentials = useClaudeSetupStore((s) => s.openAiCredentials);
-  const checkClaudeStatus = useClaudeSetupStore((s) => s.checkStatus);
-  const installClaude = useClaudeSetupStore((s) => s.install);
+  const codexStatus = useAgentSetupStore((s) => s.status);
+  const codexVersion = useAgentSetupStore((s) => s.version);
+  const codexError = useAgentSetupStore((s) => s.error);
+  const isCodexInstalling = useAgentSetupStore((s) => s.isInstalling);
+  const checkCodexStatus = useAgentSetupStore((s) => s.checkStatus);
+  const installCodex = useAgentSetupStore((s) => s.install);
 
   const uvStatus = useUvSetupStore((s) => s.status);
   const uvVersion = useUvSetupStore((s) => s.version);
@@ -95,7 +90,7 @@ export function EnvironmentOnboarding() {
     let cancelled = false;
 
     Promise.allSettled([
-      checkClaudeStatus(),
+      checkCodexStatus(),
       checkUvStatus(),
       checkSkillsStatus(),
     ]).finally(() => {
@@ -107,7 +102,7 @@ export function EnvironmentOnboarding() {
     return () => {
       cancelled = true;
     };
-  }, [checkClaudeStatus, checkSkillsStatus, checkUvStatus]);
+  }, [checkCodexStatus, checkSkillsStatus, checkUvStatus]);
 
   useEffect(() => {
     const unlisten = listen<boolean>("uv-install-complete", (event) => {
@@ -119,21 +114,21 @@ export function EnvironmentOnboarding() {
     };
   }, [finishUvInstall]);
 
-  const isClaudeInstalled =
-    claudeStatus === "ready" || claudeStatus === "not-authenticated";
-  const isClaudeReady = claudeStatus === "ready";
+  const isCodexInstalled =
+    codexStatus === "ready" || codexStatus === "not-authenticated";
+  const isCodexReady = codexStatus === "ready";
   const isUvReady = uvStatus === "ready";
   const isSkillsReady = !!skillsStatus?.installed;
-  const claudeNeedsAttention =
-    isClaudeInstalling || (claudeStatus !== "checking" && !isClaudeReady);
+  const codexNeedsAttention =
+    isCodexInstalling || (codexStatus !== "checking" && !isCodexReady);
   const uvNeedsAttention =
     isUvInstalling || (uvStatus !== "checking" && !isUvReady);
   const skillsNeedsAttention =
     !skillsChecking && (!isSkillsReady || !!skillsError);
   const needsAttention =
-    claudeNeedsAttention || uvNeedsAttention || skillsNeedsAttention;
+    codexNeedsAttention || uvNeedsAttention || skillsNeedsAttention;
   const isCheckingSetup =
-    claudeStatus === "checking" || uvStatus === "checking" || skillsChecking;
+    codexStatus === "checking" || uvStatus === "checking" || skillsChecking;
   const setupComplete =
     initialCheckComplete && !needsAttention && !isCheckingSetup;
   const shouldShow =
@@ -174,28 +169,7 @@ export function EnvironmentOnboarding() {
     }
   };
 
-  const providerDetail = useMemo(() => {
-    if (!isClaudeInstalled) {
-      return "Install Claude Code before adding a provider";
-    }
-    if (!isClaudeReady) {
-      return "Add an API key or sign in";
-    }
-    const openAiProviderCount = Math.max(
-      openAiCredentials.length,
-      providerKind === "openai-compatible" ? 1 : 0,
-    );
-    const includesClaudeProvider =
-      claudeProviderConfigured || providerKind === "claude-code";
-    const count = openAiProviderCount + (includesClaudeProvider ? 1 : 0);
-    return `${count} provider${count === 1 ? "" : "s"} configured`;
-  }, [
-    claudeProviderConfigured,
-    isClaudeInstalled,
-    isClaudeReady,
-    openAiCredentials.length,
-    providerKind,
-  ]);
+  const providerDetail = isCodexReady ? "Connected to Codex" : "Connect your ChatGPT account";
 
   return (
     <>
@@ -209,12 +183,12 @@ export function EnvironmentOnboarding() {
           <div className="flex flex-col items-center px-6 pt-6 pb-4 text-center">
             <img
               src="/icon-192.png"
-              alt="ClaudePrism"
+              alt="Codex-Prism"
               className="size-14 object-contain"
             />
             <DialogHeader className="mt-3 items-center gap-1.5 text-center">
               <DialogTitle className="font-semibold text-xl">
-                ClaudePrism
+                Codex-Prism
               </DialogTitle>
               <DialogDescription className="max-w-sm text-sm leading-relaxed">
                 Set up the local tools and model provider required before
@@ -227,33 +201,33 @@ export function EnvironmentOnboarding() {
             <div className="space-y-1.5">
               <SetupItem
                 state={
-                  isClaudeInstalling || claudeStatus === "checking"
+                  isCodexInstalling || codexStatus === "checking"
                     ? "loading"
-                    : claudeStatus === "error"
+                    : codexStatus === "error"
                       ? "error"
-                      : isClaudeInstalled
+                      : isCodexInstalled
                         ? "ready"
                         : "blocked"
                 }
                 icon={TerminalIcon}
-                title="Claude Code"
+                title="Codex"
                 detail={
-                  isClaudeInstalling
+                  isCodexInstalling
                     ? "Installing..."
-                    : claudeStatus === "checking"
+                    : codexStatus === "checking"
                       ? "Checking..."
-                      : claudeStatus === "missing-git"
+                      : codexStatus === "missing-git"
                         ? "Git for Windows is required first"
-                        : claudeStatus === "not-installed"
+                        : codexStatus === "not-installed"
                           ? "Required for AI writing"
-                          : claudeStatus === "error"
-                            ? claudeError || "Installation needs attention"
-                            : claudeVersion
-                              ? `Installed ${claudeVersion}`
+                          : codexStatus === "error"
+                            ? codexError || "Installation needs attention"
+                            : codexVersion
+                              ? `Installed ${codexVersion}`
                               : "Installed"
                 }
                 action={
-                  claudeStatus === "missing-git"
+                  codexStatus === "missing-git"
                     ? {
                         label: "Git",
                         icon: GitBranchIcon,
@@ -261,18 +235,18 @@ export function EnvironmentOnboarding() {
                           shellOpen("https://git-scm.com/downloads/win");
                         },
                       }
-                    : claudeStatus === "not-installed" ||
-                        claudeStatus === "error"
+                    : codexStatus === "not-installed" ||
+                        codexStatus === "error"
                       ? {
-                          label: isClaudeInstalling ? "Installing" : "Install",
-                          icon: isClaudeInstalling ? Loader2Icon : DownloadIcon,
-                          loading: isClaudeInstalling,
-                          onClick: installClaude,
+                          label: "Configure",
+                          icon: isCodexInstalling ? Loader2Icon : DownloadIcon,
+                          loading: isCodexInstalling,
+                          onClick: () => setProviderDialogOpen(true),
                         }
                       : {
                           label: "Check",
                           icon: RefreshCwIcon,
-                          onClick: checkClaudeStatus,
+                          onClick: checkCodexStatus,
                         }
                 }
               />
@@ -318,11 +292,11 @@ export function EnvironmentOnboarding() {
 
               <SetupItem
                 state={
-                  claudeStatus === "checking"
+                  codexStatus === "checking"
                     ? "loading"
-                    : claudeStatus === "error"
+                    : codexStatus === "error"
                       ? "error"
-                      : isClaudeReady
+                      : isCodexReady
                         ? "ready"
                         : "blocked"
                 }
@@ -330,9 +304,9 @@ export function EnvironmentOnboarding() {
                 title="AI Provider"
                 detail={providerDetail}
                 action={
-                  isClaudeInstalled
+                  isCodexInstalled
                     ? {
-                        label: isClaudeReady ? "Manage" : "Configure",
+                        label: isCodexReady ? "Manage" : "Configure",
                         icon: KeyRoundIcon,
                         onClick: () => setProviderDialogOpen(true),
                       }
@@ -398,17 +372,17 @@ export function EnvironmentOnboarding() {
       <Dialog open={providerDialogOpen} onOpenChange={setProviderDialogOpen}>
         <DialogContent className="max-h-[85vh] w-[min(42rem,calc(100vw-2rem))] overflow-y-auto overflow-x-hidden sm:max-w-none">
           <DialogHeader>
-            <DialogTitle>Add AI Provider</DialogTitle>
+            <DialogTitle>Codex connection</DialogTitle>
             <DialogDescription>
-              Configure Anthropic or another model provider for this project.
+              Connect your installed Codex to your ChatGPT account.
             </DialogDescription>
           </DialogHeader>
-          <ClaudeSetup
+          <AgentSetup
             variant="provider-dialog"
             onCancel={() => setProviderDialogOpen(false)}
             onSaved={() => {
               setProviderDialogOpen(false);
-              checkClaudeStatus();
+              checkCodexStatus();
             }}
           />
         </DialogContent>

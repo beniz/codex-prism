@@ -28,7 +28,7 @@ import {
   TerminalIcon,
   type LucideIcon,
 } from "lucide-react";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "@/lib/backend";
 import {
   DndContext,
   DragOverlay,
@@ -45,7 +45,6 @@ import { useTheme } from "next-themes";
 import { useDocumentStore, type ProjectFile } from "@/stores/document-store";
 import { useHistoryStore } from "@/stores/history-store";
 import { cn } from "@/lib/utils";
-import { ZoteroPanel, ZoteroHeader } from "@/components/workspace/zotero-panel";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -75,8 +74,8 @@ import {
   HoverCardTrigger,
 } from "@/components/ui/hover-card";
 import { Input } from "@/components/ui/input";
-import { open as openDialog } from "@tauri-apps/plugin-dialog";
-import { getCurrentWebview } from "@tauri-apps/api/webview";
+import { open as openDialog } from "@/lib/backend/desktop-host";
+import { getCurrentWebview } from "@/lib/backend/desktop-host";
 import { useUvSetupStore } from "@/stores/uv-setup-store";
 import { UvSetupDialog } from "@/components/uv-setup";
 import { createLogger } from "@/lib/debug/logger";
@@ -1171,16 +1170,6 @@ export function Sidebar({
           size="icon"
           className="size-7 transition-transform duration-300 ease-in-out hover:scale-105"
           onClick={onToggleCollapsed}
-          title="Zotero"
-          aria-label="Expand Zotero"
-        >
-          <FileTextIcon className="size-3.5" />
-        </Button>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="size-7 transition-transform duration-300 ease-in-out hover:scale-105"
-          onClick={onToggleCollapsed}
           title="Environment"
           aria-label="Expand Environment"
         >
@@ -1269,7 +1258,7 @@ export function Sidebar({
           {/* Resizable sections */}
           <PanelGroup direction="vertical" className="min-h-0 flex-1">
             {/* Files */}
-            <Panel defaultSize={50} minSize={15}>
+            <Panel defaultSize={70} minSize={15}>
               <div
                 ref={sidebarFilesRef}
                 className="flex h-full flex-col"
@@ -1404,7 +1393,7 @@ export function Sidebar({
             <PanelResizeHandle className="h-px bg-sidebar-border transition-colors hover:bg-ring data-resize-handle-active:bg-ring" />
 
             {/* Outline */}
-            <Panel defaultSize={20} minSize={10}>
+            <Panel defaultSize={30} minSize={10}>
               <div className="flex h-full flex-col">
                 <div className="flex h-8 shrink-0 items-center justify-center gap-2 px-3">
                   <ListIcon className="size-3.5 text-muted-foreground" />
@@ -1434,19 +1423,6 @@ export function Sidebar({
               </div>
             </Panel>
 
-            <PanelResizeHandle className="h-px bg-sidebar-border transition-colors hover:bg-ring data-resize-handle-active:bg-ring" />
-
-            {/* Zotero */}
-            <Panel defaultSize={15} minSize={10}>
-              <div className="flex h-full flex-col">
-                <div className="flex h-8 shrink-0 items-center">
-                  <ZoteroHeader />
-                </div>
-                <div className="min-h-0 flex-1 overflow-hidden">
-                  <ZoteroPanel />
-                </div>
-              </div>
-            </Panel>
           </PanelGroup>
 
           {/* Environment section — Python + Skills */}
@@ -1454,7 +1430,7 @@ export function Sidebar({
 
           {/* Footer */}
           <div className="flex h-9 items-center justify-between border-sidebar-border border-t px-3 text-muted-foreground text-xs">
-            <span className="truncate">ClaudePrism v{appVersion}</span>
+            <span className="truncate">Codex-Prism v{appVersion}</span>
             <div className="flex shrink-0 items-center gap-1">
               <Button variant="ghost" size="icon" className="size-6" asChild>
                 <a

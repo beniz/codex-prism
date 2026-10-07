@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "@/lib/backend";
 import { createLogger } from "@/lib/debug/logger";
 
 const log = createLogger("history");

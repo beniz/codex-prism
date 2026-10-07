@@ -7,7 +7,7 @@ import {
 } from "react";
 import { LoaderIcon } from "lucide-react";
 import { open as shellOpen } from "@tauri-apps/plugin-shell";
-import { ask } from "@tauri-apps/plugin-dialog";
+import { ask } from "@/lib/backend/desktop-host";
 import {
   getCachedDocument,
   getOrOpenDocument,

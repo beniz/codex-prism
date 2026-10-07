@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke, backend, type FileRef } from "@/lib/backend";
 import {
   scanProjectFolder,
   readTexFileContent,
@@ -17,7 +17,7 @@ import {
   type ProjectFileType,
 } from "@/lib/tauri/fs";
 import { useHistoryStore } from "@/stores/history-store";
-import { useClaudeChatStore } from "@/stores/claude-chat-store";
+import { useAgentChatStore } from "@/stores/agent-chat-store";
 import { clearDocCache } from "@/lib/mupdf/pdf-doc-cache";
 import { clearScrollPositionCache } from "@/components/workspace/preview/pdf-viewer";
 import { clearZoomCache } from "@/components/workspace/preview/pdf-preview";
@@ -32,7 +32,7 @@ export interface ProjectFile {
   id: string; // relativePath is the id
   name: string;
   relativePath: string;
-  absolutePath: string;
+  ref: FileRef;
   type: ProjectFileType;
   content?: string;
   dataUrl?: string;
@@ -75,6 +75,7 @@ export function clearPdfBytesCache() {
 }
 
 interface DocumentState {
+  projectId: string | null;
   projectRoot: string | null;
   files: ProjectFile[];
   folders: string[];
@@ -353,6 +354,7 @@ function scheduleAutoSave() {
 }
 
 export const useDocumentStore = create<DocumentState>()((set, get) => ({
+  projectId: null,
   projectRoot: null,
   files: [],
   folders: [],
@@ -373,6 +375,8 @@ export const useDocumentStore = create<DocumentState>()((set, get) => ({
 
   openProject: async (rootPath: string) => {
     log.info(`Opening project: ${rootPath}`);
+    const project = await backend.projects.register(rootPath);
+    set({ projectId: project.id });
     await invoke("allow_project_directory", { rootPath });
     const { files: fsFiles, folders: fsFolders } =
       await scanProjectFolder(rootPath);
@@ -383,7 +387,7 @@ export const useDocumentStore = create<DocumentState>()((set, get) => ({
         id: f.relativePath,
         name: f.relativePath.split(/[/\\]/).pop() || f.relativePath,
         relativePath: f.relativePath,
-        absolutePath: f.absolutePath,
+        ref: f.ref,
         type: f.type,
         isDirty: false,
         fileSize: f.fileSize,
@@ -400,7 +404,7 @@ export const useDocumentStore = create<DocumentState>()((set, get) => ({
           f.type === "other" && f.fileSize > LARGE_FILE_THRESHOLD;
         if (!isLargeNonEssential) {
           try {
-            pf.content = await readTexFileContent(f.absolutePath);
+            pf.content = await readTexFileContent(f.ref);
           } catch {
             pf.content = "";
           }
@@ -412,7 +416,7 @@ export const useDocumentStore = create<DocumentState>()((set, get) => ({
       if (f.type === "image") {
         if (f.fileSize <= LARGE_FILE_THRESHOLD) {
           try {
-            pf.dataUrl = await readImageAsDataUrl(f.absolutePath);
+            pf.dataUrl = await readImageAsDataUrl(f.ref);
           } catch {
             // Image loading failed, that's ok
           }
@@ -456,6 +460,7 @@ export const useDocumentStore = create<DocumentState>()((set, get) => ({
   },
 
   renameProject: async (newName: string) => {
+    if (useAgentChatStore.getState().locked) return;
     const state = get();
     if (!state.projectRoot) throw new Error("No project open");
 
@@ -469,16 +474,14 @@ export const useDocumentStore = create<DocumentState>()((set, get) => ({
     }
     await waitForCompileToFinish(get);
 
-    const chatState = useClaudeChatStore.getState();
+    const chatState = useAgentChatStore.getState();
     const streamingTabs =
       "tabs" in chatState && Array.isArray(chatState.tabs)
         ? chatState.tabs.filter((tab) => tab.isStreaming)
         : [];
     if (streamingTabs.length > 0) {
       await Promise.all(
-        streamingTabs.map((tab) =>
-          invoke("cancel_claude_execution", { tabId: tab.id }).catch(() => {}),
-        ),
+        streamingTabs.map((tab) => chatState.cancelExecution().catch(() => {})),
       );
       await sleep(250);
     }
@@ -505,19 +508,8 @@ export const useDocumentStore = create<DocumentState>()((set, get) => ({
     await clearDocCache();
     await sleep(150);
 
-    await renameProjectRootWithRetry(oldRoot, newRoot);
-    try {
-      await invoke("migrate_project_sessions", {
-        oldProjectPath: oldRoot,
-        newProjectPath: newRoot,
-      });
-    } catch (err) {
-      log.warn("Failed to migrate project sessions after rename", {
-        oldRoot,
-        newRoot,
-        error: String(err),
-      });
-    }
+    const registered = await backend.projects.register(oldRoot);
+    await backend.projects.rename(registered.id, newName);
     const projectStore = useProjectStore.getState();
     projectStore.renameRecentProject(oldRoot, newRoot);
     projectStore.setLastProjectFolder(splitProjectRoot(newRoot).parentPath);
@@ -548,7 +540,7 @@ export const useDocumentStore = create<DocumentState>()((set, get) => ({
       initialized: false,
     });
     // Reset chat session so stale messages don't leak into the next project
-    useClaudeChatStore.getState().newSession();
+    useAgentChatStore.getState().newSession();
   },
 
   setActiveFile: (id) => {
@@ -591,12 +583,13 @@ export const useDocumentStore = create<DocumentState>()((set, get) => ({
   },
 
   deleteFile: async (id) => {
+    if (useAgentChatStore.getState().locked) return;
     const state = get();
     if (state.files.length <= 1) return;
     const file = state.files.find((f) => f.id === id);
     if (file) {
       try {
-        await deleteFileFromDisk(file.absolutePath);
+        await deleteFileFromDisk(file.ref);
       } catch (e) {
         log.error("Failed to delete file from disk", { error: String(e) });
       }
@@ -632,6 +625,7 @@ export const useDocumentStore = create<DocumentState>()((set, get) => ({
   },
 
   deleteFolder: async (folderPath) => {
+    if (useAgentChatStore.getState().locked) return;
     const state = get();
     if (!state.projectRoot) return;
     const prefix = `${folderPath}/`;
@@ -694,6 +688,7 @@ export const useDocumentStore = create<DocumentState>()((set, get) => ({
   },
 
   renameFile: async (id, name) => {
+    if (useAgentChatStore.getState().locked) return;
     const state = get();
     const file = state.files.find((f) => f.id === id);
     if (!file || !state.projectRoot) return;
@@ -705,7 +700,7 @@ export const useDocumentStore = create<DocumentState>()((set, get) => ({
 
     const newAbsPath = await join(state.projectRoot, newRelativePath);
     try {
-      await renameFileOnDisk(file.absolutePath, newAbsPath);
+      await renameFileOnDisk(file.ref, newAbsPath);
     } catch (e) {
       log.error("Failed to rename file on disk", { error: String(e) });
       return;
@@ -730,7 +725,7 @@ export const useDocumentStore = create<DocumentState>()((set, get) => ({
                 ...f,
                 name,
                 relativePath: newRelativePath,
-                absolutePath: newAbsPath,
+                ref: { projectId: state.projectId!, path: newRelativePath },
                 id: newRelativePath,
               }
             : f,
@@ -743,6 +738,7 @@ export const useDocumentStore = create<DocumentState>()((set, get) => ({
   },
 
   updateFileContent: (id, content) => {
+    if (useAgentChatStore.getState().locked) return;
     set((state) => ({
       files: state.files.map((f) =>
         f.id === id ? { ...f, content, isDirty: true } : f,
@@ -753,6 +749,7 @@ export const useDocumentStore = create<DocumentState>()((set, get) => ({
   },
 
   updateImageDataUrl: (id, dataUrl) => {
+    if (useAgentChatStore.getState().locked) return;
     set((state) => ({
       files: state.files.map((f) => (f.id === id ? { ...f, dataUrl } : f)),
     }));
@@ -820,6 +817,7 @@ export const useDocumentStore = create<DocumentState>()((set, get) => ({
   setCursorPosition: (position) => set({ cursorPosition: position }),
 
   insertAtCursor: (text) => {
+    if (useAgentChatStore.getState().locked) return;
     const state = get();
     const activeFile = getActiveFile(state);
     if (!activeFile || activeFile.type === "image" || activeFile.type === "pdf")
@@ -841,6 +839,7 @@ export const useDocumentStore = create<DocumentState>()((set, get) => ({
   },
 
   replaceSelection: (start, end, text) => {
+    if (useAgentChatStore.getState().locked) return;
     const state = get();
     const activeFile = getActiveFile(state);
     if (!activeFile || activeFile.type === "image" || activeFile.type === "pdf")
@@ -860,6 +859,7 @@ export const useDocumentStore = create<DocumentState>()((set, get) => ({
   },
 
   findAndReplace: (find, replace) => {
+    if (useAgentChatStore.getState().locked) return false;
     const state = get();
     const activeFile = getActiveFile(state);
     if (!activeFile || activeFile.type === "image" || activeFile.type === "pdf")
@@ -882,23 +882,25 @@ export const useDocumentStore = create<DocumentState>()((set, get) => ({
   setInitialized: () => set({ initialized: true }),
 
   saveFile: async (id) => {
+    if (useAgentChatStore.getState().locked) return;
     const state = get();
     const file = state.files.find((f) => f.id === id);
     if (!file || !file.isDirty || file.content == null) return;
 
-    await writeTexFileContent(file.absolutePath, file.content);
+    await writeTexFileContent(file.ref, file.content);
     set((s) => ({
       files: s.files.map((f) => (f.id === id ? { ...f, isDirty: false } : f)),
     }));
   },
 
   saveAllFiles: async () => {
+    if (useAgentChatStore.getState().locked) return;
     const state = get();
     const dirtyFiles = state.files.filter(
       (f) => f.isDirty && f.content != null,
     );
     const results = await Promise.allSettled(
-      dirtyFiles.map((f) => writeTexFileContent(f.absolutePath, f.content!)),
+      dirtyFiles.map((f) => writeTexFileContent(f.ref, f.content!)),
     );
     // Only mark successfully saved files as clean
     const savedIds = new Set<string>();
@@ -915,6 +917,7 @@ export const useDocumentStore = create<DocumentState>()((set, get) => ({
   },
 
   saveCurrentFile: async () => {
+    if (useAgentChatStore.getState().locked) return;
     const state = get();
     await state.saveFile(state.activeFileId);
     // Manual save → immediate snapshot
@@ -930,6 +933,7 @@ export const useDocumentStore = create<DocumentState>()((set, get) => ({
   },
 
   createNewFile: async (name, type, folder) => {
+    if (useAgentChatStore.getState().locked) return;
     const state = get();
     if (!state.projectRoot) return;
 
@@ -952,7 +956,7 @@ export const useDocumentStore = create<DocumentState>()((set, get) => ({
           id: relativePath,
           name,
           relativePath,
-          absolutePath: fullPath,
+          ref: fullPath,
           type,
           content: type !== "image" ? content : undefined,
           isDirty: false,
@@ -963,6 +967,7 @@ export const useDocumentStore = create<DocumentState>()((set, get) => ({
   },
 
   createFolder: async (name, parentFolder) => {
+    if (useAgentChatStore.getState().locked) return;
     const state = get();
     if (!state.projectRoot) return;
 
@@ -975,6 +980,7 @@ export const useDocumentStore = create<DocumentState>()((set, get) => ({
   },
 
   importFiles: async (sourcePaths, targetFolder) => {
+    if (useAgentChatStore.getState().locked) return [];
     const state = get();
     if (!state.projectRoot) return [];
 
@@ -998,6 +1004,7 @@ export const useDocumentStore = create<DocumentState>()((set, get) => ({
   },
 
   moveFile: async (fileId, targetFolder) => {
+    if (useAgentChatStore.getState().locked) return;
     const state = get();
     const file = state.files.find((f) => f.id === fileId);
     if (!file || !state.projectRoot) return;
@@ -1013,7 +1020,7 @@ export const useDocumentStore = create<DocumentState>()((set, get) => ({
       desiredPath,
     );
     const newAbsPath = await join(state.projectRoot, newRelativePath);
-    await renameFileOnDisk(file.absolutePath, newAbsPath);
+    await renameFileOnDisk(file.ref, newAbsPath);
 
     const newName = newRelativePath.split(/[/\\]/).pop() || file.name;
     migratePdfBytesKey(fileId, newRelativePath);
@@ -1035,7 +1042,7 @@ export const useDocumentStore = create<DocumentState>()((set, get) => ({
                 ...f,
                 name: newName,
                 relativePath: newRelativePath,
-                absolutePath: newAbsPath,
+                ref: { projectId: state.projectId!, path: newRelativePath },
                 id: newRelativePath,
               }
             : f,
@@ -1049,6 +1056,7 @@ export const useDocumentStore = create<DocumentState>()((set, get) => ({
   },
 
   moveFolder: async (folderPath, targetFolder) => {
+    if (useAgentChatStore.getState().locked) return;
     const state = get();
     if (!state.projectRoot) return;
 
@@ -1074,7 +1082,7 @@ export const useDocumentStore = create<DocumentState>()((set, get) => ({
     if (!file) return;
 
     if (file.type === "tex" || file.type === "bib") {
-      const content = await readTexFileContent(file.absolutePath);
+      const content = await readTexFileContent(file.ref);
       set((s) => ({
         files: s.files.map((f) =>
           f.id === file.id ? { ...f, content, isDirty: false } : f,
@@ -1116,12 +1124,20 @@ export const useDocumentStore = create<DocumentState>()((set, get) => ({
             // Only reload if it was previously loaded (not a skipped large file)
             if (!isLargeNonEssential || updated.content !== undefined) {
               try {
-                updated.content = await readTexFileContent(
-                  updated.absolutePath,
-                );
+                updated.content = await readTexFileContent(updated.ref);
               } catch {
                 /* keep previous content */
               }
+            }
+          }
+          if (
+            updated.type === "image" &&
+            (updated.dataUrl || fsFile.fileSize <= LARGE_FILE_THRESHOLD)
+          ) {
+            try {
+              updated.dataUrl = await readImageAsDataUrl(updated.ref);
+            } catch {
+              /* Keep preview until a successful reload. */
             }
           }
           merged.push(updated);
@@ -1132,7 +1148,7 @@ export const useDocumentStore = create<DocumentState>()((set, get) => ({
           id: fsFile.relativePath,
           name: fsFile.relativePath.split(/[/\\]/).pop() || fsFile.relativePath,
           relativePath: fsFile.relativePath,
-          absolutePath: fsFile.absolutePath,
+          ref: fsFile.ref,
           type: fsFile.type,
           isDirty: false,
           fileSize: fsFile.fileSize,
@@ -1146,7 +1162,7 @@ export const useDocumentStore = create<DocumentState>()((set, get) => ({
           (pf.type === "other" && !isLargeNonEssential)
         ) {
           try {
-            pf.content = await readTexFileContent(pf.absolutePath);
+            pf.content = await readTexFileContent(pf.ref);
           } catch {
             /* skip unreadable */
           }
@@ -1155,7 +1171,7 @@ export const useDocumentStore = create<DocumentState>()((set, get) => ({
           fsFile.fileSize <= LARGE_FILE_THRESHOLD
         ) {
           try {
-            pf.dataUrl = await readImageAsDataUrl(pf.absolutePath);
+            pf.dataUrl = await readImageAsDataUrl(pf.ref);
           } catch {
             /* skip unreadable */
           }
@@ -1189,7 +1205,7 @@ export const useDocumentStore = create<DocumentState>()((set, get) => ({
     const file = state.files.find((f) => f.id === id);
     if (!file || file.content !== undefined) return; // already loaded
     try {
-      const content = await readTexFileContent(file.absolutePath);
+      const content = await readTexFileContent(file.ref);
       set((s) => ({
         files: s.files.map((f) => (f.id === id ? { ...f, content } : f)),
       }));
@@ -1220,6 +1236,7 @@ export const useDocumentStore = create<DocumentState>()((set, get) => ({
   },
 
   setContent: (content) => {
+    if (useAgentChatStore.getState().locked) return;
     const state = get();
     set({
       files: state.files.map((f) =>

@@ -1,4 +1,4 @@
-import { getCurrentWebview } from "@tauri-apps/api/webview";
+import { getCurrentWebview } from "@/lib/backend/desktop-host";
 
 export const APP_ZOOM_STORAGE_KEY = "claude-prism-app-zoom";
 export const LOCAL_ZOOM_SHORTCUTS_ATTR = "data-local-zoom-shortcuts";

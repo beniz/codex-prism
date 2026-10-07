@@ -1,5 +1,6 @@
+import { readProjectBytes } from "@/lib/tauri/fs";
 import { useCallback, useEffect, useRef, useState, useMemo } from "react";
-import { Compartment, EditorState, Prec, Transaction } from "@codemirror/state";
+import { Annotation, Compartment, EditorState, Prec, Transaction } from "@codemirror/state";
 import {
   EditorView,
   drawSelection,
@@ -49,9 +50,9 @@ import {
   type ProposedChange,
 } from "@/stores/proposed-changes-store";
 import {
-  useClaudeChatStore,
+  useAgentChatStore,
   type PromptContextOverride,
-} from "@/stores/claude-chat-store";
+} from "@/stores/agent-chat-store";
 import { useHistoryStore, type FileDiff } from "@/stores/history-store";
 import {
   compileLatex,
@@ -77,13 +78,12 @@ import {
   CopyIcon,
   XIcon,
 } from "lucide-react";
-import { ClaudeChatDrawer } from "@/components/claude-chat/claude-chat-drawer";
-import { ProposedChangesPanel } from "@/components/claude-chat/proposed-changes-panel";
+import { AgentChatDrawer } from "@/components/agent-chat/agent-chat-drawer";
+import { ProposedChangesPanel } from "@/components/agent-chat/proposed-changes-panel";
 import { ImagePreview } from "./image-preview";
 import { SearchPanel } from "./search-panel";
 import { ProblemsPanel, type DiagnosticItem } from "./problems-panel";
 import { PdfViewer } from "@/components/workspace/preview/pdf-viewer";
-import { readFile } from "@tauri-apps/plugin-fs";
 import { createLogger } from "@/lib/debug/logger";
 
 const log = createLogger("merge-view");
@@ -101,6 +101,8 @@ const editorStateCache = new Map<
 >();
 
 /** Clear editor state cache (e.g., on project close). */
+const backendReload = Annotation.define<boolean>();
+
 export function clearEditorStateCache(): void {
   editorStateCache.clear();
 }
@@ -628,6 +630,7 @@ export function LatexEditor() {
     const state = EditorState.create({
       doc: currentContent,
       extensions: [
+        EditorState.transactionFilter.of(tr => tr.docChanged && !tr.annotation(backendReload) && useAgentChatStore.getState().locked ? [] : tr),
         compileKeymap,
         lineNumbers(),
         drawSelection(),
@@ -664,7 +667,7 @@ export function LatexEditor() {
                         );
                         const fileName = file?.relativePath ?? "main.tex";
                         const ctx = `[Lint error in ${fileName}:${line.number}]\n[Error: ${d.message}]`;
-                        useClaudeChatStore
+                        useAgentChatStore
                           .getState()
                           .sendPrompt(`${ctx}\n\nFix this lint error.`);
                       },
@@ -860,6 +863,7 @@ export function LatexEditor() {
     if (currentContent !== content) {
       view.dispatch({
         changes: { from: 0, to: currentContent.length, insert: content },
+        annotations: backendReload.of(true),
       });
     }
   }, [activeFileContent, isTextFile]);
@@ -1017,7 +1021,7 @@ export function LatexEditor() {
       toolbarStickyRef.current = false;
       setSelectionCoords(null);
       setSelectionRange(null);
-      const chat = useClaudeChatStore.getState();
+      const chat = useAgentChatStore.getState();
       if (context) {
         void chat.sendPrompt(prompt, context);
         chat.requestPinnedContextRemoval([context.label]);
@@ -1100,7 +1104,7 @@ export function LatexEditor() {
   const isImage = !isTextFile && !isPdf && !!activeFile;
 
   return (
-    <div className="flex h-full min-w-0 flex-col bg-background">
+    <div className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-background">
       {/* Toolbar — adapts to file type */}
       <EditorToolbar
         editorView={viewRef}
@@ -1181,7 +1185,7 @@ export function LatexEditor() {
           </div>
         </div>
       )}
-      {/* Main content area — single wrapper keeps ClaudeChatDrawer stable */}
+      {/* Editor viewport — absolute editor content stays inside this area. */}
       <div
         ref={isPdf || isImage ? undefined : parentRef}
         className="relative flex min-h-0 flex-1 flex-col overflow-hidden"
@@ -1351,8 +1355,6 @@ export function LatexEditor() {
             )}
           </>
         )}
-        {/* Chat drawer — single stable instance across all file types */}
-        <ClaudeChatDrawer />
       </div>
       {/* Text-editor-only bottom panels */}
       {!isPdf &&
@@ -1374,7 +1376,7 @@ export function LatexEditor() {
             onFixWithChat={(message, line) => {
               const fileName = activeFile?.relativePath ?? "main.tex";
               const ctx = `[Lint error in ${fileName}:${line}]\n[Error: ${message}]`;
-              useClaudeChatStore
+              useAgentChatStore
                 .getState()
                 .sendPrompt(`${ctx}\n\nFix this lint error.`);
             }}
@@ -1383,7 +1385,7 @@ export function LatexEditor() {
               const errorList = diagnostics
                 .map((d) => `- ${fileName}:${d.line} — ${d.message}`)
                 .join("\n");
-              useClaudeChatStore
+              useAgentChatStore
                 .getState()
                 .sendPrompt(
                   `[Lint errors in ${fileName}]\n${errorList}\n\nFix all these lint errors.`,
@@ -1391,17 +1393,9 @@ export function LatexEditor() {
             }}
           />
         )}
-      {!isPdf && !isImage && !isLargeFileNotLoaded && activeFileChange && (
-        <ProposedChangesPanel
-          change={activeFileChange}
-          changeIndex={proposedChanges.findIndex(
-            (c) => c.filePath === activeFile?.relativePath,
-          )}
-          totalChanges={proposedChanges.length}
-          onKeep={() => handleKeepAllRef.current()}
-          onUndo={() => handleUndoAllRef.current()}
-        />
-      )}
+      <ProposedChangesPanel />
+      {/* Keep chat outside the editor viewport so CodeMirror cannot cover it. */}
+      <AgentChatDrawer />
       {/* History label dialog */}
       <Dialog
         open={historyLabelDialogOpen}
@@ -1464,7 +1458,7 @@ function InlinePdfContent({
     setError(null);
     setFitted(false);
 
-    readFile(file.absolutePath)
+    readProjectBytes(file.ref)
       .then((data) => {
         if (!cancelled) setPdfData(new Uint8Array(data));
       })
@@ -1475,7 +1469,7 @@ function InlinePdfContent({
     return () => {
       cancelled = true;
     };
-  }, [file.absolutePath]);
+  }, [file.ref.projectId, file.ref.path]);
 
   const handleFirstPageSize = useCallback(
     (pageWidth: number) => {

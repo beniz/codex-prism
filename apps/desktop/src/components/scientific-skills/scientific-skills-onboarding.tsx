@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
-import { open } from "@tauri-apps/plugin-dialog";
+import { invoke } from "@/lib/backend";
+import { listen } from "@/lib/backend";
+import { open } from "@/lib/backend/desktop-host";
 import { toast } from "sonner";
 import {
   FlaskConicalIcon,
@@ -107,7 +107,7 @@ export function ScientificSkillsOnboarding({
     };
   }, []);
 
-  // Skills are global Claude Code assets under ~/.claude/skills.
+  // Skills are global Codex assets under ~/.agents/skills.
   const checkStatus = useCallback(async () => {
     try {
       const [gs, skills] = await Promise.all([
@@ -255,7 +255,7 @@ export function ScientificSkillsOnboarding({
       const selectedFolder = await open({
         directory: true,
         multiple: false,
-        title: "Import Claude Skill Folder",
+        title: "Import Agent Skill Folder",
       });
 
       if (typeof selectedFolder !== "string") return;
@@ -410,7 +410,7 @@ export function ScientificSkillsOnboarding({
                 <DialogTitle className="text-sm">Skills</DialogTitle>
                 <DialogDescription className="mt-0.5 text-xs">
                   {totalSkills} skills across {displayCategories.length} groups
-                  - install curated scientific skills or import a local Claude
+                  - install curated scientific skills or import a local agent
                   skill. Curated set powered by{" "}
                   <a
                     href="https://github.com/K-Dense-AI/scientific-agent-skills"
@@ -535,7 +535,7 @@ export function ScientificSkillsOnboarding({
           {/* Footer */}
           <div className="flex shrink-0 items-center justify-between border-border border-t bg-muted/20 px-6 py-2.5">
             <p className="font-mono text-[11px] text-muted-foreground/60">
-              {status?.location ?? "~/.claude/skills/"}
+              {status?.location ?? "~/.agents/skills/"}
             </p>
             <Button
               variant="ghost"
@@ -559,7 +559,7 @@ export function ScientificSkillsOnboarding({
           <DialogHeader>
             <DialogTitle>Delete Skill</DialogTitle>
             <DialogDescription>
-              Delete {deleteTarget?.name ?? "this skill"} from ~/.claude/skills.
+              Delete {deleteTarget?.name ?? "this skill"} from ~/.agents/skills.
               This cannot be undone.
             </DialogDescription>
           </DialogHeader>
@@ -603,7 +603,7 @@ export function ScientificSkillsOnboarding({
           <DialogHeader>
             <DialogTitle>Uninstall All Skills</DialogTitle>
             <DialogDescription>
-              This will delete every skill under ~/.claude/skills, including
+              This will delete every skill under ~/.agents/skills, including
               imported local skills. This cannot be undone.
             </DialogDescription>
           </DialogHeader>

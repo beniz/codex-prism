@@ -1,7 +1,7 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
-import { getCurrentWindow } from "@tauri-apps/api/window";
-import { listen } from "@tauri-apps/api/event";
+import { getCurrentWindow } from "@/lib/backend/desktop-host";
+import { listen, invoke } from "@/lib/backend";
 import { initializeAppZoom } from "./lib/app-zoom";
 import { createLogger } from "./lib/debug/logger";
 import { APP_VISIBILITY_RESTORED } from "./lib/debug/log-store";
@@ -55,6 +55,7 @@ if (!rootEl) throw new Error("Root element #root not found");
 const rootContainer: HTMLElement = rootEl;
 
 function hideLoadingScreen() {
+  void invoke("js_log", { msg: "[app] UI ready" }).catch(() => {});
   const loading = document.getElementById("loading-screen");
   if (loading) {
     loading.style.opacity = "0";
@@ -91,4 +92,23 @@ async function bootstrap() {
   );
 }
 
-void bootstrap();
+void bootstrap().catch((error: unknown) => {
+  log.error("Application startup failed", {
+    error: String(error),
+    stack: error instanceof Error ? error.stack : undefined,
+  });
+  const loading = document.getElementById("loading-screen");
+  if (loading) {
+    document.getElementById("loading-spinner")?.remove();
+    const message = loading.querySelector("p");
+    if (message)
+      message.textContent = `Unable to start Codex-Prism: ${String(error)}`;
+    const retry = document.createElement("button");
+    retry.textContent = "Reload application";
+    retry.style.cssText =
+      "margin-top:16px;padding:8px 16px;border:1px solid currentColor;border-radius:8px;cursor:pointer";
+    retry.addEventListener("click", () => window.location.reload());
+    loading.append(retry);
+  }
+  void getCurrentWindow().show();
+});

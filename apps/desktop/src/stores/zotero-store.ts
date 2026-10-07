@@ -241,7 +241,7 @@ export const useZoteroStore = create<ZoteroState>()(
             docStore.addFile({
               name: bibFileName,
               relativePath: bibFileName,
-              absolutePath: fullPath,
+              ref: fullPath,
               type: "tex",
               content: result.bibtex,
             });

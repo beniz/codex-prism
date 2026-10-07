@@ -7,10 +7,10 @@ import {
   useRef,
   useState,
 } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "@/lib/backend";
 import { getVersion } from "@tauri-apps/api/app";
-import { listen } from "@tauri-apps/api/event";
-import { open } from "@tauri-apps/plugin-dialog";
+import { listen } from "@/lib/backend";
+import { open } from "@/lib/backend/desktop-host";
 import { readFile, readTextFile, stat } from "@tauri-apps/plugin-fs";
 import { toast } from "sonner";
 import {
@@ -36,7 +36,7 @@ import type { LucideIcon } from "lucide-react";
 import { useTheme } from "next-themes";
 import { useProjectStore } from "@/stores/project-store";
 import { useDocumentStore } from "@/stores/document-store";
-import { useClaudeSetupStore } from "@/stores/claude-setup-store";
+import { useAgentSetupStore } from "@/stores/agent-setup-store";
 import { useUvSetupStore } from "@/stores/uv-setup-store";
 import { useSettingsStore } from "@/stores/settings-store";
 import { compileLatex } from "@/lib/latex-compiler";
@@ -52,7 +52,7 @@ import {
   DialogDescription,
 } from "@/components/ui/dialog";
 import { ProjectWizard, type CreationMode } from "./project-wizard";
-import { ClaudeSetup } from "./claude-setup";
+import { AgentSetup } from "./agent-setup";
 import { cn } from "@/lib/utils";
 
 interface DefaultProject {
@@ -110,14 +110,14 @@ export function ProjectPicker() {
   const removeRecentProject = useProjectStore((s) => s.removeRecentProject);
   const openProject = useDocumentStore((s) => s.openProject);
 
-  const claudeStatus = useClaudeSetupStore((s) => s.status);
-  const checkClaudeStatus = useClaudeSetupStore((s) => s.checkStatus);
-  const isClaudeReady = claudeStatus === "ready";
+  const codexStatus = useAgentSetupStore((s) => s.status);
+  const checkCodexStatus = useAgentSetupStore((s) => s.checkStatus);
+  const isCodexReady = codexStatus === "ready";
 
   useEffect(() => {
-    checkClaudeStatus();
+    checkCodexStatus();
     getVersion().then(setAppVersion);
-  }, [checkClaudeStatus]);
+  }, [checkCodexStatus]);
 
   useEffect(() => {
     const handleSearchShortcut = (event: KeyboardEvent) => {
@@ -238,9 +238,9 @@ export function ProjectPicker() {
         >
           {!isSidebarCollapsed && (
             <div className="flex min-w-0 items-center gap-2">
-              <img src="/icon-192.png" alt="ClaudePrism" className="size-6" />
+              <img src="/icon-192.png" alt="Codex-Prism" className="size-6" />
               <span className="truncate font-semibold text-sm">
-                ClaudePrism
+                Codex-Prism
               </span>
             </div>
           )}
@@ -296,10 +296,10 @@ export function ProjectPicker() {
           )}
         >
           {isSidebarCollapsed ? (
-            <img src="/icon-192.png" alt="ClaudePrism" className="size-4" />
+            <img src="/icon-192.png" alt="Codex-Prism" className="size-4" />
           ) : (
             <>
-              <span className="truncate">ClaudePrism v{appVersion}</span>
+              <span className="truncate">Codex-Prism v{appVersion}</span>
               <div className="flex shrink-0 items-center gap-1">
                 <Button variant="ghost" size="icon" className="size-6" asChild>
                   <a
@@ -393,7 +393,7 @@ export function ProjectPicker() {
                   active={settingsDetailSection === "provider"}
                   icon={KeyRoundIcon}
                   label="Provider"
-                  meta={isClaudeReady ? "Ready" : "Setup"}
+                  meta={isCodexReady ? "Ready" : "Setup"}
                   onClick={() => setSettingsDetailSection("provider")}
                 />
                 <SettingsDetailButton
@@ -412,7 +412,7 @@ export function ProjectPicker() {
                     icon={KeyRoundIcon}
                     contentClassName="p-0"
                   >
-                    <ClaudeSetup variant="embedded" />
+                    <AgentSetup variant="embedded" />
                   </SettingsPanel>
                 ) : (
                   <SettingsPanel
@@ -544,7 +544,7 @@ export function ProjectPicker() {
   );
 }
 
-// ─── Environment Status (shown when Claude is ready) ───
+// ─── Environment Status (shown when Codex is ready) ───
 
 interface SkillsStatus {
   installed: boolean;
@@ -1080,7 +1080,7 @@ function EnvironmentStatus({ appVersion }: { appVersion: string }) {
 
         <StatusRow
           ok={true}
-          label="ClaudePrism"
+          label="Codex-Prism"
           detail={appVersion ? `v${appVersion}` : "Checking..."}
         />
       </div>

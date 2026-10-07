@@ -362,10 +362,10 @@ fn skill_categories() -> Vec<SkillCategory> {
 /// Resolve the target skills directory.
 fn skills_dir(project_path: Option<&str>) -> PathBuf {
     match project_path {
-        Some(p) => PathBuf::from(p).join(".claude").join("skills"),
+        Some(p) => PathBuf::from(p).join(".agents").join("skills"),
         None => dirs::home_dir()
             .unwrap_or_else(|| PathBuf::from("."))
-            .join(".claude")
+            .join(".agents")
             .join("skills"),
     }
 }
@@ -819,7 +819,7 @@ async fn download_tarball_once(
 
     let mut response = client
         .get(url)
-        .header(reqwest::header::USER_AGENT, "ClaudePrism skills installer")
+        .header(reqwest::header::USER_AGENT, "Codex-Prism skills installer")
         .send()
         .await
         .map_err(|e| format!("Failed to start download: {}", e))?;
@@ -1170,7 +1170,7 @@ pub async fn import_skill_from_folder(source_path: String) -> Result<Vec<SkillIn
 
     if skill_dirs.is_empty() {
         return Err(
-            "Selected folder does not contain any Claude skills. A skill must contain SKILL.md."
+            "Selected folder does not contain any agent skills. A skill must contain SKILL.md."
                 .into(),
         );
     }
@@ -1231,7 +1231,7 @@ pub async fn import_skill_from_folder(source_path: String) -> Result<Vec<SkillIn
 }
 
 /// Ensure the target directory is creatable and writable.
-/// If creation fails (e.g. ~/.claude is owned by root), prompt for admin password via osascript.
+/// If creation fails (e.g. ~/.agents is owned by root), prompt for admin password via osascript.
 fn ensure_target_writable(target: &Path) -> Result<(), String> {
     // Try without elevation first
     if std::fs::create_dir_all(target).is_ok() {
@@ -1242,7 +1242,7 @@ fn ensure_target_writable(target: &Path) -> Result<(), String> {
     {
         let home = dirs::home_dir().ok_or("Could not determine home directory")?;
         let user = std::env::var("USER").unwrap_or_default();
-        let claude_dir = home.join(".claude");
+        let claude_dir = home.join(".agents");
 
         let script = format!(
             "mkdir -p '{}' && chown -R {} '{}'",
@@ -1266,7 +1266,7 @@ fn ensure_target_writable(target: &Path) -> Result<(), String> {
             let stderr = String::from_utf8_lossy(&output.stderr);
             return Err(format!(
                 "Failed to fix directory permissions. Error: {}. \
-                 You can fix this manually by running: sudo chown -R $(whoami) ~/.claude",
+                 You can fix this manually by running: sudo chown -R $(whoami) ~/.agents",
                 stderr.trim()
             ));
         }
@@ -1469,7 +1469,7 @@ pub async fn delete_installed_skill(skill_folder: String) -> Result<(), String> 
         .canonicalize()
         .map_err(|e| format!("Failed to resolve skill folder: {}", e))?;
     if !skill_canon.starts_with(&target_canon) {
-        return Err("Refusing to delete a skill outside ~/.claude/skills".into());
+        return Err("Refusing to delete a skill outside ~/.agents/skills".into());
     }
 
     std::fs::remove_dir_all(&skill_canon)
@@ -1541,7 +1541,7 @@ pub async fn get_skill_content(
             let url = format!("{}/{}/{}", base_url, skill_folder, skill_file);
             let response = match client
                 .get(&url)
-                .header(reqwest::header::USER_AGENT, "ClaudePrism skills viewer")
+                .header(reqwest::header::USER_AGENT, "Codex-Prism skills viewer")
                 .send()
                 .await
             {
@@ -1582,14 +1582,14 @@ mod tests {
     #[test]
     fn test_skills_dir_global() {
         let dir = skills_dir(None);
-        assert!(dir.to_string_lossy().contains(".claude"));
+        assert!(dir.to_string_lossy().contains(".agents"));
         assert!(dir.to_string_lossy().ends_with("skills"));
     }
 
     #[test]
     fn test_skills_dir_project() {
         let dir = skills_dir(Some("/tmp/my-project"));
-        assert_eq!(dir, PathBuf::from("/tmp/my-project/.claude/skills"));
+        assert_eq!(dir, PathBuf::from("/tmp/my-project/.agents/skills"));
     }
 
     #[test]

@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "@/lib/backend";
 import { open } from "@tauri-apps/plugin-shell";
 
 const ZOTERO_BASE = "https://api.zotero.org";

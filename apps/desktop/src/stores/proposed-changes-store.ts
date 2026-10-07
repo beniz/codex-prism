@@ -9,8 +9,8 @@ export interface ProposedChange {
   id: string; // tool_use_id
   filePath: string; // relativePath
   absolutePath: string;
-  oldContent: string; // content before Claude's edit
-  newContent: string; // content after Claude's edit (from disk)
+  oldContent: string; // content before Codex's edit
+  newContent: string; // content after Codex's edit (from disk)
   toolName: string; // "Edit" | "Write" | "MultiEdit"
   timestamp: number;
 }

@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { listen } from "@tauri-apps/api/event";
+import { listen } from "@/lib/backend";
 import {
   CheckCircle2Icon,
   AlertCircleIcon,
@@ -168,7 +168,7 @@ export function UvSetupDialog({ open, onClose }: UvSetupDialogProps) {
           {/* Info text */}
           {status === "ready" && venvReady && (
             <p className="max-w-full break-words text-muted-foreground text-xs leading-relaxed">
-              Claude Code and ClaudePrism terminal tools use this environment
+              Codex and Codex-Prism terminal tools use this environment
               when running Python code. OpenAI-compatible providers use it
               through PowerShell/Bash tool calls. Use{" "}
               <code className="text-foreground">uv pip install</code> to add

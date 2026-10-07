@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { join } from "node:path";
 
 const env = { ...process.env };
+if (process.platform === "linux") env.CXXFLAGS = [env.CXXFLAGS, "-std=c++17"].filter(Boolean).join(" ");
 
 function appendEnvFlag(name, flag) {
   const current = env[name] ?? "";
@@ -27,14 +28,14 @@ const child =
           "/d",
           "/s",
           "/c",
-          "corepack pnpm --filter=@claude-prism/desktop tauri dev",
+          "corepack pnpm --filter=@codex-prism/desktop tauri dev",
         ],
         {
           env,
           stdio: "inherit",
         },
       )
-    : spawn("pnpm", ["--filter=@claude-prism/desktop", "tauri", "dev"], {
+    : spawn("corepack", ["pnpm","--filter=@codex-prism/desktop", "tauri", "dev"], {
         env,
         stdio: "inherit",
       });

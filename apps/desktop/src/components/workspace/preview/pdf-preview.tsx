@@ -14,8 +14,8 @@ import {
   ChevronUpIcon,
   ChevronDownIcon,
 } from "lucide-react";
-import { writeFile, mkdir, exists } from "@tauri-apps/plugin-fs";
-import { join } from "@tauri-apps/api/path";
+import { writeFile } from "@tauri-apps/plugin-fs";
+import { backend } from "@/lib/backend";
 import {
   useDocumentStore,
   getPdfBytes,
@@ -24,7 +24,7 @@ import {
   hasPdfData,
 } from "@/stores/document-store";
 import { useHistoryStore } from "@/stores/history-store";
-import { useClaudeChatStore } from "@/stores/claude-chat-store";
+import { useAgentChatStore } from "@/stores/agent-chat-store";
 import { useSettingsStore } from "@/stores/settings-store";
 import { Button } from "@/components/ui/button";
 import {
@@ -52,7 +52,7 @@ import {
   SelectionToolbar,
   type ToolbarAction,
 } from "@/components/workspace/editor/selection-toolbar";
-import { save } from "@tauri-apps/plugin-dialog";
+import { save } from "@/lib/backend/desktop-host";
 import {
   PdfViewer,
   type PdfTextSelection,
@@ -330,7 +330,7 @@ export function PdfPreview() {
       const sel = pdfSelection;
       setPdfSelection(null);
       window.getSelection()?.removeAllRanges();
-      useClaudeChatStore.getState().sendPrompt(prompt, {
+      useAgentChatStore.getState().sendPrompt(prompt, {
         label,
         filePath: resolvedSource?.file ?? "document.pdf",
         selectedText: buildPdfContext(sel.text),
@@ -364,7 +364,7 @@ export function PdfPreview() {
       setPdfSelection(null);
       window.getSelection()?.removeAllRanges();
       if (actionId === "proofread") {
-        useClaudeChatStore
+        useAgentChatStore
           .getState()
           .sendPrompt("Proofread and fix any errors in this text", {
             label,
@@ -590,21 +590,17 @@ export function PdfPreview() {
     const relativePath = `attachments/${fileName}`;
 
     try {
-      const attachmentsDir = await join(projectRoot, "attachments");
-      if (!(await exists(attachmentsDir))) {
-        await mkdir(attachmentsDir, { recursive: true });
-      }
-      const fullPath = await join(projectRoot, relativePath);
+      const project = await backend.projects.register(projectRoot);
 
       const base64 = result.dataUrl.split(",")[1];
       const binary = atob(base64);
       const bytes = new Uint8Array(binary.length);
       for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-      await writeFile(fullPath, bytes);
+      await backend.files.write({projectId:project.id,path:relativePath},[...bytes],null);
 
       await useDocumentStore.getState().refreshFiles();
 
-      useClaudeChatStore.getState().addPendingAttachment({
+      useAgentChatStore.getState().addPendingAttachment({
         label: `@${relativePath}`,
         filePath: relativePath,
         selectedText: `[Captured region from PDF page ${result.pageNumber}]`,
@@ -638,7 +634,7 @@ export function PdfPreview() {
 
       const handleFixWithChat = () => {
         const errorList = errors.map((e) => `- ${e}`).join("\n");
-        useClaudeChatStore
+        useAgentChatStore
           .getState()
           .sendPrompt(
             `[Compilation errors]\n${errorList}\n\nFix these LaTeX compilation errors.`,

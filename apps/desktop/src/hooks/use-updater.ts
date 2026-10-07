@@ -1,6 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { check, type Update } from "@tauri-apps/plugin-updater";
-import { relaunch } from "@tauri-apps/plugin-process";
+import { useCallback, useState } from "react";
 
 export type UpdateStatus =
   | { state: "idle" }
@@ -12,69 +10,12 @@ export type UpdateStatus =
   | { state: "ready" }
   | { state: "error"; message: string };
 
+// This fork has no update feed. Never query or install the upstream application's releases.
 export function useUpdater() {
   const [status, setStatus] = useState<UpdateStatus>({ state: "idle" });
-  const updateRef = useRef<Update | null>(null);
-
   const checkForUpdate = useCallback(async () => {
-    setStatus({ state: "checking" });
-    try {
-      const update = await check();
-      if (!update) {
-        setStatus({ state: "up-to-date" });
-        return;
-      }
-      updateRef.current = update;
-      setStatus({
-        state: "available",
-        version: update.version,
-        notes: update.body ?? undefined,
-      });
-    } catch (err) {
-      setStatus({ state: "error", message: String(err) });
-    }
+    setStatus({ state: "error", message: "Automatic updates are not configured for Codex-Prism. Update your local checkout to install a new version." });
   }, []);
-
-  const installUpdate = useCallback(async () => {
-    const update = updateRef.current;
-    if (!update) return;
-
-    try {
-      let downloaded = 0;
-      let contentLength = 0;
-
-      await update.downloadAndInstall((event) => {
-        switch (event.event) {
-          case "Started":
-            contentLength = event.data.contentLength ?? 0;
-            setStatus({ state: "downloading", percent: 0 });
-            break;
-          case "Progress":
-            downloaded += event.data.chunkLength;
-            if (contentLength > 0) {
-              setStatus({
-                state: "downloading",
-                percent: Math.round((downloaded / contentLength) * 100),
-              });
-            }
-            break;
-          case "Finished":
-            setStatus({ state: "installing" });
-            break;
-        }
-      });
-
-      setStatus({ state: "ready" });
-      setTimeout(() => relaunch(), 1500);
-    } catch (err) {
-      setStatus({ state: "error", message: String(err) });
-    }
-  }, []);
-
-  // Auto-check on mount
-  useEffect(() => {
-    checkForUpdate();
-  }, [checkForUpdate]);
-
+  const installUpdate = useCallback(async () => {}, []);
   return { status, checkForUpdate, installUpdate };
 }

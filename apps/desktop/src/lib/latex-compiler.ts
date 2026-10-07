@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "@/lib/backend";
 import { resolveTexRoot, type ProjectFile } from "@/stores/document-store";
 import { createLogger } from "@/lib/debug/logger";
 
