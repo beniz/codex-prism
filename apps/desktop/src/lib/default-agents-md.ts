@@ -49,6 +49,8 @@ If scientific skills are installed (\`~/.agents/skills/\` or \`.agents/skills/\`
 - **Symbolic Math**: sympy
 - **Statistical Modeling**: pymc, statsmodels, scikit-survival
 
+For technical drawings and other structured figures (such as schematics, geometry, flowcharts, and architecture diagrams), use LaTeX's \`tikzpicture\` environment unless the user requests another format. Keep the editable TikZ source in the document or in \`figures/<descriptive-name>.tex\`, included with \`\\input{figures/<descriptive-name>}\`. Add \`\\usepackage{tikz}\` and only the required TikZ libraries to the preamble. Match the document's fonts and notation, and check that the figure compiles and its labels remain readable at the intended size. Continue using suitable plotting libraries for data-driven charts.
+
 When generating figures with Python, always:
 1. Save to \`figures/<descriptive-name>.pdf\` (vector) or \`.png\` (raster, 300 dpi)
 2. Add corresponding \`\\includegraphics\` in the \`.tex\` file
