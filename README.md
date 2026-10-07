@@ -19,6 +19,15 @@ CodexPrism is a scientific writing workspace powered by the **installed Codex ap
 
 The default launcher disables automatic native restarts and frontend hot reloads. To apply application code changes, close the app, stop the launcher with Ctrl+C if needed, and run `corepack pnpm dev:desktop` again. Editing your LaTeX documents and compiling PDFs still works normally.
 
+For a short Linux command available from any directory, install a symlink from this checkout:
+
+```sh
+mkdir -p ~/.local/bin
+ln -s "$PWD/scripts/codex-prism" ~/.local/bin/codex-prism
+```
+
+With `~/.local/bin` on your PATH, run `codex-prism`. Each launch uses the current checkout, rebuilding the native app as needed and serving the current frontend. Keep the terminal open while using the app. Use `codex-prism --watch` to enable automatic reloads. If you move the checkout, update the symlink.
+
 To opt into automatic reloads and native rebuilds during development, use `corepack pnpm dev:desktop:watch`.
 
 To build an installable desktop package: `corepack pnpm build:desktop`. Automatic updates from the original upstream release feed are disabled.

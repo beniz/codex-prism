@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Resolve the installed symlink so launches always use this checkout.
+launcher_path="$(readlink -f -- "${BASH_SOURCE[0]}")"
+project_dir="$(dirname -- "$(dirname -- "$launcher_path")")"
+
+case "${1:-}" in
+  -h|--help)
+    printf 'Usage: codex-prism [--watch]\n\nStart CodexPrism from %s\nBuild current sources on launch; automatic reloads are off unless --watch is supplied.\n' "$project_dir"
+    exit 0
+    ;;
+  ''|--watch) ;;
+  *) printf 'Unknown argument: %s\nUsage: codex-prism [--watch]\n' "$1" >&2; exit 2 ;;
+esac
+if (( $# > 1 )); then
+  printf 'Usage: codex-prism [--watch]\n' >&2
+  exit 2
+fi
+
+cd -- "$project_dir"
+exec node scripts/dev-desktop.mjs "$@"
