@@ -106,9 +106,10 @@ export function AgentChatDrawer({
   const model =
     setup.models.find((m) => m.model === s.selectedModel) ||
     setup.models.find((m) => m.isDefault);
+  const pendingReview = !s.review.active && s.review.changes.length > 0;
   const canSend =
     !!t.draft.trim() &&
-    (t.isStreaming || !s.locked) &&
+    (t.isStreaming || !s.locked || pendingReview) &&
     setup.status === "ready" &&
     !attaching;
   const setDraft = (draft: string) =>
@@ -422,8 +423,8 @@ export function AgentChatDrawer({
                 placeholder={
                   t.isStreaming
                     ? "Guide the current turn…"
-                    : s.locked
-                      ? "Review the changes to continue…"
+                    : s.locked && !pendingReview
+                      ? "Wait for the current turn…"
                       : "Ask Codex anything about your project…"
                 }
                 value={t.draft}
@@ -593,8 +594,10 @@ export function AgentChatDrawer({
               <span>
                 {attaching ? (
                   "Adding files…"
+                ) : pendingReview ? (
+                  "Sending keeps pending changes"
                 ) : s.locked ? (
-                  "Project editing paused during execution and review"
+                  "Project editing paused during execution"
                 ) : setup.status !== "ready" ? (
                   <button
                     className="underline underline-offset-2"

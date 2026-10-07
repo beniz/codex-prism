@@ -197,10 +197,9 @@ export const useAgentChatStore = create<ChatState>((set, get) => ({
         }
       return;
     }
-    if (state.locked) {
+    if (state.locked && (state.review.active || !state.review.changes.length)) {
       set({
-        error:
-          "Resolve the current project review before starting another turn.",
+        error: "Wait for the current project turn to finish.",
       });
       return;
     }
@@ -220,8 +219,8 @@ export const useAgentChatStore = create<ChatState>((set, get) => ({
       const project = await backend.projects.register(doc.projectRoot);
       set({ projectId: project.id });
       await get().refreshReview();
-      if (get().locked)
-        throw new Error("This project has an active turn or pending review.");
+      if (get().review.active)
+        throw new Error("This project has an active turn.");
       const active = doc.files.find((f) => f.id === doc.activeFileId);
       const attachments = [
         ...state.pendingAttachments,

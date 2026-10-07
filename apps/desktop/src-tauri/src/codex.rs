@@ -37,6 +37,8 @@ pub struct Review {
     pub active: bool,
     pub before: BTreeMap<String, Vec<u8>>,
     pub after: BTreeMap<String, Vec<u8>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    previous: Option<Box<Review>>,
 }
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -198,6 +200,11 @@ async fn connection(app: &tauri::AppHandle) -> Result<Arc<Connection>, String> {
                         if let Ok(mut turns) = read.turns.lock() {
                             turns.insert(thread.into(), turn.into());
                         }
+                        if let Ok(all) = sessions(&handle) {
+                            if let Some(session) = all.iter().find(|s| s.id == thread) {
+                                let _ = confirm_review_start(&handle, &session.project_id);
+                            }
+                        }
                     }
                 }
                 if v["method"] == "serverRequest/resolved" {
@@ -267,6 +274,62 @@ async fn connection(app: &tauri::AppHandle) -> Result<Arc<Connection>, String> {
     *state.inner.lock().await = Some(c.clone());
     Ok(c)
 }
+// Reserve the project and durably retain the previous review until turn/start succeeds.
+fn prepare_review(
+    id: String,
+    previous: Option<Review>,
+    before: BTreeMap<String, Vec<u8>>,
+) -> Result<Review, String> {
+    if previous.as_ref().is_some_and(|r| r.active) {
+        return Err("Project already has an active turn".into());
+    }
+    Ok(Review {
+        project_id: id,
+        active: true,
+        before,
+        after: BTreeMap::new(),
+        previous: previous.map(Box::new),
+    })
+}
+
+fn confirm_review_start(app: &tauri::AppHandle, id: &str) -> Result<(), String> {
+    let projects = app.state::<projects::Projects>();
+    let _files = projects.0.lock().map_err(|e| e.to_string())?;
+    let path = review_path(app, id)?;
+    if !path.exists() {
+        return Ok(());
+    }
+    let mut r: Review = serde_json::from_slice(&std::fs::read(&path).map_err(|e| e.to_string())?)
+        .map_err(|e| e.to_string())?;
+    if r.active && r.previous.take().is_some() {
+        save_json(&path, &r)?;
+    }
+    Ok(())
+}
+
+fn finish_review_state(r: &mut Review, after: BTreeMap<String, Vec<u8>>) {
+    if let Some(previous) = r.previous.take() {
+        if after == r.before {
+            // Startup failed without editing anything: restore the exact pending review.
+            *r = *previous;
+            return;
+        }
+        // An interrupted, unacknowledged start may have edited files. Preserve both
+        // the old pending changes and new edits for review rather than accepting them.
+        for path in previous.before.keys().chain(previous.after.keys()) {
+            if previous.before.get(path) != previous.after.get(path) {
+                if let Some(bytes) = previous.before.get(path) {
+                    r.before.insert(path.clone(), bytes.clone());
+                } else {
+                    r.before.remove(path);
+                }
+            }
+        }
+    }
+    r.after = after;
+    r.active = false;
+}
+
 fn finish_review(app: &tauri::AppHandle, id: &str) -> Result<(), String> {
     let projects = app.state::<projects::Projects>();
     let _files = projects.0.lock().map_err(|e| e.to_string())?;
@@ -279,8 +342,8 @@ fn finish_review(app: &tauri::AppHandle, id: &str) -> Result<(), String> {
     if !r.active {
         return Ok(());
     }
-    r.after = projects::snapshot(&projects::get(app, id)?.root)?;
-    r.active = false;
+    let after = projects::snapshot(&projects::get(app, id)?.root)?;
+    finish_review_state(&mut r, after);
     if r.before == r.after {
         std::fs::remove_file(path).map_err(|e| e.to_string())?;
     } else {
@@ -401,13 +464,20 @@ pub async fn codex_send(
         let _files = projects.0.lock().map_err(|e| e.to_string())?;
         let state = app.state::<CodexState>();
         let _guard = state.reviews.lock().map_err(|e| e.to_string())?;
-        assert_unlocked(&app, &project_id)?;
-        let r = Review {
-            project_id: project_id.clone(),
-            active: true,
-            before: projects::snapshot(&project.root)?,
-            after: BTreeMap::new(),
+        let path = review_path(&app, &project_id)?;
+        let previous = if path.exists() {
+            Some(
+                serde_json::from_slice::<Review>(&std::fs::read(&path).map_err(|e| e.to_string())?)
+                    .map_err(|e| e.to_string())?,
+            )
+        } else {
+            None
         };
+        let r = prepare_review(
+            project_id.clone(),
+            previous,
+            projects::snapshot(&project.root)?,
+        )?;
         save_json(&review_path(&app, &project_id)?, &r)?;
     }
     let _ = app.emit("project-review", json!({"projectId":project_id}));
@@ -419,7 +489,7 @@ pub async fn codex_send(
  {let state=app.state::<CodexState>();let _guard=state.reviews.lock().map_err(|e|e.to_string())?;let mut all=sessions(&app)?;if !all.iter().any(|s|s.id==id){all.push(Session{project_id:project_id.clone(),id:id.clone(),title:prompt.chars().take(70).collect()});save_json(&projects::data_dir(&app)?.join("sessions.json"),&all)?;}}
  let _=app.emit("codex-event",json!({"method":"prism/session","params":{"projectId":project_id,"threadId":id}}));
  let mut input=vec![json!({"type":"text","text":prompt})];for url in images.unwrap_or_default(){input.push(json!({"type":"image","imageUrl":url}));}let mut params=json!({"threadId":id,"input":input});if let Some(e)=effort.filter(|s|!s.is_empty()){params["effort"]=json!(e)}
- let turn=c.call("turn/start",params).await?;Ok(json!({"threadId":id,"turn":turn["turn"]}))
+ let turn=c.call("turn/start",params).await?;confirm_review_start(&app, &project_id)?;Ok(json!({"threadId":id,"turn":turn["turn"]}))
  }.await;
     if let Err(ref error) = result {
         // A transport failure can leave an accepted turn running. Stop the process before unlocking files.
@@ -579,6 +649,76 @@ fn undo_change(root: &std::path::Path, r: &Review, path: &str) -> Result<(), Str
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn pending_review() -> Review {
+        Review {
+            project_id: "project".into(),
+            before: BTreeMap::from([("main.tex".into(), b"original".to_vec())]),
+            after: BTreeMap::from([("main.tex".into(), b"first turn".to_vec())]),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn next_turn_uses_current_files_and_blocks_overlapping_start() {
+        let previous = pending_review();
+        let current = previous.after.clone();
+        let next = prepare_review("project".into(), Some(previous), current.clone()).unwrap();
+        assert_eq!(next.before, current);
+        assert!(next.previous.is_some());
+        assert!(prepare_review("project".into(), Some(next), current).is_err());
+    }
+
+    #[test]
+    fn failed_start_restores_pending_review_after_serialization() {
+        let previous = pending_review();
+        let next = prepare_review(
+            "project".into(),
+            Some(previous.clone()),
+            previous.after.clone(),
+        )
+        .unwrap();
+        let mut restored: Review =
+            serde_json::from_slice(&serde_json::to_vec(&next).unwrap()).unwrap();
+        finish_review_state(&mut restored, previous.after.clone());
+        assert!(!restored.active);
+        assert_eq!(restored.before, previous.before);
+        assert_eq!(restored.after, previous.after);
+        assert!(restored.previous.is_none());
+    }
+
+    #[test]
+    fn accepted_start_reviews_only_new_changes() {
+        let previous = pending_review();
+        let mut next = prepare_review(
+            "project".into(),
+            Some(previous.clone()),
+            previous.after.clone(),
+        )
+        .unwrap();
+        next.previous = None; // turn/started confirmation
+        let after = BTreeMap::from([("main.tex".into(), b"second turn".to_vec())]);
+        finish_review_state(&mut next, after.clone());
+        assert_eq!(next.before, previous.after);
+        assert_eq!(next.after, after);
+        assert!(!next.active);
+    }
+
+    #[test]
+    fn unconfirmed_interrupted_turn_preserves_prior_and_new_changes() {
+        let previous = pending_review();
+        let mut next = prepare_review(
+            "project".into(),
+            Some(previous.clone()),
+            previous.after.clone(),
+        )
+        .unwrap();
+        let after = BTreeMap::from([("main.tex".into(), b"partial second turn".to_vec())]);
+        finish_review_state(&mut next, after.clone());
+        assert_eq!(next.before, previous.before);
+        assert_eq!(next.after, after);
+        assert!(!next.active);
+    }
+
     #[test]
     fn persisted_review_restores_modifications_additions_and_deletions() {
         let d = tempfile::tempdir().unwrap();
@@ -595,6 +735,7 @@ mod tests {
             active: false,
             before: before.clone(),
             after: projects::snapshot(&root).unwrap(),
+            previous: None,
         };
         let file = d.path().join("review.json");
         save_json(&file, &r).unwrap();

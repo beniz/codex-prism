@@ -54,6 +54,7 @@ beforeEach(() => {
     projectId: "p1",
     activeProjectPath: "/paper",
     locked: false,
+    review: { active: false, changes: [] },
     isStreaming: false,
     error: null,
     requests: [],
@@ -79,10 +80,57 @@ describe("Codex turn lifecycle", () => {
     );
     expect(useAgentChatStore.getState().locked).toBe(true);
   });
-  it("blocks a new turn when a review is pending", async () => {
-    useAgentChatStore.setState({ locked: true });
+  it("sends through pending review without accepting files one at a time", async () => {
+    const review = {
+      active: false,
+      changes: [
+        {
+          path: "main.tex",
+          kind: "modified" as const,
+          binary: false,
+          oldContent: "before",
+          newContent: "after",
+        },
+      ],
+    };
+    useAgentChatStore.setState({ locked: true, review });
+    vi.mocked(backend.review.get).mockResolvedValueOnce(review);
+    await useAgentChatStore.getState().sendPrompt("refine this");
+    expect(backend.agent.send).toHaveBeenCalledOnce();
+    expect(backend.review.resolve).not.toHaveBeenCalled();
+  });
+  it("blocks a new turn when the project has an active turn", async () => {
+    useAgentChatStore.setState({
+      locked: true,
+      review: { active: true, changes: [] },
+    });
     await useAgentChatStore.getState().sendPrompt("again");
     expect(backend.agent.send).not.toHaveBeenCalled();
+  });
+  it("retains pending review if starting the next turn is rejected", async () => {
+    const review = {
+      active: false,
+      changes: [
+        {
+          path: "main.tex",
+          kind: "modified" as const,
+          binary: false,
+          oldContent: "before",
+          newContent: "after",
+        },
+      ],
+    };
+    useAgentChatStore.setState({ locked: true, review });
+    vi.mocked(backend.review.get)
+      .mockResolvedValueOnce(review)
+      .mockResolvedValueOnce(review);
+    vi.mocked(backend.agent.send).mockRejectedValueOnce(
+      new Error("Model unavailable"),
+    );
+    await useAgentChatStore.getState().sendPrompt("refine");
+    expect(useAgentChatStore.getState().review).toEqual(review);
+    expect(useAgentChatStore.getState().locked).toBe(true);
+    expect(useAgentChatStore.getState().isStreaming).toBe(false);
   });
   it("does not start when dirty buffers remain after save", async () => {
     vi.mocked(useDocumentStore.getState).mockReturnValue({
