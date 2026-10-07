@@ -1,0 +1,25 @@
+name: Headless backend
+on:
+  push:
+    branches: ['**']
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  core:
+    runs-on: ubuntu-26.04
+    container: rust:1.88-bookworm
+    steps:
+      - uses: https://github.com/actions/checkout@v4
+      - name: Install headless test prerequisites
+        run: apt-get update && apt-get install -y --no-install-recommends pkg-config python3
+      - name: Verify no GUI dependencies
+        shell: bash
+        run: |
+          cargo tree --locked --manifest-path crates/prism-core/Cargo.toml --prefix none > /tmp/prism-core-dependencies.txt
+          if grep -E '^(tauri|wry|webkit2gtk|gtk|gdk|tao)(-| |$)' /tmp/prism-core-dependencies.txt; then
+            echo 'The core must not depend on desktop GUI libraries.'
+            exit 1
+          fi
+      - name: Test standalone core
+        run: cargo test --locked --manifest-path crates/prism-core/Cargo.toml

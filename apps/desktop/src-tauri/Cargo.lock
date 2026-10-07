@@ -335,29 +335,20 @@ dependencies = [
 name = "codex-prism-desktop"
 version = "1.4.0"
 dependencies = [
- "chrono",
  "dirs 5.0.1",
- "flate2",
- "git2",
  "objc2",
  "objc2-app-kit",
  "objc2-foundation",
- "reqwest 0.12.28",
+ "prism-core",
  "serde",
  "serde_json",
- "sha1",
- "tar",
  "tauri",
  "tauri-build",
  "tauri-plugin-dialog",
  "tauri-plugin-fs",
  "tauri-plugin-shell",
- "tempfile",
  "tokio",
- "uuid",
  "which",
- "windows-sys 0.61.2",
- "winreg",
 ]
 
 [[package]]
@@ -2507,6 +2498,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "prism-core"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "flate2",
+ "git2",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "sha1",
+ "tar",
+ "tokio",
+ "uuid",
+ "which",
+ "windows-sys 0.61.2",
+ "winreg",
+]
+
+[[package]]
 name = "proc-macro-crate"
 version = "1.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3858,19 +3868,6 @@ dependencies = [
  "dunce",
  "embed-resource",
  "toml 1.1.2+spec-1.1.0",
-]
-
-[[package]]
-name = "tempfile"
-version = "3.27.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
-dependencies = [
- "fastrand",
- "getrandom 0.4.2",
- "once_cell",
- "rustix",
- "windows-sys 0.61.2",
 ]
 
 [[package]]

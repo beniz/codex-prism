@@ -112,8 +112,7 @@ Thumbs.db
 
 // ─── Tauri Commands ───
 
-#[tauri::command]
-pub fn history_init(project_root: String) -> Result<(), String> {
+pub(crate) fn history_init(project_root: String) -> Result<(), String> {
     let git_dir = history_path(&project_root);
 
     if git_dir.exists() {
@@ -175,8 +174,7 @@ pub fn history_init(project_root: String) -> Result<(), String> {
     Ok(())
 }
 
-#[tauri::command]
-pub fn history_snapshot(
+pub(crate) fn history_snapshot(
     project_root: String,
     message: String,
 ) -> Result<Option<SnapshotInfo>, String> {
@@ -261,8 +259,7 @@ pub fn history_snapshot(
     }))
 }
 
-#[tauri::command]
-pub fn history_list(
+pub(crate) fn history_list(
     project_root: String,
     limit: u32,
     offset: u32,
@@ -337,8 +334,7 @@ pub fn history_list(
     Ok(snapshots)
 }
 
-#[tauri::command]
-pub fn history_diff(
+pub(crate) fn history_diff(
     project_root: String,
     from_id: String,
     to_id: String,
@@ -419,8 +415,7 @@ pub fn history_diff(
     Ok(results)
 }
 
-#[tauri::command]
-pub fn history_file_at(
+pub(crate) fn history_file_at(
     project_root: String,
     snapshot_id: String,
     file_path: String,
@@ -445,8 +440,10 @@ pub fn history_file_at(
     Ok(String::from_utf8_lossy(blob.content()).to_string())
 }
 
-#[tauri::command]
-pub fn history_restore(project_root: String, snapshot_id: String) -> Result<SnapshotInfo, String> {
+pub(crate) fn history_restore(
+    project_root: String,
+    snapshot_id: String,
+) -> Result<SnapshotInfo, String> {
     let repo = open_repo(&project_root)?;
     let oid = Oid::from_str(&snapshot_id).map_err(|e| format!("Invalid snapshot_id: {}", e))?;
     let commit = repo
@@ -494,8 +491,7 @@ pub fn history_restore(project_root: String, snapshot_id: String) -> Result<Snap
     })
 }
 
-#[tauri::command]
-pub fn history_add_label(
+pub(crate) fn history_add_label(
     project_root: String,
     snapshot_id: String,
     label: String,
@@ -512,8 +508,7 @@ pub fn history_add_label(
     Ok(())
 }
 
-#[tauri::command]
-pub fn history_remove_label(project_root: String, label: String) -> Result<(), String> {
+pub(crate) fn history_remove_label(project_root: String, label: String) -> Result<(), String> {
     let repo = open_repo(&project_root)?;
     let tag_ref = format!("refs/tags/{}", label);
     repo.find_reference(&tag_ref)

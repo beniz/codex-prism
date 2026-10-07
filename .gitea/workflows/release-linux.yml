@@ -37,6 +37,7 @@ jobs:
           node scripts/release.mjs check "$RELEASE_TAG"
           corepack pnpm test:release
           corepack pnpm --filter @codex-prism/desktop test
+          cargo test --locked --manifest-path crates/prism-core/Cargo.toml
           cargo test --locked --manifest-path apps/desktop/src-tauri/Cargo.toml --lib
       - run: corepack pnpm release:build
       - name: Upload Gitea draft release

@@ -8,7 +8,8 @@
     "beforeDevCommand": "corepack pnpm dev",
     "beforeBuildCommand": "corepack pnpm build",
     "devUrl": "http://localhost:1420",
-    "frontendDist": "../dist"
+    "frontendDist": "../dist",
+    "additionalWatchFolders": ["../../../crates/prism-core"]
   },
   "app": {
     "withGlobalTauri": true,

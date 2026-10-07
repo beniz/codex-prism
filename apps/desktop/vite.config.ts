@@ -47,7 +47,7 @@ export default defineConfig({
         : undefined,
     watch: watch
       ? {
-          ignored: ["**/src-tauri/**"],
+          ignored: ["**/src-tauri/**", "**/crates/prism-core/target/**"],
         }
       : null,
   },

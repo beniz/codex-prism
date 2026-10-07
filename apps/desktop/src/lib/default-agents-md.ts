@@ -1,4 +1,4 @@
-import writingGuidance from "./writing-guidance.txt?raw";
+import writingGuidance from "../../../../crates/prism-core/src/writing-guidance.txt?raw";
 
 export const DEFAULT_AGENTS_MD = `# codex-prism LaTeX Project
 

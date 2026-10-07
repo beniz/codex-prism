@@ -69,18 +69,30 @@ cd apps/desktop && pnpm test:watch
 ### Rust
 
 ```bash
-cd apps/desktop/src-tauri && cargo test
+# Core tests need no Tauri/WebKit/GTK installation.
+cargo test --locked --manifest-path crates/prism-core/Cargo.toml
+# Desktop adapters still require the platform's Tauri libraries.
+cargo test --locked --manifest-path apps/desktop/src-tauri/Cargo.toml --lib
 ```
 
-Current test counts:
-- **Frontend:** 89 tests (stores, components)
-- **Rust:** 114 tests (65 unit + 49 integration)
+The core has its own manifest and lockfile; it is a path dependency of the desktop crate. There is no root Cargo workspace, so run both Rust test commands. Unix agent protocol tests use `python3` fixtures and never require Codex credentials or inference. Tool installation tests use local fixtures and temporary storage.
+
+For installed TeX Live, run the optional engine/bibliography and failed-build recovery tests:
+
+```bash
+cargo test --locked --manifest-path crates/prism-core/Cargo.toml texlive_integration_engines_errors_and_bibliography -- --ignored
+cargo test --locked --manifest-path crates/prism-core/Cargo.toml texlive_integration_failed_pdf_is_not_reused -- --ignored
+```
+
+Hosts use `Backend::new(BackendConfig { data_dir, home_dir, temp_dir }, events)` and retain one shared backend instance. Supply absolute paths and call `shutdown().await` before stopping the Tokio runtime. Ordinary service access goes through `Backend` methods; project compilation/history/environment operations retain the `project_service(project_id, operation, args)` facade. Static tool/category inspection remains available independently of shutdown. The core follows the host process's executable environment and Codex credential configuration; configured home paths control Prism discovery, skills storage and uv installation/discovery, not a separate credential identity.
+
+Agent and review events go to the backend's sink. Installer methods take an operation sink; the desktop adapter preserves app-wide skills logs and window-specific uv progress/completion. Sinks must return promptly and tolerate disconnected recipients. Foreground filesystem/compilation operations finish before shutdown returns; installer cancellation terminates the supervised process tree.
 
 ### What to test
 
 - **Unit tests:** Pure functions, parsers, data transformations
 - **Integration tests:** Filesystem/git operations using `tempfile` crate for isolation
-- Tests live in `#[cfg(test)] mod tests` blocks within each source file (modules are private)
+- Core unit tests live beside their implementation; headless API/protocol integration tests live in `crates/prism-core/tests`. Desktop tests cover native adapters.
 
 ### Adding Rust integration tests
 

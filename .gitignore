@@ -96,3 +96,6 @@ build/
 reference_pr
 reference_pr_claude
 external-libs/
+
+# Standalone Rust backend build outputs
+crates/prism-core/target/
