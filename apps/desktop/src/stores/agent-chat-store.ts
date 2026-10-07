@@ -1,7 +1,6 @@
 import { create } from "zustand";
 import { backend, type AgentEvent, type Review } from "@/lib/backend";
 import { useDocumentStore } from "./document-store";
-import { compileLatex, resolveCompileTarget } from "@/lib/latex-compiler";
 export interface PromptContextOverride {
   label: string;
   filePath: string;
@@ -167,18 +166,6 @@ export const useAgentChatStore = create<ChatState>((set, get) => ({
       await get().refreshReview();
       if (!get().locked) {
         await useDocumentStore.getState().refreshFiles();
-        const doc = useDocumentStore.getState();
-        const target = resolveCompileTarget(doc.activeFileId, doc.files);
-        if (target && doc.projectRoot) {
-          try {
-            doc.setPdfData(
-              await compileLatex(doc.projectRoot, target.targetPath),
-              target.rootId,
-            );
-          } catch (e) {
-            doc.setCompileError(String(e));
-          }
-        }
       }
     } catch (e) {
       set({ error: String(e) });
@@ -463,18 +450,6 @@ export const useAgentChatStore = create<ChatState>((set, get) => ({
         .then(async () => {
           const doc = useDocumentStore.getState();
           await doc.refreshFiles();
-          const target = resolveCompileTarget(doc.activeFileId, doc.files);
-          if (target && doc.projectRoot) {
-            try {
-              const bytes = await compileLatex(
-                doc.projectRoot,
-                target.targetPath,
-              );
-              doc.setPdfData(bytes, target.rootId);
-            } catch (e) {
-              doc.setCompileError(String(e));
-            }
-          }
         })
         .catch((e) => set({ error: String(e) }));
     }

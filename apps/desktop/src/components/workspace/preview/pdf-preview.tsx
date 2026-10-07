@@ -25,6 +25,7 @@ import {
 } from "@/stores/document-store";
 import { useHistoryStore } from "@/stores/history-store";
 import { useAgentChatStore } from "@/stores/agent-chat-store";
+import { useAutoRecompile } from "@/hooks/use-auto-recompile";
 import { useSettingsStore } from "@/stores/settings-store";
 import { Button } from "@/components/ui/button";
 import {
@@ -89,6 +90,10 @@ const ZOOM_OPTIONS = [
 ];
 
 export function PdfPreview() {
+  const autoRecompile = useSettingsStore((s) => s.autoRecompile);
+  const setAutoRecompile = useSettingsStore((s) => s.setAutoRecompile);
+  const contentGeneration = useDocumentStore((s) => s.contentGeneration);
+  const agentLocked = useAgentChatStore((s) => s.locked);
   const compilerBackend = useSettingsStore((s) => s.compilerBackend);
   const setCompilerBackend = useSettingsStore((s) => s.setCompilerBackend);
   const pdfRevision = useDocumentStore((s) => s.pdfRevision);
@@ -534,7 +539,7 @@ export function PdfPreview() {
     setScale(newScale);
   };
 
-  const handleCompile = async (force = false) => {
+  const handleCompile = async (force = false, automatic = false) => {
     // Read all guard values from the store to avoid stale closures
     const state = useDocumentStore.getState();
     if (!state.projectRoot) return;
@@ -546,8 +551,11 @@ export function PdfPreview() {
     const allFiles = state.files;
     const activeFileId = state.activeFileId;
     const activeEntry = allFiles.find((f) => f.id === activeFileId);
-    if (!activeEntry || activeEntry.type !== "tex") return;
-    const resolved = resolveCompileTarget(activeFileId, allFiles);
+    if (!automatic && (!activeEntry || activeEntry.type !== "tex")) return;
+    const resolved = resolveCompileTarget(
+      automatic ? currentRootFileId : activeFileId,
+      allFiles,
+    );
     if (!resolved) {
       setCompileError(
         "No .tex file found in this project. Create a main.tex file to compile.",
@@ -575,9 +583,11 @@ export function PdfPreview() {
       await saveAllFiles();
       const texlive = useSettingsStore.getState().compilerBackend === "texlive";
       const data = await compileLatex(state.projectRoot, targetFile, texlive);
-      setPdfData(data, rootId);
+      if (useDocumentStore.getState().projectRoot === state.projectRoot)
+        setPdfData(data, rootId);
     } catch (error) {
-      setCompileError(formatCompileError(error), rootId);
+      if (useDocumentStore.getState().projectRoot === state.projectRoot)
+        setCompileError(formatCompileError(error), rootId);
     } finally {
       // Ensure the spinner is visible for at least 500ms for visual feedback
       const elapsed = Date.now() - compileStart;
@@ -592,6 +602,16 @@ export function PdfPreview() {
       }
     }
   };
+
+  useAutoRecompile({
+    enabled: autoRecompile,
+    documentKey: projectRoot
+      ? JSON.stringify([projectRoot, currentRootFileId])
+      : null,
+    generation: contentGeneration,
+    busy: isCompiling || agentLocked || !initialized,
+    compile: () => handleCompile(true, true),
+  });
 
   const handleCapture = async (result: CaptureResult) => {
     setCaptureMode(false);
@@ -877,6 +897,25 @@ export function PdfPreview() {
               <span className="@[42rem]/pv:inline hidden">Retry</span>
             </Button>
           )}
+          <Button
+            variant={autoRecompile ? "secondary" : "ghost"}
+            size="sm"
+            className="h-7 shrink-0 gap-1.5 px-2 text-xs"
+            role="switch"
+            aria-label="Auto-recompile"
+            aria-checked={autoRecompile}
+            title="Automatically recompile after edits"
+            onClick={() => setAutoRecompile(!autoRecompile)}
+          >
+            <span
+              className={
+                autoRecompile
+                  ? "size-1.5 rounded-full bg-primary"
+                  : "size-1.5 rounded-full bg-muted-foreground/40"
+              }
+            />
+            Auto
+          </Button>
         </div>
         <div data-tauri-drag-region className="min-w-2 flex-1 self-stretch" />
         <div className="ml-auto flex min-w-0 shrink-0 flex-nowrap items-center justify-end gap-1">
