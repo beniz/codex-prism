@@ -78,8 +78,6 @@ import {
   CopyIcon,
   XIcon,
 } from "lucide-react";
-import { AgentChatDrawer } from "@/components/agent-chat/agent-chat-drawer";
-import { ProposedChangesPanel } from "@/components/agent-chat/proposed-changes-panel";
 import { ImagePreview } from "./image-preview";
 import { SearchPanel } from "./search-panel";
 import { ProblemsPanel, type DiagnosticItem } from "./problems-panel";
@@ -1393,9 +1391,6 @@ export function LatexEditor() {
             }}
           />
         )}
-      <ProposedChangesPanel />
-      {/* Keep chat outside the editor viewport so CodeMirror cannot cover it. */}
-      <AgentChatDrawer />
       {/* History label dialog */}
       <Dialog
         open={historyLabelDialogOpen}

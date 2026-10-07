@@ -54,7 +54,7 @@ import {
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 
-export function AgentChatDrawer() {
+export function AgentChatDrawer({ fillHeight = false }: { fillHeight?: boolean }) {
   const s = useAgentChatStore();
   const setup = useAgentSetupStore();
   const [open, setOpen] = useState(true);
@@ -188,7 +188,7 @@ export function AgentChatDrawer() {
       aria-label="Codex chat"
       className={cn(
         "flex min-h-0 shrink-0 flex-col overflow-hidden border-t bg-background",
-        open && "h-[min(28rem,55%)]",
+        open && (fillHeight ? "flex-1" : "h-[min(28rem,55%)]"),
       )}
     >
       <header className="flex shrink-0 items-center gap-1 px-3 py-2">

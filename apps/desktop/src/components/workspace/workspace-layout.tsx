@@ -14,6 +14,8 @@ import {
 import { Sidebar } from "./sidebar";
 import { LatexEditor } from "./editor/latex-editor";
 import { PdfPreview } from "./preview/pdf-preview";
+import { AgentChatDrawer } from "@/components/agent-chat/agent-chat-drawer";
+import { ProposedChangesPanel } from "@/components/agent-chat/proposed-changes-panel";
 import { useDocumentStore } from "@/stores/document-store";
 import { usePreviewStore } from "@/stores/preview-store";
 
@@ -183,6 +185,8 @@ export function WorkspaceLayout() {
     <div ref={workspaceRef} className="h-full">
       <PanelGroup direction="horizontal" className="h-full">
         <Panel
+          id="sidebar"
+          order={0}
           ref={sidebarPanelRef}
           defaultSize={SIDEBAR_DEFAULT_SIZE}
           minSize={SIDEBAR_MIN_SIZE}
@@ -214,23 +218,33 @@ export function WorkspaceLayout() {
 
         <PanelResizeHandle className="w-px bg-border transition-colors hover:bg-ring" />
 
-        {codeVisible && (
-          <Panel
-            defaultSize={previewVisible ? 42.5 : 85}
-            minSize={25}
-            className="min-w-0"
-          >
-            <LatexEditor />
-          </Panel>
-        )}
+        <Panel
+          id="editor-chat"
+          order={1}
+          defaultSize={previewVisible ? 42.5 : 85}
+          minSize={25}
+          className="min-w-0"
+        >
+          <div className="flex h-full min-h-0 flex-col overflow-hidden">
+            {codeVisible && (
+              <div className="min-h-0 flex-1 overflow-hidden">
+                <LatexEditor />
+              </div>
+            )}
+            <ProposedChangesPanel />
+            <AgentChatDrawer fillHeight={!codeVisible} />
+          </div>
+        </Panel>
 
-        {codeVisible && previewVisible && (
+        {previewVisible && (
           <PanelResizeHandle className="w-px bg-border transition-colors hover:bg-ring" />
         )}
 
         {previewVisible && (
           <Panel
-            defaultSize={codeVisible ? 42.5 : 85}
+            id="pdf-preview"
+            order={2}
+            defaultSize={42.5}
             minSize={25}
             className="min-w-0"
           >
