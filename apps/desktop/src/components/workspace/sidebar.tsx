@@ -269,6 +269,33 @@ function useAppVersion() {
 
 // ─── Sidebar ───
 
+function CodePaneToggle({
+  controls,
+  className,
+}: {
+  controls?: LayoutControls;
+  className?: string;
+}) {
+  if (!controls) return null;
+  return (
+    <Button
+      variant="ghost"
+      size="icon"
+      className={cn(
+        className,
+        controls.codeVisible &&
+          "bg-sidebar-accent text-sidebar-accent-foreground",
+      )}
+      aria-label="Code"
+      aria-pressed={controls.codeVisible}
+      title={controls.codeVisible ? "Hide LaTeX code" : "Show LaTeX code"}
+      onClick={() => controls.setCodeVisible(!controls.codeVisible)}
+    >
+      <FileCodeIcon className="size-3.5" />
+    </Button>
+  );
+}
+
 function LayoutPaneSwitcher({
   controls,
   collapsed = false,
@@ -317,12 +344,6 @@ function LayoutPaneSwitcher({
         className="w-44 rounded-2xl border-border/70 bg-popover/95 p-1.5 shadow-2xl backdrop-blur"
       >
         <div className="space-y-1">
-          <LayoutToggleRow
-            icon={FileCodeIcon}
-            label="Code"
-            checked={controls.codeVisible}
-            onCheckedChange={controls.setCodeVisible}
-          />
           <LayoutToggleRow
             icon={FileTextIcon}
             label="PDF"
@@ -1145,6 +1166,7 @@ export function Sidebar({
         />
       </div>
       <div className="flex min-h-0 flex-1 flex-col items-center gap-1.5 py-2">
+        <CodePaneToggle controls={layoutControls} className="size-7" />
         <Button
           variant="ghost"
           size="icon"
@@ -1215,7 +1237,7 @@ export function Sidebar({
       >
         <div className="flex h-full flex-col bg-sidebar text-sidebar-foreground">
           {/* Header — padded top for macOS overlay titlebar */}
-          <div className="grid h-[calc(var(--workspace-topbar-height)+var(--titlebar-height))] grid-cols-[2rem_minmax(0,1fr)_2rem] items-center gap-2 border-sidebar-border border-b px-3">
+          <div className="grid h-[calc(var(--workspace-topbar-height)+var(--titlebar-height))] grid-cols-[2rem_minmax(0,1fr)_3.5rem] items-center gap-2 border-sidebar-border border-b px-3">
             <div className="flex items-center justify-start">
               <Button
                 variant="ghost"
@@ -1243,7 +1265,8 @@ export function Sidebar({
             >
               <span className="block truncate">{projectName}</span>
             </button>
-            <div className="flex items-center justify-end">
+            <div className="flex items-center justify-end gap-1">
+              <CodePaneToggle controls={layoutControls} className="size-6" />
               <LayoutPaneSwitcher
                 controls={layoutControls}
                 collapsed={collapsed}
@@ -1422,7 +1445,6 @@ export function Sidebar({
                 </div>
               </div>
             </Panel>
-
           </PanelGroup>
 
           {/* Environment section — Python + Skills */}
