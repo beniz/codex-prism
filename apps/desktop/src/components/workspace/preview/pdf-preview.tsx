@@ -120,7 +120,7 @@ export function PdfPreview() {
   const scrollToPageRef = useRef<((page: number) => void) | null>(null);
   const [scale, setScale] = useState<number>(1.0);
   const [captureMode, setCaptureMode] = useState(false);
-  const [fitMode, setFitMode] = useState<FitMode>(null);
+  const [fitMode, setFitMode] = useState<FitMode>("fit-width");
   const [containerSize, setContainerSize] = useState<{
     width: number;
     height: number;
@@ -155,6 +155,8 @@ export function PdfPreview() {
     if (cached) {
       setScale(cached.scale);
       setFitMode(cached.fitMode);
+    } else {
+      setFitMode("fit-width");
     }
     prevRootRef.current = currentRootFileId;
   }, [currentRootFileId]); // eslint-disable-line react-hooks/exhaustive-deps
