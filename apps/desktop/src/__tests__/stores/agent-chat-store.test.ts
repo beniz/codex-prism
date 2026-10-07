@@ -58,8 +58,8 @@ beforeEach(() => {
     error: null,
     requests: [],
     pendingAttachments: [],
-    selectedModel: "",
-    effortLevel: "",
+    selectedModel: useAgentChatStore.getInitialState().selectedModel,
+    effortLevel: useAgentChatStore.getInitialState().effortLevel,
   });
 });
 describe("Codex turn lifecycle", () => {
@@ -70,8 +70,8 @@ describe("Codex turn lifecycle", () => {
       "p1",
       null,
       "Fix equations",
-      "",
-      "",
+      "gpt-5.6-sol",
+      "xhigh",
       [],
     );
     expect(save.mock.invocationCallOrder[0]).toBeLessThan(

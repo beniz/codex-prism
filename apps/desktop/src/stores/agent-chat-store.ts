@@ -80,8 +80,8 @@ export const useAgentChatStore = create<ChatState>((set, get) => ({
   review: { active: false, changes: [] },
   locked: false,
   requests: [],
-  selectedModel: "",
-  effortLevel: "",
+  selectedModel: "gpt-5.6-sol",
+  effortLevel: "xhigh",
   pendingInitialPrompt: null,
   pendingAttachments: [],
   setPendingInitialPrompt: (pendingInitialPrompt) =>
