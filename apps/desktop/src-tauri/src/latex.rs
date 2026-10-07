@@ -83,8 +83,38 @@ fn extract_error_lines(log: &str) -> String {
     }
 
     // Fallback: return tail of log
-    let start = log.len().saturating_sub(500);
+    let mut start = log.len().saturating_sub(500);
+    while !log.is_char_boundary(start) {
+        start += 1;
+    }
     log[start..].to_string()
+}
+
+/// Keep the compiler failure primary, even when the TeX log ends successfully.
+fn compilation_failure(backend: &str, result: &Result<(), String>, log: &str) -> String {
+    let reason = match result {
+        Err(error) if !error.trim().is_empty() => error.trim(),
+        Err(_) => "Compiler process failed without diagnostic output",
+        Ok(()) => "No PDF generated",
+    };
+    let mut message = format!("Compilation failed ({backend})\n\n{reason}");
+    let details = extract_error_lines(log);
+    if !details.trim().is_empty() {
+        message.push_str("\n\n---- LaTeX log context ----\n");
+        message.push_str(&details);
+    }
+    message
+}
+
+fn subprocess_failure(output: &std::process::Output) -> String {
+    let mut message = format!("Compiler subprocess failed ({})", output.status);
+    for (label, bytes) in [("stderr", &output.stderr), ("stdout", &output.stdout)] {
+        let text = String::from_utf8_lossy(bytes);
+        if !text.trim().is_empty() {
+            message.push_str(&format!("\n---- {label} ----\n{}", text.trim()));
+        }
+    }
+    message
 }
 
 /// Check if the log contains real TeX errors (! lines or Error: messages).
@@ -360,9 +390,11 @@ fn lower_thread_priority() {
 pub(crate) fn compile_with_tectonic(work_dir: &Path, main_file: &str) -> Result<(), String> {
     use tectonic::config::PersistentConfig;
     use tectonic::driver::{OutputFormat, PassSetting, ProcessingSessionBuilder};
-    use tectonic::status::NoopStatusBackend;
+    use tectonic::status::{plain::PlainStatusBackend, ChatterLevel};
 
-    let mut status = NoopStatusBackend {};
+    // The parent captures stderr and displays it if this subprocess fails.
+    let mut status = PlainStatusBackend::new(ChatterLevel::Minimal);
+    status.always_stderr(true);
 
     let config = PersistentConfig::open(false)
         .map_err(|e| format!("Failed to open tectonic config: {}", e))?;
@@ -400,7 +432,7 @@ pub(crate) fn compile_with_tectonic(work_dir: &Path, main_file: &str) -> Result<
         .create(&mut status)
         .map_err(|e| format!("Failed to create tectonic session: {}", e))?;
 
-    session.run(&mut status).map_err(|e| format!("{}", e))?;
+    session.run(&mut status).map_err(|e| format!("{:#}", e))?;
 
     Ok(())
 }
@@ -431,8 +463,7 @@ fn compile_with_tectonic_subprocess(work_dir: &Path, main_file: &str) -> Result<
     if output.status.success() {
         Ok(())
     } else {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        Err(stderr.trim().to_string())
+        Err(subprocess_failure(&output))
     }
 }
 
@@ -969,7 +1000,7 @@ pub async fn compile_latex(
         }
     }
 
-    let compile_result = if use_texlive {
+    let mut compile_result = if use_texlive {
         let work_dir_clone = work_dir.clone();
         let main_file_clone = main_file.clone();
         let result = tokio::task::spawn_blocking(move || {
@@ -1046,6 +1077,7 @@ pub async fn compile_latex(
                 retry_result.is_ok(),
                 pdf_path_clone.exists()
             );
+            compile_result = retry_result;
         }
     }
 
@@ -1061,7 +1093,7 @@ pub async fn compile_latex(
         );
     }
 
-    if pdf_path.exists() {
+    if compile_result.is_ok() && pdf_path.exists() {
         let pdf_path_clone = pdf_path.clone();
         let pdf_bytes = tokio::task::spawn_blocking(move || std::fs::read(&pdf_path_clone))
             .await
@@ -1077,16 +1109,11 @@ pub async fn compile_latex(
         Ok(pdf_bytes)
     } else {
         let log_content = std::fs::read_to_string(&log_path).unwrap_or_default();
-        let details = extract_error_lines(&log_content);
-        let msg = if details.is_empty() {
-            match compile_result {
-                Err(e) => e,
-                Ok(_) => "Compilation failed: no PDF generated".to_string(),
-            }
-        } else {
-            details
-        };
-        Err(format!("Compilation failed ({})\n\n{}", backend_label, msg))
+        Err(compilation_failure(
+            &backend_label,
+            &compile_result,
+            &log_content,
+        ))
     }
 }
 
@@ -1203,6 +1230,59 @@ mod tests {
     }
 
     // --- extract_error_lines ---
+
+    #[test]
+    fn test_compilation_failure_preserves_pdf_conversion_error() {
+        let result = Err("xdvipdfmx: failed to load image".to_string());
+        let log = "Output written on main.xdv (6 pages, 54328 bytes).";
+        let message = compilation_failure("Tectonic", &result, log);
+        assert!(
+            message.starts_with("Compilation failed (Tectonic)\n\nxdvipdfmx: failed to load image")
+        );
+        assert!(message.contains("---- LaTeX log context ----\nOutput written"));
+    }
+
+    #[test]
+    fn test_compilation_failure_missing_pdf_and_empty_diagnostics() {
+        assert!(compilation_failure("Tectonic", &Ok(()), "").ends_with("No PDF generated"));
+        assert!(compilation_failure("Tectonic", &Err(String::new()), "")
+            .ends_with("Compiler process failed without diagnostic output"));
+        let message = compilation_failure(
+            "Tectonic",
+            &Err("engine failed".into()),
+            "! Undefined control sequence.",
+        );
+        assert!(message.contains("engine failed"));
+        assert!(message.contains("! Undefined control sequence."));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_subprocess_failure_reports_status_and_both_streams() {
+        use std::os::unix::process::ExitStatusExt;
+        let mut output = std::process::Output {
+            status: std::process::ExitStatus::from_raw(1 << 8),
+            stdout: b"converter detail".to_vec(),
+            stderr: b"font error".to_vec(),
+        };
+        let message = subprocess_failure(&output);
+        assert!(message.contains("exit status: 1"));
+        assert!(message.contains("font error"));
+        assert!(message.contains("converter detail"));
+        output.status = std::process::ExitStatus::from_raw(6);
+        output.stdout.clear();
+        output.stderr.clear();
+        assert!(subprocess_failure(&output).contains("signal: 6"));
+    }
+
+    #[test]
+    fn test_extract_error_lines_unicode_tail() {
+        let log = format!("a{}", "界".repeat(200));
+        let result = extract_error_lines(&log);
+        assert!(log.ends_with(&result));
+        assert!(result.len() <= 500);
+        assert!(!result.is_empty());
+    }
 
     #[test]
     fn test_extract_error_lines_empty_log() {
