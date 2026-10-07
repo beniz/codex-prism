@@ -4,6 +4,7 @@ import topLevelAwait from "vite-plugin-top-level-await";
 import path from "node:path";
 
 const host = process.env.TAURI_DEV_HOST;
+const watch = process.env.CODEX_PRISM_WATCH !== "0";
 const mupdfWasmFile = path.resolve(
   __dirname,
   "..",
@@ -35,16 +36,20 @@ export default defineConfig({
     port: 1420,
     strictPort: true,
     host: host || false,
-    hmr: host
+    hmr: !watch
+      ? false
+      : host
+        ? {
+            protocol: "ws",
+            host,
+            port: 1421,
+          }
+        : undefined,
+    watch: watch
       ? {
-          protocol: "ws",
-          host,
-          port: 1421,
+          ignored: ["**/src-tauri/**"],
         }
-      : undefined,
-    watch: {
-      ignored: ["**/src-tauri/**"],
-    },
+      : null,
   },
   envPrefix: ["VITE_", "TAURI_"],
   build: {

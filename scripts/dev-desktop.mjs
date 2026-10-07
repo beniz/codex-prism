@@ -1,8 +1,17 @@
 import { spawn } from "node:child_process";
 import { join } from "node:path";
 
-const env = { ...process.env };
-if (process.platform === "linux") env.CXXFLAGS = [env.CXXFLAGS, "-std=c++17"].filter(Boolean).join(" ");
+const watch = process.argv.includes("--watch");
+const env = { ...process.env, CODEX_PRISM_WATCH: watch ? "1" : "0" };
+const args = ["pnpm", "--filter=@codex-prism/desktop", "tauri", "dev"];
+if (!watch) args.push("--no-watch");
+console.log(
+  watch
+    ? "CodexPrism: automatic reloads and restarts enabled."
+    : "CodexPrism: automatic reloads and restarts disabled. Relaunch to apply code changes.",
+);
+if (process.platform === "linux")
+  env.CXXFLAGS = [env.CXXFLAGS, "-std=c++17"].filter(Boolean).join(" ");
 
 function appendEnvFlag(name, flag) {
   const current = env[name] ?? "";
@@ -24,18 +33,13 @@ const child =
   process.platform === "win32"
     ? spawn(
         process.env.ComSpec ?? "cmd.exe",
-        [
-          "/d",
-          "/s",
-          "/c",
-          "corepack pnpm --filter=@codex-prism/desktop tauri dev",
-        ],
+        ["/d", "/s", "/c", `corepack ${args.join(" ")}`],
         {
           env,
           stdio: "inherit",
         },
       )
-    : spawn("corepack", ["pnpm","--filter=@codex-prism/desktop", "tauri", "dev"], {
+    : spawn("corepack", args, {
         env,
         stdio: "inherit",
       });
