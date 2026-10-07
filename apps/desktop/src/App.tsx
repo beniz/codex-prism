@@ -84,8 +84,8 @@ function WorkspaceWithAgent() {
   // Update window title
   useEffect(() => {
     if (projectRoot) {
-      const name = projectRoot.split(/[/\\]/).pop() || "Codex-Prism";
-      getCurrentWindow().setTitle(`${name} - Codex-Prism`);
+      const name = projectRoot.split(/[/\\]/).pop() || "codex-prism";
+      getCurrentWindow().setTitle(`${name} - codex-prism`);
     }
   }, [projectRoot]);
 
@@ -205,7 +205,7 @@ export function App({ onReady }: { onReady?: () => void }) {
 
   useEffect(() => {
     if (!projectRoot) {
-      getCurrentWindow().setTitle("Codex-Prism");
+      getCurrentWindow().setTitle("codex-prism");
     }
   }, [projectRoot]);
 

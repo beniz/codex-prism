@@ -1,8 +1,8 @@
-# CodexPrism — local desktop development
+# codex-prism — local desktop development
 
-CodexPrism is a scientific writing workspace powered by the **installed Codex app-server**, with a Tauri desktop editor. It is a local, single-user application; a browser-hosted server and collaboration are not included yet.
+codex-prism is a scientific writing workspace powered by the **installed Codex app-server**, with a Tauri desktop editor. It is a local, single-user application; a browser-hosted server and collaboration are not included yet.
 
-## Run locally (Linux)
+## Run locally (Ubuntu 26.04 LTS, x86_64)
 
 1. Install Node.js 20+, Corepack, Git, and the Linux Tauri/Tectonic development libraries (Ubuntu/Debian):
    ```sh
@@ -58,7 +58,7 @@ For a hands-on acceptance check, open a disposable LaTeX project, ask Codex to e
 ---
 
 <p align="center">
-  <img src="./apps/desktop/src-tauri/icons/icon.png" width="120" height="120" alt="CodexPrism" />
+  <img src="./apps/desktop/src-tauri/icons/icon.png" width="120" height="120" alt="codex-prism" />
 </p>
 
 ## Features
@@ -81,7 +81,21 @@ The legacy `.claudeprism/history.git` directory name is retained for compatibili
 
 ## Installation
 
-Build from this repository using the instructions above. Original upstream release binaries do not contain the CodexPrism changes.
+Build from this repository using the instructions above. Original upstream release binaries do not contain the codex-prism changes.
+
+## Application releases
+
+Linux releases target Ubuntu 26.04 LTS x86_64 and are published as drafts on [Gitea](https://git.jolibrain.com/beniz/codex-prism/releases). Local release commands work without a CI runner:
+
+```sh
+corepack pnpm release:prepare 1.3.1
+# Review, commit, and tag the version changes before building.
+corepack pnpm release:build
+# Push the matching commit and tag; set GITEA_TOKEN before uploading.
+corepack pnpm release:publish
+```
+
+See [the release guide](docs/releases/README.md) for the complete sequence, prerequisites, validation, and optional Gitea Actions setup. No version or release is created automatically by this setup.
 
 ## Contributing
 
@@ -89,7 +103,7 @@ See [CONTRIBUTING.md](./CONTRIBUTING.md) for the inherited development guideline
 
 ## Acknowledgments
 
-CodexPrism builds on [the original desktop project](https://github.com/delibae/claude-prism), which started from [Open Prism](https://github.com/assistant-ui/open-prism) by [assistant-ui](https://github.com/assistant-ui).
+codex-prism builds on [the original desktop project](https://github.com/delibae/claude-prism), which started from [Open Prism](https://github.com/assistant-ui/open-prism) by [assistant-ui](https://github.com/assistant-ui).
 
 ## License
 

@@ -37,7 +37,7 @@ fn open_repo(project_root: &str) -> Result<Repository, String> {
 }
 
 fn default_signature() -> Result<Signature<'static>, String> {
-    Signature::now("Codex-Prism", "history@claudeprism.local")
+    Signature::now("codex-prism", "history@codex-prism.local")
         .map_err(|e| format!("Failed to create signature: {}", e))
 }
 
@@ -90,7 +90,7 @@ Thumbs.db
 # Git
 .git/
 
-# Codex-Prism internal
+# codex-prism internal
 .claudeprism/
 .prism/
 "#;

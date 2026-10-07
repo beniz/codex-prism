@@ -1,0 +1,46 @@
+name: Linux release
+on:
+  push:
+    tags: ['v*']
+permissions:
+  contents: write
+jobs:
+  release:
+    # Register this label on a Linux x86_64 runner with Ubuntu 26.04 userspace.
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: https://github.com/actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: https://github.com/actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: https://github.com/dtolnay/rust-toolchain@1.88.0
+        with:
+          targets: x86_64-unknown-linux-gnu
+      - name: Install build dependencies
+        shell: bash
+        run: |
+          source /etc/os-release
+          test "$ID" = ubuntu && test "$VERSION_ID" = 26.04
+          test "$(uname -m)" = x86_64
+          SUDO=()
+          if [ "$(id -u)" != 0 ]; then SUDO=(sudo); fi
+          "${SUDO[@]}" apt-get update
+          "${SUDO[@]}" apt-get install -y build-essential pkg-config libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev librsvg2-bin patchelf libssl-dev libicu-dev libgraphite2-dev libharfbuzz-dev libfreetype-dev libfontconfig-dev libpng-dev zlib1g-dev file curl wget xdg-utils
+          corepack enable
+      - run: corepack pnpm install --frozen-lockfile
+      - name: Check release and run tests
+        env:
+          RELEASE_TAG: ${{ gitea.ref_name }}
+          CXXFLAGS: -std=c++17
+        run: |
+          node scripts/release.mjs check "$RELEASE_TAG"
+          corepack pnpm test:release
+          corepack pnpm --filter @codex-prism/desktop test
+          cargo test --locked --manifest-path apps/desktop/src-tauri/Cargo.toml --lib
+      - run: corepack pnpm release:build
+      - name: Upload Gitea draft release
+        env:
+          GITEA_TOKEN: ${{ secrets.RELEASE_TOKEN || secrets.GITEA_TOKEN }}
+        run: corepack pnpm release:publish

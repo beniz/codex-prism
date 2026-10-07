@@ -1,3 +1,4 @@
+import { migrateStorageKey } from "@/lib/legacy-storage";
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
@@ -23,7 +24,7 @@ export const useSettingsStore = create<SettingsState>()(
       setVimMode: (enabled) => set({ vimMode: enabled }),
     }),
     {
-      name: "claude-prism-settings",
+      name: migrateStorageKey("codex-prism-settings"),
     },
   ),
 );

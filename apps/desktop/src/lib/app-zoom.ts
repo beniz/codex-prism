@@ -1,6 +1,7 @@
+import { migrateStorageKey } from "./legacy-storage";
 import { getCurrentWebview } from "@/lib/backend/desktop-host";
 
-export const APP_ZOOM_STORAGE_KEY = "claude-prism-app-zoom";
+export const APP_ZOOM_STORAGE_KEY = "codex-prism-app-zoom";
 export const LOCAL_ZOOM_SHORTCUTS_ATTR = "data-local-zoom-shortcuts";
 export const DEFAULT_APP_ZOOM = 1;
 export const MIN_APP_ZOOM = 0.5;
@@ -25,7 +26,9 @@ export function clampAppZoom(value: number): number {
 }
 
 export function readStoredAppZoom(): number {
-  const raw = window.localStorage.getItem(APP_ZOOM_STORAGE_KEY);
+  const raw = window.localStorage.getItem(
+    migrateStorageKey(APP_ZOOM_STORAGE_KEY),
+  );
   if (raw === null) return DEFAULT_APP_ZOOM;
 
   const parsed = Number(raw);

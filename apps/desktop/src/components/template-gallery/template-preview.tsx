@@ -139,7 +139,7 @@ export function TemplatePreview() {
       setProjectFolder(lastProjectFolder);
     } else {
       homeDir()
-        .then((home) => join(home, "Documents", "Codex-Prism"))
+        .then((home) => join(home, "Documents", "codex-prism"))
         .then(async (dir) => {
           await mkdir(dir, { recursive: true }).catch(() => {});
           setProjectFolder(dir);

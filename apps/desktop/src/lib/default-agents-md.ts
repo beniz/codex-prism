@@ -1,6 +1,6 @@
-export const DEFAULT_AGENTS_MD = `# Codex-Prism LaTeX Project
+export const DEFAULT_AGENTS_MD = `# codex-prism LaTeX Project
 
-Academic writing workspace powered by Codex-Prism. You are assisting with a LaTeX document project.
+Academic writing workspace powered by codex-prism. You are assisting with a LaTeX document project.
 
 ## Environment
 
@@ -27,7 +27,7 @@ Academic writing workspace powered by Codex-Prism. You are assisting with a LaTe
 uv pip install numpy matplotlib pandas scipy     # Install packages
 uv run python script.py                          # Run a script
 
-# LaTeX is compiled automatically by Codex-Prism — no manual build commands needed.
+# LaTeX is compiled automatically by codex-prism — no manual build commands needed.
 \`\`\`
 
 ## Writing Guidelines
@@ -35,7 +35,7 @@ uv run python script.py                          # Run a script
 - Treat scientific publications as the default writing target unless the user or project specifies another purpose. Use precise, evidence-based academic prose appropriate to the intended discipline and venue, and distinguish established findings from hypotheses and original contributions.
 - Add references to relevant academic works when supporting substantive claims, describing prior work or methods, or comparing results. Prefer primary research and authoritative reviews; cite sources where they support the text and follow the project's existing bibliography and citation style.
 - Verify that each added reference exists, its bibliographic metadata is accurate, and it supports the associated claim, using accessible source material or trusted scholarly records. Never invent papers, authors, DOIs, citations, or findings. If a reference cannot be verified, flag the gap to the user instead of presenting it as verified.
-- Edit \`.tex\` files directly. Codex-Prism auto-compiles and shows a live PDF preview.
+- Edit \`.tex\` files directly. codex-prism auto-compiles and shows a live PDF preview.
 - Use \`\\input{filename}\` or \`\\include{filename}\` to split large documents into multiple files.
 - Place images in a \`figures/\` directory and reference with \`\\includegraphics{figures/name}\`.
 - For bibliography, add entries to \`references.bib\` and cite with \`\\cite{key}\`.

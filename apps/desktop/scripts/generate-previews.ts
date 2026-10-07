@@ -1,7 +1,7 @@
 /**
  * Generate example projects for all LaTeX templates.
  *
- * Usage:  pnpm --filter @claude-prism/desktop generate-previews
+ * Usage:  pnpm --filter @codex-prism/desktop generate-previews
  *
  * Requires pdflatex to be installed (part of TeX Live / MacTeX).
  * Output: public/examples/{template-id}/main.tex, main.pdf, references.bib (if applicable)

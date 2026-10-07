@@ -102,7 +102,7 @@ void bootstrap().catch((error: unknown) => {
     document.getElementById("loading-spinner")?.remove();
     const message = loading.querySelector("p");
     if (message)
-      message.textContent = `Unable to start Codex-Prism: ${String(error)}`;
+      message.textContent = `Unable to start codex-prism: ${String(error)}`;
     const retry = document.createElement("button");
     retry.textContent = "Reload application";
     retry.style.cssText =

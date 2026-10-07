@@ -1,6 +1,8 @@
-# Contributing to ClaudePrism
+# Contributing to codex-prism
 
 Contributions are welcome! This guide covers the development environment, workflow, and testing.
+
+Release packaging currently targets Ubuntu 26.04 LTS x86_64; see [the release guide](docs/releases/README.md). Other platform recipes below are retained for future work.
 
 ## Development Environment
 
@@ -8,10 +10,10 @@ Contributions are welcome! This guide covers the development environment, workfl
 
 - [Node.js](https://nodejs.org/) 22+
 - [pnpm](https://pnpm.io/) 10+
-- [Rust](https://rustup.rs/) (stable)
+- [Rust](https://rustup.rs/) (repository-pinned 1.88.0)
 - Platform-specific native dependencies (required by [Tectonic](https://tectonic-typesetting.github.io/)):
   - **macOS:** `brew install icu4c harfbuzz pkg-config`
-  - **Linux:** `apt install libicu-dev libgraphite2-dev libharfbuzz-dev libfreetype-dev libfontconfig-dev libwebkit2gtk-4.1-dev libappindicator3-dev`
+  - **Linux:** `apt install libicu-dev libgraphite2-dev libharfbuzz-dev libfreetype-dev libfontconfig-dev libwebkit2gtk-4.1-dev libayatana-appindicator3-dev`
   - **Windows:** Visual Studio Build Tools (C++ workload) + vcpkg — see detailed steps below
 
 #### Windows Setup (PowerShell)
@@ -37,8 +39,8 @@ vcpkg install harfbuzz[graphite2]:x64-windows freetype:x64-windows icu:x64-windo
 ### Setup
 
 ```bash
-git clone https://github.com/delibae/claude-prism.git
-cd claude-prism
+git clone https://git.jolibrain.com/beniz/codex-prism.git
+cd codex-prism
 pnpm install
 ```
 
@@ -57,7 +59,7 @@ pnpm build:desktop
 ## Project Structure
 
 ```
-claude-prism/
+codex-prism/
 ├── apps/
 │   └── desktop/              # Tauri desktop app
 │       ├── src/              # React frontend (TypeScript)

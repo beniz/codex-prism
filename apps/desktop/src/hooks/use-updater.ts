@@ -14,7 +14,7 @@ export type UpdateStatus =
 export function useUpdater() {
   const [status, setStatus] = useState<UpdateStatus>({ state: "idle" });
   const checkForUpdate = useCallback(async () => {
-    setStatus({ state: "error", message: "Automatic updates are not configured for Codex-Prism. Update your local checkout to install a new version." });
+    setStatus({ state: "error", message: "Automatic updates are not configured for codex-prism. Update your local checkout to install a new version." });
   }, []);
   const installUpdate = useCallback(async () => {}, []);
   return { status, checkForUpdate, installUpdate };

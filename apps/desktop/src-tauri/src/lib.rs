@@ -1,10 +1,10 @@
 #![recursion_limit = "512"]
 
 mod codex;
-mod projects;
-mod services;
 mod history;
 mod latex;
+mod projects;
+mod services;
 mod skills;
 mod uv;
 mod zotero;
@@ -183,7 +183,7 @@ fn create_new_window(app: tauri::AppHandle) -> Result<(), String> {
 
     #[allow(unused_mut)]
     let mut builder = WebviewWindowBuilder::new(&app, &label, WebviewUrl::default())
-        .title("Codex-Prism")
+        .title("codex-prism")
         .inner_size(1400.0, 900.0)
         .min_inner_size(800.0, 600.0)
         .zoom_hotkeys_enabled(true)
@@ -406,34 +406,36 @@ fn list_default_projects() -> Result<Vec<ProjectCandidate>, String> {
         return Ok(Vec::new());
     };
 
-    let base = home.join("Documents").join("Codex-Prism");
-    if !base.is_dir() {
-        return Ok(Vec::new());
-    }
-
     let mut projects = Vec::new();
-    let entries = std::fs::read_dir(&base)
-        .map_err(|e| format!("Failed to read default project directory: {}", e))?;
-
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if !path.is_dir() {
+    // Continue discovering projects created under the previous display name.
+    for folder in ["codex-prism", "Codex-Prism"] {
+        let base = home.join("Documents").join(folder);
+        if !base.is_dir() {
             continue;
         }
+        let entries = std::fs::read_dir(&base)
+            .map_err(|e| format!("Failed to read default project directory: {}", e))?;
 
-        let name = entry.file_name().to_string_lossy().to_string();
-        if name.starts_with('.') || !has_tex_file(&path) {
-            continue;
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !path.is_dir() {
+                continue;
+            }
+
+            let name = entry.file_name().to_string_lossy().to_string();
+            if name.starts_with('.') || !has_tex_file(&path) {
+                continue;
+            }
+
+            projects.push(ProjectCandidate {
+                path: path.to_string_lossy().to_string(),
+                name,
+                last_modified: project_modified_ms(&path),
+                has_main_tex: path.join("main.tex").is_file()
+                    || path.join("document.tex").is_file(),
+            });
         }
-
-        projects.push(ProjectCandidate {
-            path: path.to_string_lossy().to_string(),
-            name,
-            last_modified: project_modified_ms(&path),
-            has_main_tex: path.join("main.tex").is_file() || path.join("document.tex").is_file(),
-        });
     }
-
     projects.sort_by(|a, b| b.last_modified.cmp(&a.last_modified));
     Ok(projects)
 }
@@ -457,7 +459,7 @@ fn open_debug_window(app: tauri::AppHandle) -> Result<(), String> {
 
     let url = WebviewUrl::App("index.html?debug=1".into());
     WebviewWindowBuilder::new(&app, "debug", url)
-        .title("Codex-Prism — Debug")
+        .title("codex-prism — Debug")
         .inner_size(560.0, 700.0)
         .min_inner_size(400.0, 400.0)
         .zoom_hotkeys_enabled(true)
@@ -559,7 +561,6 @@ pub fn run() {
 
     #[allow(clippy::expect_used)]
     let app = tauri::Builder::default()
-
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_shell::init())

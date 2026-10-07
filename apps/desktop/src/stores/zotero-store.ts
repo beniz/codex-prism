@@ -1,3 +1,4 @@
+import { migrateStorageKey } from "@/lib/legacy-storage";
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import {
@@ -410,7 +411,7 @@ export const useZoteroStore = create<ZoteroState>()(
       },
     }),
     {
-      name: "claude-prism-zotero",
+      name: migrateStorageKey("codex-prism-zotero"),
       partialize: (state) => ({
         apiKey: state.apiKey,
         userID: state.userID,

@@ -7,7 +7,7 @@ project_dir="$(dirname -- "$(dirname -- "$launcher_path")")"
 
 case "${1:-}" in
   -h|--help)
-    printf 'Usage: codex-prism [--watch]\n\nStart CodexPrism from %s\nBuild current sources on launch; automatic reloads are off unless --watch is supplied.\n' "$project_dir"
+    printf 'Usage: codex-prism [--watch]\n\nStart codex-prism from %s\nBuild current sources on launch; automatic reloads are off unless --watch is supplied.\n' "$project_dir"
     exit 0
     ;;
   ''|--watch) ;;

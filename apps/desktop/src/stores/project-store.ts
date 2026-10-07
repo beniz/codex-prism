@@ -1,3 +1,4 @@
+import { migrateStorageKey } from "@/lib/legacy-storage";
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
@@ -82,7 +83,7 @@ export const useProjectStore = create<ProjectState>()(
       },
     }),
     {
-      name: "claude-prism-projects",
+      name: migrateStorageKey("codex-prism-projects"),
       partialize: (state) => ({
         recentProjects: state.recentProjects,
         lastProjectFolder: state.lastProjectFolder,

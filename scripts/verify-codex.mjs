@@ -28,7 +28,7 @@ child.on('exit', () => { for (const p of pending.values()) p.reject(new Error('C
 const timeout = setTimeout(() => { console.error('Protocol check timed out'); child.kill(); process.exitCode = 1; }, exercise ? 180000 : 30000);
 function call(method, params) { const id = next++; return new Promise((resolve, reject) => { pending.set(id, { resolve, reject }); write({ id, method, params }); }); }
 try {
-  await call('initialize', { clientInfo: { name: 'codex_prism_check', title: 'Codex-Prism protocol check', version: '0.1.0' }, capabilities: {} });
+  await call('initialize', { clientInfo: { name: 'codex_prism_check', title: 'codex-prism protocol check', version: '0.1.0' }, capabilities: {} });
   write({ method: 'initialized' });
   const [account, models] = await Promise.all([call('account/read', { refreshToken: false }), call('model/list', {})]);
   const result = { initialized: true, authenticated: !!account.account, models: models.data?.length ?? 0 };

@@ -183,12 +183,12 @@ export function EnvironmentOnboarding() {
           <div className="flex flex-col items-center px-6 pt-6 pb-4 text-center">
             <img
               src="/icon-192.png"
-              alt="Codex-Prism"
+              alt="codex-prism"
               className="size-14 object-contain"
             />
             <DialogHeader className="mt-3 items-center gap-1.5 text-center">
               <DialogTitle className="font-semibold text-xl">
-                Codex-Prism
+                codex-prism
               </DialogTitle>
               <DialogDescription className="max-w-sm text-sm leading-relaxed">
                 Set up the local tools and model provider required before

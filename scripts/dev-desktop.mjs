@@ -7,8 +7,8 @@ const args = ["pnpm", "--filter=@codex-prism/desktop", "tauri", "dev"];
 if (!watch) args.push("--no-watch");
 console.log(
   watch
-    ? "CodexPrism: automatic reloads and restarts enabled."
-    : "CodexPrism: automatic reloads and restarts disabled. Relaunch to apply code changes.",
+    ? "codex-prism: automatic reloads and restarts enabled."
+    : "codex-prism: automatic reloads and restarts disabled. Relaunch to apply code changes.",
 );
 if (process.platform === "linux")
   env.CXXFLAGS = [env.CXXFLAGS, "-std=c++17"].filter(Boolean).join(" ");

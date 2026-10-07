@@ -1,0 +1,124 @@
+# INACTIVE REFERENCE ONLY. Old GitHub publishing must be ported before reuse.
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Load signing & notarization env vars
+ENV_FILE="apps/desktop/src-tauri/.env"
+if [ -f "$ENV_FILE" ]; then
+  set -a
+  source "$ENV_FILE"
+  set +a
+else
+  echo "Error: $ENV_FILE not found"
+  exit 1
+fi
+
+# Require signing key for updater
+if [ -z "${TAURI_SIGNING_PRIVATE_KEY:-}" ]; then
+  echo "Error: TAURI_SIGNING_PRIVATE_KEY is not set"
+  echo "  Local: set it in apps/desktop/src-tauri/.env"
+  echo "  CI:    set it as a GitHub Actions secret"
+  exit 1
+fi
+
+TARGET="aarch64-apple-darwin"
+VERSION=$(node -p "require('./package.json').version")
+TAG="v${VERSION}"
+
+echo "==> Building codex-prism $TAG for macOS ($TARGET)"
+
+# Build
+export TECTONIC_DEP_BACKEND=vcpkg
+export VCPKG_ROOT="$HOME/vcpkg"
+export CXXFLAGS="-std=c++17"
+export CFLAGS=""
+
+pnpm --filter @codex-prism/desktop tauri build --target "$TARGET"
+
+# Notarize DMG
+DMG_PATH=$(find "apps/desktop/src-tauri/target/$TARGET/release/bundle/dmg" -name '*.dmg' | head -1)
+APP_PATH="apps/desktop/src-tauri/target/$TARGET/release/bundle/macos/codex-prism.app"
+
+if [ -z "$DMG_PATH" ]; then
+  echo "Error: DMG not found"
+  exit 1
+fi
+
+echo "==> Notarizing $DMG_PATH ..."
+xcrun notarytool submit "$DMG_PATH" \
+  --apple-id "$APPLE_ID" \
+  --team-id "$APPLE_TEAM_ID" \
+  --password "$APPLE_PASSWORD" \
+  --wait --timeout 30m
+
+echo "==> Stapling..."
+xcrun stapler staple "$DMG_PATH"
+xcrun stapler staple "$APP_PATH"
+
+# --- Auto-updater artifacts ---
+BUNDLE_DIR="apps/desktop/src-tauri/target/$TARGET/release/bundle"
+UPDATE_TAR=$(find "$BUNDLE_DIR/macos" -name '*.app.tar.gz' | head -1)
+UPDATE_SIG=$(find "$BUNDLE_DIR/macos" -name '*.app.tar.gz.sig' | head -1)
+
+if [ -z "$UPDATE_TAR" ] || [ -z "$UPDATE_SIG" ]; then
+  echo "Warning: Updater artifacts not found, skipping latest.json"
+else
+  SIGNATURE=$(cat "$UPDATE_SIG")
+  PUB_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+  UPDATE_FILENAME=$(basename "$UPDATE_TAR")
+
+  # Generate latest.json (merge with existing if present)
+  LATEST_JSON="apps/desktop/src-tauri/target/latest.json"
+
+  if [ -f "$LATEST_JSON" ]; then
+    # Merge: add this platform to existing latest.json
+    node -e "
+      const fs = require('fs');
+      const data = JSON.parse(fs.readFileSync('$LATEST_JSON', 'utf8'));
+      data.platforms['darwin-aarch64'] = {
+        signature: \`$SIGNATURE\`,
+        url: 'https://github.com/delibae/claude-prism/releases/download/$TAG/codex-prism-macOS.app.tar.gz'
+      };
+      fs.writeFileSync('$LATEST_JSON', JSON.stringify(data, null, 2));
+    "
+  else
+    cat > "$LATEST_JSON" <<EOF
+{
+  "version": "$VERSION",
+  "notes": "codex-prism $TAG",
+  "pub_date": "$PUB_DATE",
+  "platforms": {
+    "darwin-aarch64": {
+      "signature": "$SIGNATURE",
+      "url": "https://github.com/delibae/claude-prism/releases/download/$TAG/codex-prism-macOS.app.tar.gz"
+    }
+  }
+}
+EOF
+  fi
+  echo "==> Generated latest.json with darwin-aarch64"
+fi
+
+# Upload to GitHub Release
+echo "==> Uploading to GitHub Release $TAG"
+gh release view "$TAG" --repo delibae/claude-prism >/dev/null 2>&1 || \
+  gh release create "$TAG" --repo delibae/claude-prism --title "codex-prism $TAG" --generate-notes
+
+# Rename to version-free names
+RENAMED_DMG="apps/desktop/src-tauri/target/codex-prism-macOS.dmg"
+cp "$DMG_PATH" "$RENAMED_DMG"
+UPLOAD_ASSETS=("$RENAMED_DMG")
+
+if [ -n "${UPDATE_TAR:-}" ]; then
+  RENAMED_TAR="apps/desktop/src-tauri/target/codex-prism-macOS.app.tar.gz"
+  cp "$UPDATE_TAR" "$RENAMED_TAR"
+  UPLOAD_ASSETS+=("$RENAMED_TAR")
+fi
+[ -f "${LATEST_JSON:-}" ] && UPLOAD_ASSETS+=("$LATEST_JSON")
+
+gh release upload "$TAG" \
+  --repo delibae/claude-prism \
+  --clobber \
+  "${UPLOAD_ASSETS[@]}"
+
+echo "==> Done! macOS build uploaded to $TAG"

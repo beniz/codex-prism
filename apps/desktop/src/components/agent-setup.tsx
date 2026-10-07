@@ -73,7 +73,7 @@ export function AgentSetup({
               useAgentSetupStore.setState({
                 error: null,
                 loginInfo:
-                  "Executable path saved. Restart Codex-Prism to apply it.",
+                  "Executable path saved. Restart codex-prism to apply it.",
               }),
             )
             .catch((e) => useAgentSetupStore.setState({ error: String(e) }))
