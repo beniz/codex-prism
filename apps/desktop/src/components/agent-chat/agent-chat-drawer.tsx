@@ -618,13 +618,13 @@ export function AgentChatDrawer({ fillHeight = false }: { fillHeight?: boolean }
 }
 
 function Message({ item: m }: { item: ChatItem }) {
+  if (m.type === "reasoning") return null;
   if (m.type !== "agentMessage" && m.type !== "userMessage")
     return (
       <details className="rounded-lg border bg-muted/20 px-3 py-2 text-xs">
         <summary className="cursor-pointer text-muted-foreground">
           {(
             {
-              reasoning: "Thinking",
               commandExecution: "Command",
               fileChange: "File changes",
               plan: "Plan",
