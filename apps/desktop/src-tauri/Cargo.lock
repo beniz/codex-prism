@@ -333,7 +333,7 @@ dependencies = [
 
 [[package]]
 name = "codex-prism-desktop"
-version = "1.4.0"
+version = "1.4.1"
 dependencies = [
  "dirs 5.0.1",
  "objc2",
