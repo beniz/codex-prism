@@ -81,7 +81,7 @@ Individual documents may require additional fonts, publisher classes or language
 
 Documents and compilation stay on your machine. AI requests send prompts and the content used by Codex to its configured provider for inference. Credentials are managed by the installed Codex CLI; signing out affects that shared login.
 
-Existing project instructions, skills, Python environments and history are preserved. The legacy `.claudeprism/history.git` directory name is retained for compatibility with existing projects. New project instructions use `AGENTS.md`, and scientific skills use `.agents/skills`.
+Existing project instructions, skills, Python environments and history are preserved. Project history is stored in `.codexprism/history`; existing `.claudeprism/history.git` history is migrated automatically when a project opens. New project instructions use `AGENTS.md`, and scientific skills use `.agents/skills`.
 
 The application is currently local and single-user. Browser hosting and project collaboration are not included yet.
 
@@ -140,7 +140,7 @@ For a hands-on acceptance check, open a disposable LaTeX project, ask Codex to e
 - The agent saves dirty buffers before starting, runs with `workspace-write` and `on-request` approvals, and allows one active turn per project. Unrelated CLI sessions are not imported into its chat list.
 - File editing is locked during a turn and pending review, but pending review does not block the next chat prompt. Sending a new prompt implicitly keeps pending changes once Codex confirms the new turn has started; Undo then applies only to the new turn. A failed start preserves the prior review. At completion, the app reviews the actual project source/asset changes, including command-generated changes. Keep accepts the current disk contents; Undo restores the saved bytes only if the file still matches the completed turn. Text saves likewise refuse to overwrite an external edit.
 - Review baselines and session mappings persist in the application's data directory, separately from project source. Restart recovers interrupted reviews. Prompts are never automatically resubmitted after a disconnect. Generated build files, hidden/environment directories and symlinks are excluded from snapshots; changes outside that scope cannot be undone by project review.
-- LaTeX/PDF and history features remain; Python and external scientific skills are optional. Existing `.claudeprism/history.git` history is deliberately retained. New project instructions use `AGENTS.md`; scientific skills use `.agents/skills`.
+- LaTeX/PDF and history features remain; Python and external scientific skills are optional. Existing `.claudeprism/history.git` history is migrated to `.codexprism/history` with its commits and labels preserved. New project instructions use `AGENTS.md`; scientific skills use `.agents/skills`.
 - Hosts construct a shared `prism_core::Backend` with explicit application-data, home and temporary paths, an `EventSink`, and optionally a native directory-permission hook. Construction recovers interrupted reviews; `shutdown().await` rejects new work, stops the agent and background installers, drains admitted work, and retains persisted projects/builds. The headless default never opens native permission dialogs.
 - `apps/desktop/src/lib/backend` is the frontend transport boundary and `desktop-host.ts` owns desktop window/dialog/open-link APIs. The implementation remains Tauri-only at this stage; a hosted transport, browser import/export, authentication and remote isolation remain future work.
 

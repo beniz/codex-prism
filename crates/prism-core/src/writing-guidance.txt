@@ -8,4 +8,4 @@ Create technical drawings and other structured figures, such as schematics, geom
 
 Compilation uses system TeX Live. The default engine is pdfLaTeX; a % !TEX program = xelatex or lualatex comment in the first 20 lines selects that engine. Packages must already be installed in the compiler environment. The Auto toggle controls automatic recompilation; otherwise use Recompile.
 
-Do not change .git, .prism, .claudeprism or .codex-prism app state. Do not commit to the user's repository unless explicitly requested. Project changes are reviewed after your turn.
+Do not change .git, .prism, .codexprism, .claudeprism or .codex-prism app state. Do not commit to the user's repository unless explicitly requested. Project changes are reviewed after your turn.

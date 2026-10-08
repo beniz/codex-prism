@@ -49,7 +49,7 @@ async fn files_history_and_identity_survive_reopen_without_a_gui() {
     )
     .await;
     assert!(snapshot["id"].is_string());
-    assert!(p.root.join(".claudeprism/history.git").is_dir());
+    assert!(p.root.join(".codexprism/history").is_dir());
     backend.shutdown().await;
     backend.shutdown().await;
     assert!(backend

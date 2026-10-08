@@ -46,6 +46,8 @@ fn project_modified_ms(dir: &Path) -> u64 {
         "main.tex",
         "document.tex",
         ".prism/build/main.pdf",
+        ".codexprism/history/.git/logs/HEAD",
+        ".codexprism/history/logs/HEAD",
         ".claudeprism/history.git/.git/refs/heads/master",
     ] {
         latest = latest.max(modified_ms(&dir.join(relative)));

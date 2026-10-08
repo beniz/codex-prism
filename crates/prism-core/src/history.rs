@@ -26,9 +26,7 @@ pub struct FileDiff {
 // ─── Helpers ───
 
 fn history_path(project_root: &str) -> PathBuf {
-    Path::new(project_root)
-        .join(".claudeprism")
-        .join("history.git")
+    Path::new(project_root).join(".codexprism").join("history")
 }
 
 fn open_repo(project_root: &str) -> Result<Repository, String> {
@@ -60,7 +58,7 @@ fn tag_map(repo: &Repository) -> HashMap<Oid, Vec<String>> {
 
 fn ensure_excludes(project_root: &str, repo: &Repository) {
     let excludes_path = Path::new(project_root)
-        .join(".claudeprism")
+        .join(".codexprism")
         .join("history-exclude");
     let content = r#"# LaTeX build artifacts
 *.aux
@@ -92,18 +90,23 @@ Thumbs.db
 
 # codex-prism internal
 .claudeprism/
+.codexprism/
 .prism/
 "#;
     if !excludes_path.exists() {
         let _ = fs::write(&excludes_path, content);
     } else {
-        // Migrate: add .prism/ if missing from existing excludes file
-        if let Ok(existing) = fs::read_to_string(&excludes_path) {
-            if !existing.contains(".prism/") {
-                let _ = fs::write(&excludes_path, content);
+        // Preserve custom exclusions while adding internal directories.
+        if let Ok(mut existing) = fs::read_to_string(&excludes_path) {
+            for directory in [".claudeprism/", ".codexprism/", ".prism/"] {
+                if !existing.lines().any(|line| line.trim() == directory) {
+                    existing.push_str(&format!("\n{}\n", directory));
+                }
             }
+            let _ = fs::write(&excludes_path, existing);
         }
     }
+
     // Configure the repo to use this excludes file
     if let Ok(mut config) = repo.config() {
         let _ = config.set_str("core.excludesFile", &excludes_path.to_string_lossy());
@@ -115,20 +118,38 @@ Thumbs.db
 pub(crate) fn history_init(project_root: String) -> Result<(), String> {
     let git_dir = history_path(&project_root);
 
+    let legacy_dir = Path::new(&project_root).join(".claudeprism");
+    let legacy_history = legacy_dir.join("history.git");
+    let state_dir = Path::new(&project_root).join(".codexprism");
+    if !git_dir.exists() && legacy_history.exists() {
+        // Validate before moving; never overwrite an existing destination history.
+        Repository::open(&legacy_history)
+            .map_err(|e| format!("Corrupt legacy history repo: {}", e))?;
+        fs::create_dir_all(&state_dir).map_err(|e| e.to_string())?;
+        let legacy_excludes = legacy_dir.join("history-exclude");
+        let excludes = state_dir.join("history-exclude");
+        if legacy_excludes.exists() && !excludes.exists() {
+            fs::copy(&legacy_excludes, &excludes).map_err(|e| e.to_string())?;
+        }
+        fs::rename(&legacy_history, &git_dir)
+            .map_err(|e| format!("Failed to migrate project history: {}", e))?;
+    }
+
     if git_dir.exists() {
         // Already initialized — verify and ensure excludes
         let repo =
             Repository::open(&git_dir).map_err(|e| format!("Corrupt history repo: {}", e))?;
+        repo.set_workdir(Path::new(&project_root), false)
+            .map_err(|e| format!("Failed to set history workdir: {}", e))?;
         ensure_excludes(&project_root, &repo);
         return Ok(());
     }
 
-    // Create .claudeprism/ dir
-    let claudeprism_dir = Path::new(&project_root).join(".claudeprism");
-    fs::create_dir_all(&claudeprism_dir)
-        .map_err(|e| format!("Failed to create .claudeprism dir: {}", e))?;
+    // Create project history state directory
+    fs::create_dir_all(&state_dir)
+        .map_err(|e| format!("Failed to create .codexprism dir: {}", e))?;
 
-    // Init a bare repo with workdir pointing to project root
+    // Keep the history repository separate, with the project root as its workdir.
     let mut opts = RepositoryInitOptions::new();
     opts.bare(false);
     opts.workdir_path(Path::new(&project_root));
@@ -548,8 +569,8 @@ mod tests {
         let dir = setup_project(&[("main.tex", "\\documentclass{article}")]);
         history_init(root(&dir)).unwrap();
 
-        let git_dir = dir.path().join(".claudeprism").join("history.git");
-        assert!(git_dir.exists(), "history.git should be created");
+        let git_dir = dir.path().join(".codexprism").join("history");
+        assert!(git_dir.exists(), "history directory should be created");
 
         // Should have an initial commit
         let repo = Repository::open(&git_dir).unwrap();
@@ -568,11 +589,47 @@ mod tests {
     }
 
     #[test]
+    fn legacy_history_migration_preserves_commits_labels_and_exclusions() {
+        let dir = setup_project(&[("main.tex", "original")]);
+        let r = root(&dir);
+        history_init(r.clone()).unwrap();
+        let initial = open_repo(&r).unwrap().head().unwrap().target().unwrap();
+        history_add_label(r.clone(), initial.to_string(), "baseline".into()).unwrap();
+        let legacy = dir.path().join(".claudeprism");
+        fs::create_dir_all(&legacy).unwrap();
+        fs::rename(history_path(&r), legacy.join("history.git")).unwrap();
+        fs::remove_file(dir.path().join(".codexprism/history-exclude")).unwrap();
+        fs::write(
+            legacy.join("history-exclude"),
+            "private.txt\n.claudeprism/\n",
+        )
+        .unwrap();
+        fs::write(dir.path().join("private.txt"), "excluded").unwrap();
+
+        history_init(r.clone()).unwrap();
+        assert!(!legacy.join("history.git").exists());
+        let repo = open_repo(&r).unwrap();
+        assert_eq!(repo.head().unwrap().target(), Some(initial));
+        assert_eq!(repo.revparse_single("baseline").unwrap().id(), initial);
+        assert!(history_snapshot(r.clone(), "unchanged".into())
+            .unwrap()
+            .is_none());
+        fs::write(dir.path().join("main.tex"), "updated").unwrap();
+        assert!(history_snapshot(r.clone(), "edit".into())
+            .unwrap()
+            .is_some());
+        assert_eq!(
+            history_file_at(r, initial.to_string(), "main.tex".into()).unwrap(),
+            "original"
+        );
+    }
+
+    #[test]
     fn test_history_init_creates_excludes() {
         let dir = setup_project(&[("main.tex", "doc")]);
         history_init(root(&dir)).unwrap();
 
-        let excludes = dir.path().join(".claudeprism").join("history-exclude");
+        let excludes = dir.path().join(".codexprism").join("history-exclude");
         assert!(excludes.exists());
         let content = fs::read_to_string(&excludes).unwrap();
         assert!(content.contains("*.aux"));
@@ -836,7 +893,7 @@ mod tests {
         history_init(r.clone()).unwrap();
 
         // Write an excludes file WITHOUT .prism/
-        let excludes_path = dir.path().join(".claudeprism").join("history-exclude");
+        let excludes_path = dir.path().join(".codexprism").join("history-exclude");
         fs::write(&excludes_path, "*.aux\n*.log\n.claudeprism/\n").unwrap();
 
         let repo = open_repo(&r).unwrap();

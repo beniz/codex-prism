@@ -8,7 +8,7 @@ Academic writing workspace powered by codex-prism.
 
 - **Compiler:** system TeX Live; pdfLaTeX by default, with XeLaTeX and LuaLaTeX selected using a TeX engine comment.
 - **Build directory:** \`.prism/build/\` (managed by the application).
-- **Version history:** \`.claudeprism/\` (existing automatic snapshots, do not modify).
+- **Version history:** \`.codexprism/history/\` (project snapshots, do not modify).
 - **Python:** optional. An existing project \`.venv/\` may be used; environment setup is an explicit action in workspace settings.
 - **Scientific skills:** optional, loaded from \`~/.agents/skills/\` or project \`.agents/skills/\` when installed. Skills provide guidance; they do not automatically install their tools.
 
