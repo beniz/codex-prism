@@ -105,6 +105,9 @@ pub(crate) fn resolve(root: &Path, relative: &str) -> Result<PathBuf, String> {
     {
         return Err("Expected a project-relative path".into());
     }
+    // macOS exposes temporary directories through /var -> /private/var. Compare
+    // canonical paths on both sides while still rejecting symlinks within a project.
+    let root = fs::canonicalize(root).map_err(|e| e.to_string())?;
     let path = root.join(relative);
     let mut component_path = root.to_path_buf();
     for component in Path::new(relative).components() {
@@ -123,7 +126,7 @@ pub(crate) fn resolve(root: &Path, relative: &str) -> Result<PathBuf, String> {
         }
     }
     let actual = fs::canonicalize(&ancestor).map_err(|e| e.to_string())?;
-    if !actual.starts_with(root) {
+    if !actual.starts_with(&root) {
         return Err("Path escapes project directory".into());
     }
     // A dangling symlink must not become a write-through escape.
@@ -261,6 +264,25 @@ mod tests {
         assert!(resolve(d.path(), "../secret").is_err());
         assert!(resolve(d.path(), "/etc/passwd").is_err());
         assert!(resolve(d.path(), "a/b.tex").is_ok());
+    }
+    #[cfg(unix)]
+    #[test]
+    fn project_roots_under_an_aliased_parent_are_scoped_canonically() {
+        let d = tempfile::tempdir().unwrap();
+        let real = d.path().join("real");
+        fs::create_dir_all(real.join("project")).unwrap();
+        let alias = d.path().join("alias");
+        std::os::unix::fs::symlink(&real, &alias).unwrap();
+        let root = alias.join("project");
+        assert_eq!(
+            resolve(&root, "new.tex").unwrap(),
+            fs::canonicalize(real.join("project"))
+                .unwrap()
+                .join("new.tex")
+        );
+        assert!(resolve(&root, "../outside.tex").is_err());
+        std::os::unix::fs::symlink(d.path(), root.join("escape")).unwrap();
+        assert!(resolve(&root, "escape/outside.tex").is_err());
     }
     #[cfg(unix)]
     #[test]
