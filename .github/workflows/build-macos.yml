@@ -67,7 +67,7 @@ jobs:
           APPLE_SIGNING_IDENTITY: '-'
         run: |
           corepack pnpm --filter @codex-prism/desktop tauri build \
-            --target aarch64-apple-darwin --bundles dmg -- --locked
+            --target aarch64-apple-darwin --bundles app,dmg -- --locked
 
       - name: Verify app signature and checksum DMG
         run: |
