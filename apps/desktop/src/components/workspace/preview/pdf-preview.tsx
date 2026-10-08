@@ -139,6 +139,15 @@ export function PdfPreview() {
     width: number;
     height: number;
   } | null>(null);
+  // A fresh callback reattaches the viewer's ResizeObserver, whose initial
+  // notification can otherwise trigger another render indefinitely.
+  const handleContainerResize = useCallback((width: number, height: number) => {
+    setContainerSize((previous) =>
+      previous?.width === width && previous.height === height
+        ? previous
+        : { width, height },
+    );
+  }, []);
   const [firstPageSize, setFirstPageSize] = useState<{
     width: number;
     height: number;
@@ -814,9 +823,7 @@ export function PdfPreview() {
                       : undefined
                   }
                   onContainerResize={
-                    isActive
-                      ? (w, h) => setContainerSize({ width: w, height: h })
-                      : undefined
+                    isActive ? handleContainerResize : undefined
                   }
                   onCurrentPageChange={
                     isActive ? handleCurrentPageChange : undefined
