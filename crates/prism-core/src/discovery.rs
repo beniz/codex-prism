@@ -67,10 +67,24 @@ pub(crate) fn list_default_projects(app: crate::Backend) -> Result<Vec<ProjectCa
     let home = &app.inner.config.home_dir;
 
     let mut projects = Vec::new();
+    let mut visited = std::collections::HashSet::new();
     // Continue discovering projects created under the previous display name.
     for folder in ["codex-prism", "Codex-Prism"] {
         let base = home.join("Documents").join(folder);
         if !base.is_dir() {
+            continue;
+        }
+        // Legacy and current names can identify the same directory on a
+        // case-insensitive filesystem. Keep distinct directories on other volumes.
+        #[cfg(unix)]
+        let identity = {
+            use std::os::unix::fs::MetadataExt;
+            let metadata = std::fs::metadata(&base).map_err(|e| e.to_string())?;
+            (metadata.dev(), metadata.ino())
+        };
+        #[cfg(not(unix))]
+        let identity = std::fs::canonicalize(&base).map_err(|e| e.to_string())?;
+        if !visited.insert(identity) {
             continue;
         }
         let entries = std::fs::read_dir(&base)
@@ -98,4 +112,24 @@ pub(crate) fn list_default_projects(app: crate::Backend) -> Result<Vec<ProjectCa
     }
     projects.sort_by(|a, b| b.last_modified.cmp(&a.last_modified));
     Ok(projects)
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    #[test]
+    fn legacy_directory_alias_does_not_duplicate_projects() {
+        let (_tmp, backend) = crate::test_backend();
+        let documents = backend.inner.config.home_dir.join("Documents");
+        let current = documents.join("codex-prism");
+        std::fs::create_dir_all(current.join("paper")).unwrap();
+        std::fs::write(current.join("paper/main.tex"), "source").unwrap();
+        let legacy = documents.join("Codex-Prism");
+        // On case-sensitive volumes, reproduce the alias with a symlink.
+        if !legacy.exists() {
+            std::os::unix::fs::symlink(&current, legacy).unwrap();
+        }
+        let projects = backend.list_default_projects().unwrap();
+        assert_eq!(projects.len(), 1);
+        assert_eq!(projects[0].name, "paper");
+    }
 }
