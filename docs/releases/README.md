@@ -52,6 +52,19 @@ The tag-triggered workflow is `.gitea/workflows/release-linux.yml`. No runner is
 
 Do not run a local upload and CI upload for the same tag simultaneously. The current server's API returned HTTP 403 to an unauthenticated version request, so server permissions and runner execution must be verified after setup.
 
+## GitHub Actions: macOS test builds
+
+`.github/workflows/build-macos.yml` builds an Apple Silicon DMG on GitHub's `macos-15` runner. It runs frontend, core and desktop-adapter tests, then packages the app with ad-hoc signing and uploads the DMG plus SHA-256 checksums. No personal Codex credentials, Apple signing certificates or repository secrets are needed. This is a test artifact, not a notarized public release; macOS may require an explicit Gatekeeper override to open it.
+
+After the workflow is on GitHub's default branch:
+
+1. Open **Actions → Build macOS → Run workflow**.
+2. Select the branch (normally `main`) and start the run.
+3. Open the completed run and download `codex-prism-macos-arm64-<run number>` under **Artifacts**, or use the download link in its summary. Artifacts expire after 14 days.
+4. Extract the downloaded archive, open the DMG on an Apple Silicon Mac and install the app. Install/authenticate Codex separately and install TeX Live/MacTeX for compilation.
+
+From an authenticated GitHub CLI, run `gh workflow run build-macos.yml --repo beniz/codex-prism --ref main`. The workflow is manual-only and does not publish releases or alter the Linux/Gitea release process. Intel/universal packages and Developer ID signing/notarization remain future work.
+
 ## Deferred platforms
 
 `deferred-platforms.yml.disabled` and `deferred-macos.sh.disabled` retain the old platform dependency, signing, and packaging recipes as inactive references. Their Tectonic dependencies and GitHub publishing portions are obsolete and must be replaced before reuse. `scripts/build-macos.sh` now performs local packaging only; the generic `build:desktop` script retains Windows support.

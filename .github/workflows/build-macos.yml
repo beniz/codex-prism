@@ -1,0 +1,101 @@
+name: Build macOS
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-macos-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Apple Silicon DMG
+    runs-on: macos-15
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+    env:
+      CARGO_TERM_COLOR: always
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: '22'
+          package-manager-cache: false
+
+      - name: Set up pnpm and Rust
+        run: |
+          test "$(uname -m)" = arm64
+          corepack enable
+          corepack pnpm --version
+          rustup toolchain install 1.88.0 --profile minimal --target aarch64-apple-darwin
+          cargo --version
+          python3 --version
+          if ! command -v pkg-config >/dev/null; then
+            brew install pkg-config
+          fi
+
+      - name: Cache Rust builds
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          workspaces: |
+            crates/prism-core -> target
+            apps/desktop/src-tauri -> target
+
+      - name: Install frontend dependencies
+        run: corepack pnpm install --frozen-lockfile
+
+      - name: Test frontend and backend
+        run: |
+          corepack pnpm --filter @codex-prism/desktop test
+          cargo test --locked --manifest-path crates/prism-core/Cargo.toml
+          cargo test --locked --manifest-path apps/desktop/src-tauri/Cargo.toml --lib
+
+      - name: Build macOS app and DMG
+        env:
+          # Ad-hoc signing needs no certificate; this build is not notarized.
+          APPLE_SIGNING_IDENTITY: '-'
+        run: |
+          corepack pnpm --filter @codex-prism/desktop tauri build \
+            --target aarch64-apple-darwin --bundles dmg -- --locked
+
+      - name: Verify app signature and checksum DMG
+        run: |
+          codesign --verify --deep --strict \
+            apps/desktop/src-tauri/target/aarch64-apple-darwin/release/bundle/macos/codex-prism.app
+          cd apps/desktop/src-tauri/target/aarch64-apple-darwin/release/bundle/dmg
+          shasum -a 256 ./*.dmg > SHA256SUMS
+
+      - name: Upload DMG
+        id: artifact
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: codex-prism-macos-arm64-${{ github.run_number }}
+          path: |
+            apps/desktop/src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg
+            apps/desktop/src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
+
+      - name: Add download instructions
+        env:
+          ARTIFACT_URL: ${{ steps.artifact.outputs.artifact-url }}
+        run: |
+          {
+            echo '### macOS Apple Silicon build'
+            echo "[Download the DMG artifact]($ARTIFACT_URL)"
+            echo ''
+            echo 'Ad-hoc signed test build; not Apple-notarized.'
+            echo 'Install and authenticate Codex separately, and install TeX Live/MacTeX to compile LaTeX.'
+          } >> "$GITHUB_STEP_SUMMARY"
