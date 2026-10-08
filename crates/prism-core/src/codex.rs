@@ -138,11 +138,18 @@ fn executable(app: &crate::Backend) -> Result<String, String> {
     if !configured.trim().is_empty() {
         return Ok(configured.trim().into());
     }
-    which::which("codex")
-        .map(|p| p.to_string_lossy().into())
-        .map_err(|_| {
-            "Codex is not installed or not on PATH. Set its executable path in Settings.".into()
-        })
+    if let Ok(path) = which::which("codex") {
+        return Ok(path.to_string_lossy().into());
+    }
+    // Finder-launched apps may not have Codex on PATH. ChatGPT bundles a CLI
+    // that can also run the app-server used by this backend.
+    #[cfg(target_os = "macos")]
+    if let Ok(path) = which::which(
+        "/Applications/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex",
+    ) {
+        return Ok(path.to_string_lossy().into());
+    }
+    Err("Codex was not found automatically. Set its executable path in Settings.".into())
 }
 async fn connection(app: &crate::Backend) -> Result<Arc<Connection>, String> {
     let state = &app.inner.codex;

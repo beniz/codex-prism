@@ -52,6 +52,7 @@ import {
 } from "@/components/ui/dialog";
 import { ProjectWizard, type CreationMode } from "./project-wizard";
 import { AgentSetup } from "./agent-setup";
+import { LatexSetup } from "./latex-setup";
 import { cn } from "@/lib/utils";
 
 interface DefaultProject {
@@ -1031,6 +1032,7 @@ function EnvironmentStatus({ appVersion }: { appVersion: string }) {
   return (
     <>
       <div className="divide-y divide-border/60">
+        <LatexSetup />
         {/* Python (uv) */}
         <StatusRow
           ok={uvStatus === "ready"}
