@@ -18,6 +18,7 @@ const mupdfWasmFile = path.resolve(
 export default defineConfig({
   plugins: [react(), topLevelAwait()],
   resolve: {
+    dedupe: ["react", "react-dom"],
     alias: {
       "@": path.resolve(__dirname, "src"),
     },

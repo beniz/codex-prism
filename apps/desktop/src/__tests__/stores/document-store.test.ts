@@ -715,3 +715,84 @@ describe("file refresh compilation invalidation", () => {
     expect(useDocumentStore.getState().contentGeneration).toBe(12);
   });
 });
+
+it("uses metadata to skip unchanged reads and retries changed content", async () => {
+  const { scanProjectFolder } = await import("@/lib/tauri/fs");
+  const file = makeFile({ fileSize: 11, diskToken: "v1" });
+  useDocumentStore.setState({
+    projectRoot: "/project",
+    files: [file],
+    folders: [],
+    activeFileId: file.id,
+  });
+  const entry = {
+    relativePath: file.relativePath,
+    ref: file.ref,
+    type: file.type,
+    fileSize: 11,
+    diskToken: "v1",
+  };
+  vi.mocked(readTextFile).mockClear();
+  vi.mocked(scanProjectFolder).mockResolvedValueOnce({
+    files: [entry],
+    folders: [],
+  });
+  await useDocumentStore.getState().refreshFiles();
+  expect(readTextFile).not.toHaveBeenCalled();
+  expect(useDocumentStore.getState().files[0]).toBe(file);
+  vi.mocked(scanProjectFolder).mockResolvedValueOnce({
+    files: [{ ...entry, diskToken: "v2" }],
+    folders: [],
+  });
+  vi.mocked(readTextFile).mockRejectedValueOnce(new Error("busy"));
+  await useDocumentStore.getState().refreshFiles();
+  expect(useDocumentStore.getState().files[0].diskToken).toBeUndefined();
+  vi.mocked(scanProjectFolder).mockResolvedValueOnce({
+    files: [{ ...entry, diskToken: "v2" }],
+    folders: [],
+  });
+  vi.mocked(readTextFile).mockResolvedValueOnce("Agent edits");
+  await useDocumentStore.getState().refreshFiles();
+  expect(useDocumentStore.getState().files[0].content).toBe("Agent edits");
+});
+
+it("preserves edits made during a refresh and ignores a previous project's results", async () => {
+  const { scanProjectFolder } = await import("@/lib/tauri/fs");
+  const file = makeFile({ fileSize: 11 });
+  const scan = {
+    files: [
+      {
+        relativePath: file.relativePath,
+        ref: file.ref,
+        type: file.type,
+        fileSize: 11,
+      },
+    ],
+    folders: [],
+  };
+  for (const switchProject of [false, true]) {
+    useDocumentStore.setState({
+      projectRoot: "/project",
+      files: [file],
+      folders: [],
+    });
+    vi.mocked(scanProjectFolder).mockResolvedValueOnce(scan);
+    let release!: (text: string) => void;
+    vi.mocked(readTextFile).mockImplementationOnce(
+      () =>
+        new Promise((r) => {
+          release = r;
+        }),
+    );
+    const refresh = useDocumentStore.getState().refreshFiles();
+    await vi.waitFor(() => expect(release).toBeTypeOf("function"));
+    const edited = { ...file, content: "Local edit", isDirty: true };
+    useDocumentStore.setState({
+      files: [edited],
+      ...(switchProject ? { projectRoot: "/elsewhere" } : {}),
+    });
+    release("Agent edit");
+    await refresh;
+    expect(useDocumentStore.getState().files[0]).toBe(edited);
+  }
+});

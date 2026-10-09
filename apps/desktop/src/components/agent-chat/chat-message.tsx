@@ -1,3 +1,4 @@
+import { memo } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
@@ -8,7 +9,7 @@ import { summarizeActivity } from "@/lib/chat-activity";
 import { openExternal } from "@/lib/backend/desktop-host";
 import { toast } from "sonner";
 
-export function Message({ item: m }: { item: ChatItem }) {
+export const Message = memo(function Message({ item: m }: { item: ChatItem }) {
   if (m.type === "reasoning") return null;
   if (m.type !== "agentMessage" && m.type !== "userMessage") {
     const activity = summarizeActivity(m);
@@ -61,4 +62,4 @@ export function Message({ item: m }: { item: ChatItem }) {
       </div>
     </article>
   );
-}
+});

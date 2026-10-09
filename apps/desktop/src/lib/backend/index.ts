@@ -95,7 +95,10 @@ export interface PrismBackend {
   files: {
     list(
       projectId: string,
-    ): Promise<{ files: { path: string; size: number }[]; folders: string[] }>;
+    ): Promise<{
+      files: { path: string; size: number; changeToken?: string }[];
+      folders: string[];
+    }>;
     mutate(
       ref: FileRef,
       action: "mkdir" | "delete" | "rename",

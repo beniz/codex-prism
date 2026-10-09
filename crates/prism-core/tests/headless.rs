@@ -233,3 +233,34 @@ async fn project_service_pdf_roundtrip() {
     );
     backend.shutdown().await;
 }
+
+#[test]
+fn file_listing_tokens_are_stable_and_detect_same_size_replacements() {
+    let dir = tempfile::tempdir().unwrap();
+    let backend = Backend::new(config(&dir), Arc::new(NoopEventSink)).unwrap();
+    let p = project(&backend, &dir);
+    let path = p.root.join("main.tex");
+    fs::write(&path, "before").unwrap();
+    let first = backend.project_list(p.id.clone()).unwrap();
+    assert!(first["files"][0]["changeToken"].is_string());
+    assert_eq!(first, backend.project_list(p.id.clone()).unwrap());
+    let replacement = p.root.join("replacement");
+    fs::write(&replacement, "after!").unwrap();
+    // Editors commonly save through atomic replacement. Preserve mtime to ensure
+    // the Unix identity/change-time part still detects the replacement.
+    let modified = fs::metadata(&path).unwrap().modified().unwrap();
+    fs::File::options()
+        .write(true)
+        .open(&replacement)
+        .unwrap()
+        .set_times(fs::FileTimes::new().set_modified(modified))
+        .unwrap();
+    fs::rename(replacement, path).unwrap();
+    let second = backend.project_list(p.id).unwrap();
+    assert_eq!(first["files"][0]["size"], second["files"][0]["size"]);
+    #[cfg(unix)]
+    assert_ne!(
+        first["files"][0]["changeToken"],
+        second["files"][0]["changeToken"]
+    );
+}

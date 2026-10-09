@@ -1,4 +1,4 @@
-import { Message } from "./chat-message";
+import { ChatHistory } from "./chat-history";
 import { useEffect, useRef, useState } from "react";
 import {
   ArrowUpIcon,
@@ -55,8 +55,39 @@ export function AgentChatDrawer({
 }: {
   fillHeight?: boolean;
 }) {
-  const s = useAgentChatStore();
-  const setup = useAgentSetupStore();
+  const s = {
+    activeTabId: useAgentChatStore((state) => state.activeTabId),
+    addPendingAttachment: useAgentChatStore(
+      (state) => state.addPendingAttachment,
+    ),
+    cancelExecution: useAgentChatStore((state) => state.cancelExecution),
+    closeTab: useAgentChatStore((state) => state.closeTab),
+    createTab: useAgentChatStore((state) => state.createTab),
+    effortLevel: useAgentChatStore((state) => state.effortLevel),
+    error: useAgentChatStore((state) => state.error),
+    isStreaming: useAgentChatStore((state) => state.isStreaming),
+    locked: useAgentChatStore((state) => state.locked),
+    pendingAttachments: useAgentChatStore((state) => state.pendingAttachments),
+    projectId: useAgentChatStore((state) => state.projectId),
+    requestPinnedContextRemoval: useAgentChatStore(
+      (state) => state.requestPinnedContextRemoval,
+    ),
+    requests: useAgentChatStore((state) => state.requests),
+    respond: useAgentChatStore((state) => state.respond),
+    resumeSession: useAgentChatStore((state) => state.resumeSession),
+    selectedModel: useAgentChatStore((state) => state.selectedModel),
+    sendPrompt: useAgentChatStore((state) => state.sendPrompt),
+    setActiveTab: useAgentChatStore((state) => state.setActiveTab),
+    tabs: useAgentChatStore((state) => state.tabs),
+    pendingReview: useAgentChatStore(
+      (state) => !state.review.active && state.review.changes.length > 0,
+    ),
+  };
+  const setup = {
+    status: useAgentSetupStore((state) => state.status),
+    models: useAgentSetupStore((state) => state.models),
+    checkStatus: useAgentSetupStore((state) => state.checkStatus),
+  };
   const [open, setOpen] = useState(true);
   const [settings, setSettings] = useState(false);
   const [sessions, setSessions] = useState<Session[]>([]);
@@ -106,7 +137,7 @@ export function AgentChatDrawer({
   const model =
     setup.models.find((m) => m.model === s.selectedModel) ||
     setup.models.find((m) => m.isDefault);
-  const pendingReview = !s.review.active && s.review.changes.length > 0;
+  const pendingReview = s.pendingReview;
   const canSend =
     !!t.draft.trim() &&
     (t.isStreaming || !s.locked || pendingReview) &&
@@ -355,9 +386,7 @@ export function AgentChatDrawer({
                 </p>
               </div>
             )}
-            {t.messages.map((m) => (
-              <Message key={m.id} item={m} />
-            ))}
+            <ChatHistory key={t.id} messages={t.messages} viewport={viewport} />
             {t.isStreaming && (
               <div
                 role="status"

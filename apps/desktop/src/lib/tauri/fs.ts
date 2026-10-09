@@ -19,6 +19,7 @@ export interface FsProjectFile {
   ref: FileRef;
   type: ProjectFileType;
   fileSize: number;
+  diskToken?: string;
 }
 
 /** Files larger than this (1 MB) are not auto-loaded into memory during project open. */
@@ -130,7 +131,9 @@ function refFor(path: string | FileRef): FileRef {
   throw new Error("File is not in a registered project");
 }
 export async function scanProjectFolder(rootPath: string): Promise<ScanResult> {
-  const project = await registerProjectRoot(rootPath);
+  const project =
+    projects.get(rootPath.replace(/[\\/]+$/, "")) ??
+    (await registerProjectRoot(rootPath));
   const result = await backend.files.list(project.id);
   return {
     folders: result.folders,
@@ -143,6 +146,7 @@ export async function scanProjectFolder(rootPath: string): Promise<ScanResult> {
               ref: { projectId: project.id, path: f.path },
               type,
               fileSize: f.size,
+              diskToken: f.changeToken,
             },
           ]
         : [];

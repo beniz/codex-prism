@@ -369,7 +369,22 @@ pub(crate) fn project_list(
                 folders.push(rel);
                 walk(root, &path, files, folders)?
             } else if ft.is_file() {
-                files.push(serde_json::json!({"path":rel,"size":e.metadata().map_err(|e|e.to_string())?.len()}));
+                let metadata = e.metadata().map_err(|e| e.to_string())?;
+                let modified = metadata.modified().map_err(|e| e.to_string())?;
+                let token = format!("{}:{modified:?}", metadata.len());
+                #[cfg(unix)]
+                let token = {
+                    use std::os::unix::fs::MetadataExt;
+                    format!(
+                        "{token}:{}:{}:{}",
+                        metadata.ino(),
+                        metadata.ctime(),
+                        metadata.ctime_nsec()
+                    )
+                };
+                files.push(
+                    serde_json::json!({"path":rel,"size":metadata.len(),"changeToken":token}),
+                );
             }
         }
         Ok(())

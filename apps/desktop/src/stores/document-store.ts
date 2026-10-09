@@ -1,3 +1,4 @@
+import { coalescedRefresh } from "@/lib/coalesced-refresh";
 import { create } from "zustand";
 import { invoke, backend, type FileRef } from "@/lib/backend";
 import {
@@ -38,6 +39,7 @@ export interface ProjectFile {
   isDirty: boolean;
   /** File size in bytes (from stat). Used to skip auto-loading large files. */
   fileSize?: number;
+  diskToken?: string;
 }
 
 // ── PDF bytes cache (kept outside Zustand to avoid React diffing large buffers) ──
@@ -317,6 +319,8 @@ function scheduleAutoSave() {
   }, 2000);
 }
 
+const refreshQueue = coalescedRefresh();
+
 export const useDocumentStore = create<DocumentState>()((set, get) => ({
   projectId: null,
   projectRoot: null,
@@ -355,6 +359,7 @@ export const useDocumentStore = create<DocumentState>()((set, get) => ({
         type: f.type,
         isDirty: false,
         fileSize: f.fileSize,
+        diskToken: f.diskToken,
       };
 
       // Load content for text-based files (skip large non-essential files)
@@ -371,6 +376,7 @@ export const useDocumentStore = create<DocumentState>()((set, get) => ({
             pf.content = await readTexFileContent(f.ref);
           } catch {
             pf.content = "";
+            pf.diskToken = undefined;
           }
         }
         // Large "other" files: content stays undefined, loaded on-demand via loadFileContent
@@ -382,7 +388,8 @@ export const useDocumentStore = create<DocumentState>()((set, get) => ({
           try {
             pf.dataUrl = await readImageAsDataUrl(f.ref);
           } catch {
-            // Image loading failed, that's ok
+            pf.diskToken = undefined;
+            // Retry on refresh.
           }
         }
       }
@@ -1059,124 +1066,120 @@ export const useDocumentStore = create<DocumentState>()((set, get) => ({
   },
 
   refreshFiles: async () => {
-    const { projectRoot, files, activeFileId } = get();
-    if (!projectRoot) return;
-
-    const { files: fsFiles, folders: fsFolders } =
-      await scanProjectFolder(projectRoot);
-    const existingMap = new Map(files.map((f) => [f.relativePath, f]));
-    const diskPaths = new Set(fsFiles.map((f) => f.relativePath));
-
-    const merged: ProjectFile[] = [];
-
-    for (const fsFile of fsFiles) {
-      const existing = existingMap.get(fsFile.relativePath);
-
-      if (existing) {
-        // Existing file — reload content from disk unless the user has unsaved edits
-        if (existing.isDirty) {
-          merged.push(existing);
-        } else {
-          const updated = { ...existing, fileSize: fsFile.fileSize };
-          if (
-            updated.type === "tex" ||
-            updated.type === "bib" ||
-            updated.type === "style" ||
-            updated.type === "other"
-          ) {
-            const isLargeNonEssential =
-              updated.type === "other" &&
-              fsFile.fileSize > LARGE_FILE_THRESHOLD;
-            // Only reload if it was previously loaded (not a skipped large file)
-            if (!isLargeNonEssential || updated.content !== undefined) {
-              try {
-                updated.content = await readTexFileContent(updated.ref);
-              } catch {
-                /* keep previous content */
-              }
+    const root = get().projectRoot;
+    if (!root) return;
+    return refreshQueue(root, async () => {
+      if (get().projectRoot !== root) return;
+      const before = get().files;
+      const existing = new Map(before.map((f) => [f.relativePath, f]));
+      const scan = await scanProjectFolder(root);
+      const merged = new Array<ProjectFile>(scan.files.length);
+      let cursor = 0;
+      // Bound disk/IPC concurrency, including when a turn creates many files.
+      await Promise.all(
+        Array.from({ length: Math.min(4, scan.files.length) }, async () => {
+          while (cursor < scan.files.length) {
+            const index = cursor++;
+            const f = scan.files[index];
+            const old = existing.get(f.relativePath);
+            if (
+              old &&
+              (old.isDirty ||
+                (f.diskToken !== undefined && old.diskToken === f.diskToken))
+            ) {
+              merged[index] = old;
+              continue;
             }
-          }
-          if (
-            updated.type === "image" &&
-            (updated.dataUrl || fsFile.fileSize <= LARGE_FILE_THRESHOLD)
-          ) {
+            const next: ProjectFile = {
+              ...old,
+              id: f.relativePath,
+              name: f.relativePath.split(/[/\\]/).pop() || f.relativePath,
+              relativePath: f.relativePath,
+              ref: f.ref,
+              type: f.type,
+              isDirty: false,
+              fileSize: f.fileSize,
+              diskToken: f.diskToken,
+            };
             try {
-              updated.dataUrl = await readImageAsDataUrl(updated.ref);
+              if (
+                ["tex", "bib", "style"].includes(f.type) ||
+                (f.type === "other" &&
+                  (f.fileSize <= LARGE_FILE_THRESHOLD ||
+                    old?.content !== undefined))
+              ) {
+                next.content = await readTexFileContent(f.ref);
+              } else if (
+                f.type === "image" &&
+                (f.fileSize <= LARGE_FILE_THRESHOLD || old?.dataUrl)
+              ) {
+                next.dataUrl = await readImageAsDataUrl(f.ref);
+              }
             } catch {
-              /* Keep preview until a successful reload. */
+              // Retry on the next scan; a failed read must not acknowledge the token.
+              next.diskToken = undefined;
             }
+            merged[index] =
+              old &&
+              old.content === next.content &&
+              old.dataUrl === next.dataUrl &&
+              old.fileSize === next.fileSize &&
+              old.diskToken === next.diskToken
+                ? old
+                : next;
           }
-          merged.push(updated);
+        }),
+      );
+      if (get().projectRoot !== root) return;
+      set((state) => {
+        const latest = new Map(state.files.map((f) => [f.relativePath, f]));
+        // Edits, renames and deletions made during the read take precedence.
+        const result = merged.flatMap((f) => {
+          const old = existing.get(f.relativePath);
+          const now = latest.get(f.relativePath);
+          if (old && !now) return [];
+          return [now && now !== old ? now : f];
+        });
+        const paths = new Set(result.map((f) => f.relativePath));
+        for (const f of state.files) {
+          if (
+            !paths.has(f.relativePath) &&
+            (f.isDirty || existing.get(f.relativePath) !== f)
+          )
+            result.push(f);
         }
-      } else {
-        // New file on disk
-        const pf: ProjectFile = {
-          id: fsFile.relativePath,
-          name: fsFile.relativePath.split(/[/\\]/).pop() || fsFile.relativePath,
-          relativePath: fsFile.relativePath,
-          ref: fsFile.ref,
-          type: fsFile.type,
-          isDirty: false,
-          fileSize: fsFile.fileSize,
+        const changed =
+          result.length !== state.files.length ||
+          result.some((f, i) => {
+            const old = state.files[i];
+            return (
+              !old ||
+              old.relativePath !== f.relativePath ||
+              old.content !== f.content ||
+              old.dataUrl !== f.dataUrl ||
+              old.fileSize !== f.fileSize ||
+              (f.content === undefined &&
+                f.dataUrl === undefined &&
+                old.diskToken !== f.diskToken)
+            );
+          });
+        const sameFiles =
+          result.length === state.files.length &&
+          result.every((f, i) => f === state.files[i]);
+        const sameFolders =
+          scan.folders.length === state.folders.length &&
+          scan.folders.every((f, i) => f === state.folders[i]);
+        if (sameFiles && sameFolders) return state;
+        return {
+          files: sameFiles ? state.files : result,
+          folders: sameFolders ? state.folders : scan.folders,
+          activeFileId: result.some((f) => f.id === state.activeFileId)
+            ? state.activeFileId
+            : (result[0]?.id ?? ""),
+          contentGeneration: state.contentGeneration + (changed ? 1 : 0),
         };
-        const isLargeNonEssential =
-          pf.type === "other" && fsFile.fileSize > LARGE_FILE_THRESHOLD;
-        if (
-          pf.type === "tex" ||
-          pf.type === "bib" ||
-          pf.type === "style" ||
-          (pf.type === "other" && !isLargeNonEssential)
-        ) {
-          try {
-            pf.content = await readTexFileContent(pf.ref);
-          } catch {
-            /* skip unreadable */
-          }
-        } else if (
-          pf.type === "image" &&
-          fsFile.fileSize <= LARGE_FILE_THRESHOLD
-        ) {
-          try {
-            pf.dataUrl = await readImageAsDataUrl(pf.ref);
-          } catch {
-            /* skip unreadable */
-          }
-        }
-        // PDF files and large files are loaded on-demand
-        merged.push(pf);
-      }
-    }
-
-    // Keep dirty files that were deleted from disk (user hasn't saved yet)
-    for (const f of files) {
-      if (!diskPaths.has(f.relativePath) && f.isDirty) {
-        merged.push(f);
-      }
-    }
-
-    const newActiveId = merged.some((f) => f.id === activeFileId)
-      ? activeFileId
-      : (merged[0]?.id ?? "");
-
-    const changed =
-      merged.length !== files.length ||
-      merged.some((file) => {
-        const previous = existingMap.get(file.relativePath);
-        return (
-          !previous ||
-          previous.content !== file.content ||
-          previous.dataUrl !== file.dataUrl ||
-          previous.fileSize !== file.fileSize
-        );
       });
-    // Polling and review refreshes are not edits. Preserve the generation so
-    // auto-recompile only runs when on-disk inputs actually change.
-    set((s) => ({
-      files: changed ? merged : files,
-      folders: fsFolders,
-      activeFileId: newActiveId,
-      contentGeneration: s.contentGeneration + (changed ? 1 : 0),
-    }));
+    });
   },
 
   loadFileContent: async (id) => {

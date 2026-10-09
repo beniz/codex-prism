@@ -1,3 +1,4 @@
+import { coalescedRefresh } from "@/lib/coalesced-refresh";
 import { create } from "zustand";
 import { backend, type AgentEvent, type Review } from "@/lib/backend";
 import { useDocumentStore } from "./document-store";
@@ -71,6 +72,53 @@ const tab = (): TabState => ({
 });
 const first = tab();
 const submissions = new Set<string>();
+const reviewQueue = coalescedRefresh();
+// One notification per batch, regardless of how many fragments/items arrived.
+const deltas = new Map<
+  string,
+  {
+    tabId: string;
+    sessionId: string | null;
+    projectId: string | null;
+    item: ChatItem;
+  }
+>();
+let deltaTimer: ReturnType<typeof setTimeout> | undefined;
+function clearDeltas() {
+  clearTimeout(deltaTimer);
+  deltaTimer = undefined;
+  deltas.clear();
+}
+function flushDeltas() {
+  clearTimeout(deltaTimer);
+  deltaTimer = undefined;
+  if (!deltas.size) return;
+  const batch = [...deltas.values()];
+  deltas.clear();
+  useAgentChatStore.setState((s) => {
+    const tabs = s.tabs.map((t) => {
+      const updates = batch.filter(
+        (d) =>
+          d.projectId === s.projectId &&
+          d.tabId === t.id &&
+          d.sessionId === t.sessionId,
+      );
+      if (!updates.length) return t;
+      const messages = [...t.messages];
+      for (const { item } of updates) {
+        const index = messages.findIndex((m) => m.id === item.id);
+        if (index < 0) messages.push(item);
+        else
+          messages[index] = {
+            ...messages[index],
+            text: messages[index].text + item.text,
+          };
+      }
+      return { ...t, messages };
+    });
+    return tabs.every((t, i) => t === s.tabs[i]) ? s : { tabs };
+  });
+}
 export const useAgentChatStore = create<ChatState>((set, get) => ({
   tabs: [first],
   activeTabId: first.id,
@@ -102,6 +150,7 @@ export const useAgentChatStore = create<ChatState>((set, get) => ({
     })),
   resetForProject: (root) => {
     if (get().activeProjectPath === root) return;
+    clearDeltas();
     const t = tab();
     set({
       tabs: [t],
@@ -156,9 +205,12 @@ export const useAgentChatStore = create<ChatState>((set, get) => ({
   refreshReview: async () => {
     const id = get().projectId;
     if (!id) return;
-    const review = await backend.review.get(id);
-    if (get().projectId !== id) return;
-    set({ review, locked: review.active || review.changes.length > 0 });
+    return reviewQueue(id, async () => {
+      if (get().projectId !== id) return;
+      const review = await backend.review.get(id);
+      if (get().projectId !== id) return;
+      set({ review, locked: review.active || review.changes.length > 0 });
+    });
   },
   resolveReview: async (path, undo) => {
     const id = get().projectId;
@@ -337,6 +389,8 @@ export const useAgentChatStore = create<ChatState>((set, get) => ({
     }
   },
   handleEvent: (e) => {
+    // Finish buffered text before lifecycle events replace items or end a turn.
+    if (!e.method.endsWith("/delta")) flushDeltas();
     const p = e.params ?? {};
     if (e.method === "connection/closed") {
       set((s) => ({
@@ -400,22 +454,17 @@ export const useAgentChatStore = create<ChatState>((set, get) => ({
         : e.method.includes("command")
           ? "commandExecution"
           : "agentMessage";
-      set((s) => ({
-        tabs: s.tabs.map((x) => {
-          if (x.id !== t.id) return x;
-          const found = x.messages.find((i) => i.id === p.itemId);
-          return {
-            ...x,
-            messages: found
-              ? x.messages.map((i) =>
-                  i.id === p.itemId
-                    ? { ...i, text: i.text + (p.delta ?? "") }
-                    : i,
-                )
-              : [...x.messages, { id: p.itemId, type, text: p.delta ?? "" }],
-          };
-        }),
-      }));
+      const key = JSON.stringify([t.id, p.itemId]);
+      const buffered = deltas.get(key);
+      if (buffered) buffered.item.text += p.delta ?? "";
+      else
+        deltas.set(key, {
+          tabId: t.id,
+          sessionId: t.sessionId,
+          projectId: get().projectId,
+          item: { id: p.itemId, type, text: p.delta ?? "" },
+        });
+      deltaTimer ??= setTimeout(flushDeltas, 32);
     }
     if (e.method === "turn/plan/updated") {
       const item = {

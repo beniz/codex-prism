@@ -20,12 +20,15 @@ pub fn project_relocate(
 }
 
 #[tauri::command]
-pub fn project_read(
+pub async fn project_read(
     backend: tauri::State<'_, prism_core::Backend>,
     project_id: String,
     path: String,
 ) -> Result<serde_json::Value, String> {
-    backend.project_read(project_id, path)
+    let backend = backend.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || backend.project_read(project_id, path))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -51,11 +54,14 @@ pub fn project_mutate(
 }
 
 #[tauri::command]
-pub fn project_list(
+pub async fn project_list(
     backend: tauri::State<'_, prism_core::Backend>,
     project_id: String,
 ) -> Result<serde_json::Value, String> {
-    backend.project_list(project_id)
+    let backend = backend.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || backend.project_list(project_id))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]

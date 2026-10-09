@@ -302,3 +302,59 @@ describe("Codex turn lifecycle", () => {
     ]);
   });
 });
+
+it("batches a streaming burst into one notification and retains completed message identities", () => {
+  vi.useFakeTimers();
+  const previous = {
+    id: "previous",
+    type: "agentMessage",
+    text: "Earlier reply",
+  };
+  useAgentChatStore.setState({
+    tabs: [
+      {
+        ...useAgentChatStore.getState().tabs[0],
+        sessionId: "thread1",
+        messages: [previous],
+      },
+    ],
+  });
+  const notify = vi.fn();
+  const unsubscribe = useAgentChatStore.subscribe(notify);
+  try {
+    for (let i = 0; i < 100; i++)
+      useAgentChatStore.getState().handleEvent({
+        method: "item/agentMessage/delta",
+        params: { threadId: "thread1", itemId: "new", delta: "x" },
+      });
+    expect(notify).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(32);
+    expect(notify).toHaveBeenCalledTimes(1);
+    const messages = useAgentChatStore.getState().tabs[0].messages;
+    expect(messages[0]).toBe(previous);
+    expect(messages[1].text).toBe("x".repeat(100));
+  } finally {
+    unsubscribe();
+    vi.useRealTimers();
+  }
+});
+
+it("discards buffered text when switching projects", () => {
+  vi.useFakeTimers();
+  try {
+    useAgentChatStore.setState({
+      tabs: [{ ...useAgentChatStore.getState().tabs[0], sessionId: "thread1" }],
+    });
+    useAgentChatStore
+      .getState()
+      .handleEvent({
+        method: "item/agentMessage/delta",
+        params: { threadId: "thread1", itemId: "new", delta: "old project" },
+      });
+    useAgentChatStore.getState().resetForProject(null);
+    vi.advanceTimersByTime(32);
+    expect(useAgentChatStore.getState().tabs[0].messages).toEqual([]);
+  } finally {
+    vi.useRealTimers();
+  }
+});
