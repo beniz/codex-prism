@@ -34,6 +34,28 @@ fn open_repo(project_root: &str) -> Result<Repository, String> {
     Repository::open(&git_dir).map_err(|e| format!("Failed to open history repo: {}", e))
 }
 
+// An interrupted legacy initialization can leave only an empty .git directory.
+// Do not mistake nonempty, potentially recoverable repositories for this case.
+fn empty_legacy_history(path: &Path) -> Result<bool, String> {
+    let entries = fs::read_dir(path)
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+    if entries.is_empty() {
+        return Ok(true);
+    }
+    if entries.len() != 1 || entries[0].file_name() != ".git" {
+        return Ok(false);
+    }
+    if !entries[0].file_type().map_err(|e| e.to_string())?.is_dir() {
+        return Ok(false);
+    }
+    Ok(fs::read_dir(entries[0].path())
+        .map_err(|e| e.to_string())?
+        .next()
+        .is_none())
+}
+
 fn default_signature() -> Result<Signature<'static>, String> {
     Signature::now("codex-prism", "history@codex-prism.local")
         .map_err(|e| format!("Failed to create signature: {}", e))
@@ -121,7 +143,7 @@ pub(crate) fn history_init(project_root: String) -> Result<(), String> {
     let legacy_dir = Path::new(&project_root).join(".claudeprism");
     let legacy_history = legacy_dir.join("history.git");
     let state_dir = Path::new(&project_root).join(".codexprism");
-    if !git_dir.exists() && legacy_history.exists() {
+    if !git_dir.exists() && legacy_history.exists() && !empty_legacy_history(&legacy_history)? {
         // Validate before moving; never overwrite an existing destination history.
         Repository::open(&legacy_history)
             .map_err(|e| format!("Corrupt legacy history repo: {}", e))?;
@@ -586,6 +608,47 @@ mod tests {
         history_init(r.clone()).unwrap();
         // Second call should succeed without error
         history_init(r).unwrap();
+    }
+
+    #[test]
+    fn empty_legacy_shell_does_not_block_history_initialization() {
+        for nested_git in [false, true] {
+            let dir = setup_project(&[("main.tex", "current document")]);
+            let legacy = dir.path().join(".claudeprism/history.git");
+            fs::create_dir_all(if nested_git {
+                legacy.join(".git")
+            } else {
+                legacy.clone()
+            })
+            .unwrap();
+            let r = root(&dir);
+            history_init(r.clone()).unwrap();
+            let first = open_repo(&r).unwrap().head().unwrap().target().unwrap();
+            assert_eq!(
+                history_file_at(r.clone(), first.to_string(), "main.tex".into()).unwrap(),
+                "current document"
+            );
+            history_init(r.clone()).unwrap();
+            assert_eq!(open_repo(&r).unwrap().head().unwrap().target(), Some(first));
+            assert!(legacy.exists());
+        }
+    }
+
+    #[test]
+    fn nonempty_invalid_legacy_history_is_preserved_and_reported() {
+        let dir = setup_project(&[("main.tex", "document")]);
+        let legacy = dir.path().join(".claudeprism/history.git/.git");
+        fs::create_dir_all(&legacy).unwrap();
+        fs::write(legacy.join("HEAD"), "damaged repository metadata").unwrap();
+        let r = root(&dir);
+        assert!(history_init(r.clone())
+            .unwrap_err()
+            .contains("Corrupt legacy history repo"));
+        assert_eq!(
+            fs::read_to_string(legacy.join("HEAD")).unwrap(),
+            "damaged repository metadata"
+        );
+        assert!(!history_path(&r).exists());
     }
 
     #[test]
