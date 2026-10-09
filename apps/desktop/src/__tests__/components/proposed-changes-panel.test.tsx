@@ -2,6 +2,7 @@ import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, expect, it, vi } from "vitest";
 import { ProposedChangesPanel } from "@/components/agent-chat/proposed-changes-panel";
+import { loadReviewDiff } from "@/lib/review-diff-client";
 import { reviewDiff } from "@/lib/review-diff";
 const { state } = vi.hoisted(() => ({
   state: {
@@ -22,6 +23,11 @@ const { state } = vi.hoisted(() => ({
 }));
 vi.mock("@/stores/agent-chat-store", () => ({
   useAgentChatStore: (select: any) => select(state),
+}));
+vi.mock("@/lib/review-diff-client", () => ({
+  loadReviewDiff: vi.fn(async (before: string, after: string) =>
+    reviewDiff(before, after),
+  ),
 }));
 afterEach(() => vi.clearAllMocks());
 it("shows changed lines with context without duplicating it", () => {
@@ -58,7 +64,7 @@ it("keeps and undoes the correct file and disables decisions while pending", asy
   (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
   const host = document.createElement("div");
   const root = createRoot(host);
-  act(() => root.render(<ProposedChangesPanel />));
+  await act(async () => root.render(<ProposedChangesPanel />));
   let finish!: () => void;
   state.resolveReview.mockImplementationOnce(
     () =>
@@ -80,4 +86,58 @@ it("keeps and undoes the correct file and disables decisions while pending", asy
   await act(async () => undo.click());
   expect(state.resolveReview).toHaveBeenLastCalledWith("main.tex", true);
   act(() => root.unmount());
+});
+
+it("computes only the selected diff, keeps stable revisions cached, and bounds rendered rows", async () => {
+  (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
+  const original = state.review.changes;
+  state.review.changes = [
+    {
+      path: "large.tex",
+      oldContent: "",
+      newContent: Array.from({ length: 5000 }, (_, i) => `line ${i}`).join(
+        "\n",
+      ),
+      kind: "added",
+      binary: false,
+    },
+    {
+      path: "other.tex",
+      oldContent: "old",
+      newContent: "new",
+      kind: "modified",
+      binary: false,
+    },
+  ];
+  const host = document.createElement("div");
+  const root = createRoot(host);
+  try {
+    await act(async () => root.render(<ProposedChangesPanel />));
+    expect(loadReviewDiff).toHaveBeenCalledTimes(1);
+    expect(host.querySelectorAll(".whitespace-pre").length).toBeLessThanOrEqual(
+      24,
+    );
+    const viewport = host.querySelector('[aria-label="Changes to large.tex"]')!;
+    act(() => {
+      viewport.scrollTop = 8000;
+      viewport.dispatchEvent(new Event("scroll"));
+    });
+    expect(viewport.textContent).toContain("line 400");
+    state.review.changes = state.review.changes.map((c) => ({ ...c }));
+    await act(async () => root.render(<ProposedChangesPanel />));
+    expect(loadReviewDiff).toHaveBeenCalledTimes(1);
+    await act(async () =>
+      (
+        host.querySelector('[title="other.tex"]')!
+          .parentElement as HTMLButtonElement
+      ).click(),
+    );
+    expect(loadReviewDiff).toHaveBeenCalledTimes(2);
+    expect(
+      host.querySelector('[aria-label="Changes to large.tex"]'),
+    ).toBeNull();
+  } finally {
+    act(() => root.unmount());
+    state.review.changes = original;
+  }
 });

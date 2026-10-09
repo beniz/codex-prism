@@ -1158,11 +1158,24 @@ export const useDocumentStore = create<DocumentState>()((set, get) => ({
       ? activeFileId
       : (merged[0]?.id ?? "");
 
+    const changed =
+      merged.length !== files.length ||
+      merged.some((file) => {
+        const previous = existingMap.get(file.relativePath);
+        return (
+          !previous ||
+          previous.content !== file.content ||
+          previous.dataUrl !== file.dataUrl ||
+          previous.fileSize !== file.fileSize
+        );
+      });
+    // Polling and review refreshes are not edits. Preserve the generation so
+    // auto-recompile only runs when on-disk inputs actually change.
     set((s) => ({
-      files: merged,
+      files: changed ? merged : files,
       folders: fsFolders,
       activeFileId: newActiveId,
-      contentGeneration: s.contentGeneration + 1,
+      contentGeneration: s.contentGeneration + (changed ? 1 : 0),
     }));
   },
 

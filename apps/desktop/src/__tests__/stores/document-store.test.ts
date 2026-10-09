@@ -688,3 +688,30 @@ describe("useDocumentStore", () => {
     });
   });
 });
+
+describe("file refresh compilation invalidation", () => {
+  it("does not invalidate unchanged inputs, but detects edits and deletions", async () => {
+    const file = makeFile({ fileSize: 0 });
+    useDocumentStore.setState({
+      projectRoot: "/project",
+      files: [file],
+      activeFileId: file.id,
+      contentGeneration: 10,
+    });
+    vi.mocked(readDir).mockResolvedValue([
+      { name: "main.tex", isFile: true, isDirectory: false, isSymlink: false },
+    ] as any);
+    vi.mocked(readTextFile).mockResolvedValue("Hello World");
+    await useDocumentStore.getState().refreshFiles();
+    expect(useDocumentStore.getState().contentGeneration).toBe(10);
+    expect(useDocumentStore.getState().files[0]).toBe(file);
+    vi.mocked(readTextFile).mockResolvedValue("Changed by agent");
+    await useDocumentStore.getState().refreshFiles();
+    expect(useDocumentStore.getState().contentGeneration).toBe(11);
+    await useDocumentStore.getState().refreshFiles();
+    expect(useDocumentStore.getState().contentGeneration).toBe(11);
+    vi.mocked(readDir).mockResolvedValue([]);
+    await useDocumentStore.getState().refreshFiles();
+    expect(useDocumentStore.getState().contentGeneration).toBe(12);
+  });
+});

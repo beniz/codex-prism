@@ -24,7 +24,7 @@ export function reviewDiff(before: string, after: string): ReviewDiffLine[] {
       rows.push({ kind, number: line, text: doc.line(line).text });
     }
   };
-  for (const chunk of chunks) {
+  for (const [index, chunk] of chunks.entries()) {
     const first = b.lineAt(Math.min(chunk.fromB, b.length)).number;
     const contextStart = Math.max(cursor, first - 2);
     if (contextStart > cursor) rows.push({ kind: "gap", text: "…" });
@@ -44,7 +44,7 @@ export function reviewDiff(before: string, after: string): ReviewDiffLine[] {
     } else {
       cursor = first;
     }
-    const next = chunks[chunks.indexOf(chunk) + 1];
+    const next = chunks[index + 1];
     const limit = next
       ? b.lineAt(Math.min(next.fromB, b.length)).number - 1
       : b.lines;

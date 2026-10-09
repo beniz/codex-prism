@@ -7,6 +7,7 @@ mod events;
 mod history;
 pub mod latex;
 pub mod projects;
+mod review_storage;
 mod services;
 pub mod skills;
 pub mod uv;

@@ -82,19 +82,27 @@ pub async fn codex_respond(
 }
 
 #[tauri::command]
-pub fn project_review(
+pub async fn project_review(
     backend: tauri::State<'_, prism_core::Backend>,
     project_id: String,
 ) -> Result<serde_json::Value, String> {
-    backend.project_review(project_id)
+    let backend = backend.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || backend.project_review(project_id))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-pub fn project_resolve_review(
+pub async fn project_resolve_review(
     backend: tauri::State<'_, prism_core::Backend>,
     project_id: String,
     path: String,
     undo: bool,
 ) -> Result<(), String> {
-    backend.project_resolve_review(project_id, path, undo)
+    let backend = backend.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        backend.project_resolve_review(project_id, path, undo)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }

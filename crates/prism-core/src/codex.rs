@@ -39,7 +39,7 @@ pub struct Review {
     pub before: BTreeMap<String, Vec<u8>>,
     pub after: BTreeMap<String, Vec<u8>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    previous: Option<Box<Review>>,
+    pub(crate) previous: Option<Box<Review>>,
 }
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -184,7 +184,9 @@ async fn connection(app: &crate::Backend) -> Result<Arc<Connection>, String> {
     let handle = app.clone();
     let reader = tokio::spawn(async move {
         let mut lines = BufReader::new(stdout).lines();
+        let mut completions = tokio::task::JoinSet::new();
         while let Ok(Some(line)) = lines.next_line().await {
+            while completions.try_join_next().is_some() {}
             let Ok(v) = serde_json::from_str::<Value>(&line) else {
                 continue;
             };
@@ -237,13 +239,18 @@ async fn connection(app: &crate::Backend) -> Result<Arc<Connection>, String> {
                             requests.retain(|_, r| r["params"]["threadId"] != thread);
                         }
                     }
-                    if let Some(thread) = v["params"]["threadId"].as_str() {
-                        if let Ok(all) = sessions(&handle) {
-                            if let Some(s) = all.iter().find(|s| s.id == thread) {
-                                let _ = finish_review(&handle, &s.project_id);
+                    let worker = handle.clone();
+                    completions.spawn_blocking(move || {
+                        if let Some(thread) = v["params"]["threadId"].as_str() {
+                            if let Ok(all) = sessions(&worker) {
+                                if let Some(s) = all.iter().find(|s| s.id == thread) {
+                                    let _ = finish_review(&worker, &s.project_id);
+                                }
                             }
                         }
-                    }
+                        let _ = worker.emit_agent(&v);
+                    });
+                    continue;
                 }
                 let _ = handle.emit_agent(&v);
             } else {
@@ -251,6 +258,7 @@ async fn connection(app: &crate::Backend) -> Result<Arc<Connection>, String> {
             }
         }
         let _ = read.stop().await;
+        while completions.join_next().await.is_some() {}
         if let Ok(mut pending) = read.pending.lock() {
             for (_, tx) in pending.drain() {
                 let _ = tx.send(Err("Codex process exited".into()));
@@ -317,12 +325,7 @@ fn confirm_review_start(app: &crate::Backend, id: &str) -> Result<(), String> {
     if !path.exists() {
         return Ok(());
     }
-    let mut r: Review = serde_json::from_slice(&std::fs::read(&path).map_err(|e| e.to_string())?)
-        .map_err(|e| e.to_string())?;
-    if r.active && r.previous.take().is_some() {
-        save_json(&path, &r)?;
-    }
-    Ok(())
+    crate::review_storage::confirm_start(&path)
 }
 
 fn finish_review_state(r: &mut Review, after: BTreeMap<String, Vec<u8>>) {
@@ -355,17 +358,26 @@ fn finish_review(app: &crate::Backend, id: &str) -> Result<(), String> {
     if !path.exists() {
         return Ok(());
     }
-    let mut r: Review = serde_json::from_slice(&std::fs::read(&path).map_err(|e| e.to_string())?)
-        .map_err(|e| e.to_string())?;
+    let mut r: Review = crate::review_storage::load(&path)?;
     if !r.active {
         return Ok(());
     }
     let after = projects::snapshot(&projects::get(app, id)?.root)?;
     finish_review_state(&mut r, after);
+    let unchanged: Vec<_> = r
+        .before
+        .keys()
+        .filter(|p| r.before.get(*p) == r.after.get(*p))
+        .cloned()
+        .collect();
+    for path in unchanged {
+        r.before.remove(&path);
+        r.after.remove(&path);
+    }
     if r.before == r.after {
-        std::fs::remove_file(path).map_err(|e| e.to_string())?;
+        crate::review_storage::remove(&path)?;
     } else {
-        save_json(&path, &r)?;
+        crate::review_storage::save(&path, &r)?;
     }
     app.inner
         .codex
@@ -477,25 +489,28 @@ pub(crate) async fn codex_send(
     {
         let state = &app.inner.codex;
         let _services = state.service_lock.lock().await;
-        let projects = &app.inner.projects;
-        let _files = projects.0.lock().map_err(|e| e.to_string())?;
-        let state = &app.inner.codex;
-        let _guard = state.reviews.lock().map_err(|e| e.to_string())?;
-        let path = review_path(&app, &project_id)?;
-        let previous = if path.exists() {
-            Some(
-                serde_json::from_slice::<Review>(&std::fs::read(&path).map_err(|e| e.to_string())?)
-                    .map_err(|e| e.to_string())?,
-            )
-        } else {
-            None
-        };
-        let r = prepare_review(
-            project_id.clone(),
-            previous,
-            projects::snapshot(&project.root)?,
-        )?;
-        save_json(&review_path(&app, &project_id)?, &r)?;
+        let worker = app.clone();
+        let worker_id = project_id.clone();
+        let root = project.root.clone();
+        let admitted = app.enter()?;
+        tokio::task::spawn_blocking(move || -> Result<(), String> {
+            let _operation = admitted;
+            let projects = &worker.inner.projects;
+            let _files = projects.0.lock().map_err(|e| e.to_string())?;
+            let state = &worker.inner.codex;
+            let _guard = state.reviews.lock().map_err(|e| e.to_string())?;
+            let path = review_path(&worker, &worker_id)?;
+            let previous = if path.exists() {
+                Some(crate::review_storage::load(&path)?)
+            } else {
+                None
+            };
+            let r = prepare_review(worker_id.clone(), previous, projects::snapshot(&root)?)?;
+            crate::review_storage::save(&review_path(&worker, &worker_id)?, &r)?;
+            Ok(())
+        })
+        .await
+        .map_err(|e| e.to_string())??;
     }
     let _ = app.emit_review(json!({"projectId":project_id}));
     let result: Result<Value,String>=async{
@@ -561,12 +576,12 @@ pub(crate) async fn codex_respond(
     c.write(json!({"id":id,"result":result})).await
 }
 pub(crate) fn project_review(app: crate::Backend, project_id: String) -> Result<Value, String> {
+    let _files = app.inner.projects.0.lock().map_err(|e| e.to_string())?;
     let path = review_path(&app, &project_id)?;
     if !path.exists() {
         return Ok(json!({"active":false,"changes":[]}));
     }
-    let r: Review = serde_json::from_slice(&std::fs::read(path).map_err(|e| e.to_string())?)
-        .map_err(|e| e.to_string())?;
+    let r: Review = crate::review_storage::display(&path)?;
     let mut paths: Vec<_> = r.before.keys().chain(r.after.keys()).cloned().collect();
     paths.sort();
     paths.dedup();
@@ -585,8 +600,7 @@ pub(crate) fn project_resolve_review(
     let state = &app.inner.codex;
     let _guard = state.reviews.lock().map_err(|e| e.to_string())?;
     let file = review_path(&app, &project_id)?;
-    let mut r: Review = serde_json::from_slice(&std::fs::read(&file).map_err(|e| e.to_string())?)
-        .map_err(|e| e.to_string())?;
+    let mut r: Review = crate::review_storage::load(&file)?;
     if r.active {
         return Err("Wait for the agent to finish".into());
     }
@@ -600,9 +614,9 @@ pub(crate) fn project_resolve_review(
     r.before.remove(&path);
     r.after.remove(&path);
     if r.before == r.after {
-        std::fs::remove_file(file).map_err(|e| e.to_string())?;
+        crate::review_storage::remove(&file)?;
     } else {
-        save_json(&file, &r)?;
+        crate::review_storage::save(&file, &r)?;
     }
     let _ = app.emit_review(json!({"projectId":project_id}));
     Ok(())
@@ -774,6 +788,35 @@ mod tests {
         assert_eq!(projects::snapshot(&root).unwrap(), before);
     }
     #[test]
+    fn completed_review_retains_only_changed_files() {
+        let (dir, app) = crate::test_backend();
+        let root = dir.path().join("project");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("main.tex"), b"before").unwrap();
+        std::fs::write(root.join("asset.png"), vec![255; 1024 * 1024]).unwrap();
+        let project =
+            projects::project_register(app.clone(), root.to_string_lossy().into()).unwrap();
+        let path = review_path(&app, &project.id).unwrap();
+        let review =
+            prepare_review(project.id.clone(), None, projects::snapshot(&root).unwrap()).unwrap();
+        crate::review_storage::save(&path, &review).unwrap();
+        std::fs::write(root.join("main.tex"), b"after").unwrap();
+        finish_review(&app, &project.id).unwrap();
+        let review = crate::review_storage::load(&path).unwrap();
+        assert_eq!(review.before.len(), 1);
+        assert_eq!(review.after.len(), 1);
+        assert_eq!(
+            std::fs::read_dir(path.with_extension("blobs"))
+                .unwrap()
+                .count(),
+            2
+        );
+        project_resolve_review(app.clone(), project.id.clone(), "main.tex".into(), true).unwrap();
+        assert_eq!(std::fs::read(root.join("main.tex")).unwrap(), b"before");
+        assert!(!path.exists());
+    }
+
+    #[test]
     fn review_undo_preserves_external_edits() {
         let d = tempfile::tempdir().unwrap();
         std::fs::write(d.path().join("a.tex"), b"external").unwrap();
@@ -785,6 +828,68 @@ mod tests {
         assert!(undo_change(d.path(), &r, "a.tex").is_err());
         assert_eq!(std::fs::read(d.path().join("a.tex")).unwrap(), b"external");
     }
+    #[cfg(unix)]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn completion_disk_work_does_not_block_rpc_responses() {
+        use std::os::unix::fs::PermissionsExt;
+        let (dir, app) = crate::test_backend();
+        let script = dir.path().join("fake-codex");
+        std::fs::write(&script, include_str!("../tests/fixtures/app_server.py")).unwrap();
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        codex_set_path(app.clone(), script.to_string_lossy().into())
+            .await
+            .unwrap();
+        let root = dir.path().join("project");
+        std::fs::create_dir(&root).unwrap();
+        std::fs::write(root.join("main.tex"), "original").unwrap();
+        let project =
+            projects::project_register(app.clone(), root.to_string_lossy().into()).unwrap();
+        codex_send(
+            app.clone(),
+            project.id.clone(),
+            None,
+            "running".into(),
+            None,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+        let connection = connection(&app).await.unwrap();
+        // Drain turn/started before taking the lock used by review completion.
+        connection.call("model/list", json!({})).await.unwrap();
+        let (held, ready) = oneshot::channel();
+        let (release, released) = std::sync::mpsc::channel();
+        let locked_app = app.clone();
+        let lock_task = tokio::task::spawn_blocking(move || {
+            let _lock = locked_app.inner.projects.0.lock().unwrap();
+            held.send(()).unwrap();
+            released.recv().unwrap();
+        });
+        ready.await.unwrap();
+        connection
+            .call(
+                "turn/interrupt",
+                json!({"threadId":"thread-1","turnId":"turn-1"}),
+            )
+            .await
+            .unwrap();
+        // The fixture writes turn/completed before answering model/list. An
+        // inline finalizer would deadlock here waiting for the held disk lock.
+        let response = tokio::time::timeout(
+            Duration::from_secs(2),
+            connection.call("model/list", json!({})),
+        )
+        .await;
+        release.send(()).unwrap();
+        lock_task.await.unwrap();
+        assert!(response.unwrap().is_ok());
+        app.shutdown().await;
+        let review = project_review(app.clone(), project.id).unwrap();
+        assert_eq!(review["active"], false);
+        assert_eq!(review["changes"][0]["newContent"], "running edit");
+    }
+
     #[cfg(unix)]
     #[tokio::test]
     async fn rpc_correlates_concurrent_out_of_order_replies() {
