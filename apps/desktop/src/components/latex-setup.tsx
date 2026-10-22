@@ -23,19 +23,23 @@ export function LatexSetup() {
   }, [check]);
 
   const missing = status !== null && !status.engines.includes("pdflatex");
+  const alternatives =
+    status?.engines.filter((engine) => engine !== "pdflatex") ?? [];
   return (
     <div className="space-y-2 px-4 py-3">
       <div className="flex items-center justify-between gap-3">
         <div>
-          <p className="text-sm font-medium">LaTeX (pdflatex)</p>
-          <p className="text-xs text-muted-foreground" role="status">
+          <p className="font-medium text-sm">LaTeX</p>
+          <p className="text-muted-foreground text-xs" role="status">
             {checking
               ? "Checking..."
               : error
                 ? "Could not check LaTeX installation"
                 : missing
-                  ? "pdflatex not detected"
-                  : "Installed"}
+                  ? alternatives.length > 0
+                    ? `Available: ${alternatives.join(", ")}. Default pdfLaTeX is unavailable.`
+                    : "No usable LaTeX compiler detected"
+                  : `Available: ${status?.engines.join(", ") ?? "pdflatex"}`}
           </p>
         </div>
         <Button
@@ -48,13 +52,27 @@ export function LatexSetup() {
         </Button>
       </div>
       {error && (
-        <p className="text-xs text-destructive" role="alert">
+        <p className="text-destructive text-xs" role="alert">
           {error}
         </p>
       )}
       {!checking && !error && missing && (
-        <div className="space-y-2 text-sm text-muted-foreground">
-          {navigator.userAgent.includes("Mac") ? (
+        <div className="space-y-2 text-muted-foreground text-sm">
+          {alternatives.length > 0 ? (
+            <p>
+              Documents use pdfLaTeX by default. Add
+              {` % !TEX program = ${alternatives[0]} `}
+              within your main document's first 20 lines, or install pdfLaTeX in
+              your existing TeX distribution. Bibliography documents also need
+              BibTeX or Biber in that installation.
+            </p>
+          ) : navigator.userAgent.includes("Windows") ? (
+            <p>
+              Rerun the Windows setup to install MiKTeX, or repair your existing
+              MiKTeX/TeX Live installation and add its bin directory to PATH.
+              Then click Refresh.
+            </p>
+          ) : navigator.userAgent.includes("Mac") ? (
             <>
               <p>Install MacTeX using Homebrew in Terminal:</p>
               <code className="block select-text overflow-x-auto rounded bg-muted p-2 text-xs">

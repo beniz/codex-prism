@@ -3,7 +3,7 @@ import { createRoot } from "react-dom/client";
 import { afterEach, expect, it, vi } from "vitest";
 import { PdfExportButton } from "@/components/workspace/preview/pdf-export-button";
 import { optimizePdf } from "@/lib/pdf-export";
-import { save } from "@/lib/backend/desktop-host";
+import { save, openExternal } from "@/lib/backend/desktop-host";
 import { writeFile } from "@tauri-apps/plugin-fs";
 vi.mock("@/lib/pdf-export", () => ({
   optimizePdf: vi.fn(),
@@ -11,6 +11,7 @@ vi.mock("@/lib/pdf-export", () => ({
 }));
 vi.mock("@/lib/backend/desktop-host", () => ({
   save: vi.fn(async () => "/tmp/export.pdf"),
+  openExternal: vi.fn(async () => {}),
 }));
 vi.mock("@tauri-apps/plugin-fs", () => ({ writeFile: vi.fn(async () => {}) }));
 vi.mock("sonner", () => ({ toast: { success: vi.fn() } }));
@@ -75,6 +76,10 @@ it("shows optimizer failures and lets the user export the original", async () =>
       "Ghostscript is not installed",
     );
     expect(writeFile).not.toHaveBeenCalled();
+    await click("Get Ghostscript");
+    expect(openExternal).toHaveBeenCalledWith(
+      "https://ghostscript.com/releases/gsdnld.html",
+    );
     await act(async () =>
       document
         .querySelector<HTMLInputElement>('input[value="original"]')!

@@ -8,6 +8,12 @@ impl Drop for ExportDirectory {
     }
 }
 fn ghostscript() -> Result<PathBuf, String> {
+    #[cfg(target_os = "windows")]
+    for name in ["gswin64c", "gswin32c", "gs"] {
+        if let Some(path) = crate::windows_tools::find(name) {
+            return Ok(path);
+        }
+    }
     for name in [
         "gs",
         "gswin64c",
@@ -20,7 +26,7 @@ fn ghostscript() -> Result<PathBuf, String> {
             return Ok(path);
         }
     }
-    Err("Ghostscript is not installed. Install Ghostscript (gs) or choose Original PDF.".into())
+    Err("Ghostscript is not installed. Install Ghostscript (on Windows, rerun setup interactively), or choose Original PDF.".into())
 }
 
 pub(crate) async fn optimize(

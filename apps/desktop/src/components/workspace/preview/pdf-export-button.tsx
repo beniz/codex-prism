@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { DownloadIcon, LoaderIcon } from "lucide-react";
 import { toast } from "sonner";
 import { writeFile } from "@tauri-apps/plugin-fs";
-import { save } from "@/lib/backend/desktop-host";
+import { save, openExternal } from "@/lib/backend/desktop-host";
 import { optimizePdf, pdfSize } from "@/lib/pdf-export";
 import { Button } from "@/components/ui/button";
 import {
@@ -147,7 +147,7 @@ export function PdfExportButton({
               />
               <span>
                 <span className="block font-medium">Optimized PDF (ebook)</span>
-                <span className="text-sm text-muted-foreground">
+                <span className="text-muted-foreground text-sm">
                   Smaller file for screen reading. Images may lose detail.
                   Requires Ghostscript.
                 </span>
@@ -167,19 +167,31 @@ export function PdfExportButton({
               />
               <span>
                 <span className="block font-medium">Original PDF</span>
-                <span className="text-sm text-muted-foreground">
+                <span className="text-muted-foreground text-sm">
                   Full quality, without additional compression.
                 </span>
               </span>
             </label>
           </fieldset>
           {error && (
-            <p role="alert" className="text-sm text-destructive">
+            <p role="alert" className="text-destructive text-sm">
               {error}
             </p>
           )}
+          {error?.includes("Ghostscript is not installed") && (
+            <Button
+              variant="outline"
+              onClick={() =>
+                void openExternal(
+                  "https://ghostscript.com/releases/gsdnld.html",
+                ).catch((reason) => setError(String(reason)))
+              }
+            >
+              Get Ghostscript
+            </Button>
+          )}
           {busy && (
-            <p role="status" className="text-sm text-muted-foreground">
+            <p role="status" className="text-muted-foreground text-sm">
               {profile === "ebook"
                 ? "Preparing optimized PDF…"
                 : "Exporting PDF…"}

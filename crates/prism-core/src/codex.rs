@@ -144,6 +144,10 @@ fn executable(app: &crate::Backend) -> Result<String, String> {
     if !configured.trim().is_empty() {
         return Ok(configured.trim().into());
     }
+    #[cfg(target_os = "windows")]
+    if let Some(path) = crate::windows_tools::find("codex") {
+        return Ok(path.to_string_lossy().into());
+    }
     if let Ok(path) = which::which("codex") {
         return Ok(path.to_string_lossy().into());
     }
@@ -164,6 +168,8 @@ async fn connection(app: &crate::Backend) -> Result<Arc<Connection>, String> {
         return Ok(c.clone());
     }
     let mut cmd = Command::new(executable(app)?);
+    #[cfg(target_os = "windows")]
+    cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
     cmd.args(["app-server", "--listen", "stdio://"]);
     #[cfg(unix)]
     cmd.process_group(0);

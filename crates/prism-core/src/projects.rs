@@ -251,8 +251,9 @@ fn snapshot_with_policy(root: &Path, strict: bool) -> Result<BTreeMap<String, Ve
                         .strip_prefix(root)
                         .map_err(|e| e.to_string())?
                         .to_str()
-                        .ok_or("Non-UTF-8 workspace path")?;
-                    resolve(root, rel)?;
+                        .ok_or("Non-UTF-8 workspace path")?
+                        .replace('\\', "/");
+                    resolve(root, &rel)?;
                     if name.ends_with(".synctex.gz") || name.ends_with(".run.xml") {
                         continue;
                     }

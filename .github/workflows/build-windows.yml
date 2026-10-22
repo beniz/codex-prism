@@ -1,0 +1,73 @@
+name: Build Windows
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, feat/windows-installer]
+  pull_request:
+    paths:
+      - '.github/workflows/build-windows.yml'
+      - 'apps/desktop/**'
+      - 'crates/prism-core/**'
+      - 'scripts/**'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - 'rust-toolchain.toml'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Windows x64 setup
+    runs-on: windows-2022
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: '22'
+          package-manager-cache: false
+      - name: Set up build tools
+        run: |
+          corepack enable
+          rustup toolchain install 1.88.0 --profile minimal
+          corepack pnpm install --frozen-lockfile
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          workspaces: |
+            crates/prism-core -> target
+            apps/desktop/src-tauri -> target
+      - name: Test installer decisions
+        run: |
+          powershell -NoProfile -ExecutionPolicy Bypass -File scripts/windows-prerequisites.test.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & "$env:WINDIR\SysWOW64\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File scripts/windows-prerequisites.test.ps1
+      - name: Test frontend
+        run: corepack pnpm --filter @codex-prism/desktop test
+      - name: Test backend
+        run: cargo test --locked --manifest-path crates/prism-core/Cargo.toml
+      - name: Test desktop adapters
+        run: cargo test --locked --manifest-path apps/desktop/src-tauri/Cargo.toml --lib
+      - name: Build setup executable
+        run: corepack pnpm build:desktop
+      - name: Test packaged install and uninstall
+        run: powershell -NoProfile -File scripts/windows-installer-smoke.ps1
+      - name: Checksum installer
+        run: |
+          Get-ChildItem apps/desktop/src-tauri/target/release/bundle/nsis/*.exe | ForEach-Object {
+            $hash = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower()
+            "$hash  $($_.Name)"
+          } | Set-Content apps/desktop/src-tauri/target/release/bundle/nsis/SHA256SUMS
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: codex-prism-windows-x64
+          path: apps/desktop/src-tauri/target/release/bundle/nsis/
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0

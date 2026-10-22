@@ -3,6 +3,9 @@ import { spawn } from "node:child_process";
 const env = { ...process.env };
 
 const args = ["--filter=@codex-prism/desktop", "tauri", "build"];
+if (process.platform === "win32") {
+  args.push("--config", "src-tauri/tauri.windows.conf.json");
+}
 
 if (!env.TAURI_SIGNING_PRIVATE_KEY) {
   args.push("--config", "src-tauri/tauri.local-build.conf.json");

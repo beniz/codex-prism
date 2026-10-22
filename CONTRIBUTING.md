@@ -13,7 +13,8 @@ Release packaging currently targets Ubuntu 26.04 LTS x86_64; see [the release gu
 - [Rust](https://rustup.rs/) (repository-pinned 1.88.0)
 - Linux Tauri development libraries: see the [README](README.md).
 - System TeX Live for compilation tests; no embedded compiler libraries are needed to build the app.
-- macOS and Windows packaging are deferred. Historical recipes under `docs/releases/` are inactive references and still contain obsolete Tectonic steps; do not use them as current build instructions.
+- macOS packaging is deferred. Historical recipes under `docs/releases/` are inactive references and still contain obsolete Tectonic steps; do not use them as current build instructions.
+- Windows x64 builds and prerequisite setup are documented in [the Windows guide](docs/releases/windows.md).
 
 ### Setup
 

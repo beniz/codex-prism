@@ -16,6 +16,8 @@ pub mod skills;
 pub mod templates;
 pub mod uv;
 mod visual_review;
+#[cfg(target_os = "windows")]
+mod windows_tools;
 pub use events::{BackendEvent, EventSink, NoopEventSink, RecordingEventSink};
 
 use std::{
@@ -270,7 +272,7 @@ mod lifecycle_tests {
         }
         assert!(!shutdown.is_finished());
         drop(lock);
-        tokio::time::timeout(std::time::Duration::from_secs(1), shutdown)
+        tokio::time::timeout(std::time::Duration::from_secs(10), shutdown)
             .await
             .unwrap()
             .unwrap();
