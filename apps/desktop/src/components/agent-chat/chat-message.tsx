@@ -3,6 +3,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
+import { ChevronRight } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { ChatItem } from "@/stores/agent-chat-store";
 import { summarizeActivity } from "@/lib/chat-activity";
@@ -40,6 +41,31 @@ function ChatLink({ href, ...props }: ComponentProps<"a">) {
 
 export const Message = memo(function Message({ item: m }: { item: ChatItem }) {
   if (m.type === "reasoning") return null;
+  if (m.type === "commandExecution") {
+    const command = m.activity?.command ?? m.text.split("\n")[0];
+    const exitCode = m.activity?.exitCode;
+    return (
+      <details className="group min-w-0 px-1 text-muted-foreground text-xs">
+        <summary className="flex cursor-pointer list-none items-center gap-2 rounded-sm py-1 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
+          <span className="shrink-0">Command:</span>
+          <span className="min-w-0 flex-1 truncate font-mono">
+            {command.replace(/\s+/g, " ")}
+          </span>
+          {exitCode != null && exitCode !== 0 && (
+            <span className="shrink-0">exit {exitCode}</span>
+          )}
+          {m.status && <span className="shrink-0">{m.status}</span>}
+          <ChevronRight
+            aria-hidden="true"
+            className="size-4 shrink-0 group-open:rotate-90"
+          />
+        </summary>
+        <pre className="mt-2 max-h-80 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-muted p-3 font-mono text-foreground text-xs">
+          {command}
+        </pre>
+      </details>
+    );
+  }
   if (m.type !== "agentMessage" && m.type !== "userMessage") {
     const activity = summarizeActivity(m);
     return (
