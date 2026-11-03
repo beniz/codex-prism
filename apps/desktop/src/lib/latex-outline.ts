@@ -43,7 +43,13 @@ export function parseTableOfContents(content: string): TocItem[] {
       toc.push({ level, title: title.trim(), line: index + 1, number });
     }
   });
-  return toc;
+  const frames = frameOutline(lines.join("\n"));
+  for (const frame of frames) {
+    const preceding = toc.filter((item) => item.line <= frame.line);
+    const section = preceding[preceding.length - 1];
+    if (section) frame.level = Math.max(2, section.level + 1);
+  }
+  return [...toc, ...frames].sort((a, b) => a.line - b.line);
 }
 
 function roman(value: number): string {
@@ -67,6 +73,68 @@ function roman(value: number): string {
       result += symbol;
       value -= amount;
     }
+  }
+  return result;
+}
+
+// Read balanced TeX arguments without evaluating macros. Offsets stay aligned
+// with the comment-stripped source so navigation retains the original line.
+function argument(source: string, start: number, open: string, close: string) {
+  let at = start;
+  while (/\s/.test(source[at] ?? "") && at < source.length) at++;
+  if (source[at] !== open) return null;
+  const begin = ++at;
+  let depth = 1;
+  while (at < source.length) {
+    if (source[at] === "\\") { at += 2; continue; }
+    if (source[at] === open) depth++;
+    if (source[at] === close) depth--;
+    if (depth === 0) {
+      return { text: source.slice(begin, at), end: at + 1 };
+    }
+    at++;
+  }
+  return null;
+}
+
+function frameOutline(source: string): TocItem[] {
+  const result: TocItem[] = [];
+  const document = /\\begin\s*\{document\}/.exec(source);
+  const frames = /\\begin\s*\{frame\}|\\frame(?![A-Za-z])/g;
+  frames.lastIndex = document ? document.index + document[0].length : 0;
+  let match: RegExpExecArray | null;
+  while ((match = frames.exec(source))) {
+    let at = frames.lastIndex;
+    // Beamer allows overlay specifications and frame options before the title.
+    for (;;) {
+      const option = argument(source, at, "<", ">") ?? argument(source, at, "[", "]");
+      if (!option) break;
+      at = option.end;
+    }
+    const first = argument(source, at, "{", "}");
+    const environment = match[0].startsWith("\\begin");
+    if (!environment && !/\\documentclass[^\n]*\{beamer\}|\\frametitle\b|\\titlepage\b/.test(source)) continue;
+    const end = environment ? /\\end\s*\{frame\}/g : null;
+    if (end) end.lastIndex = at;
+    const ending = end?.exec(source);
+    if (environment && !ending) break;
+    if (!environment && !first) continue;
+    const bodyStart = environment ? at : source.indexOf("{", at) + 1;
+    const bodyEnd = environment ? ending!.index : first!.end - 1;
+    const body = source.slice(bodyStart, bodyEnd);
+    const explicit = /\\frametitle\*?\s*(?:\[[^\]]*\]\s*)?/.exec(body);
+    const explicitTitle = explicit ? argument(body, explicit.index + explicit[0].length, "{", "}") : null;
+    const raw = explicitTitle?.text ?? (environment ? first?.text : undefined);
+    const title = raw?.replace(/\\(?:textbf|textit|emph|textrm|textsf|texttt)\s*\{([^{}]*)\}/g, "$1")
+      .replace(/\s+/g, " ").trim();
+    const offset = explicitTitle ? bodyStart + explicit!.index : match.index;
+    result.push({
+      level: 2,
+      title: title || (/\\titlepage\b/.test(body) ? "Title slide" : `Slide ${result.length + 1}`),
+      line: source.slice(0, offset).split("\n").length,
+      number: String(result.length + 1),
+    });
+    frames.lastIndex = environment ? ending!.index + ending![0].length : first!.end;
   }
   return result;
 }

@@ -54,6 +54,15 @@ it("shows headings immediately on open, then updates after typing pauses", () =>
       line: 2,
       sourceLine: "\\section{Latest edit}",
     });
+    edit("% slide\n\\begin{frame}[t]{Slide result}\nBody\n\\end{frame}");
+    act(() => vi.advanceTimersByTime(250));
+    expect(host.textContent).toContain("1Slide result");
+    act(() => host.querySelector("button")!.click());
+    expect(useDocumentStore.getState().requestJumpToPosition).toHaveBeenLastCalledWith(8);
+    expect(usePdfNavigationStore.getState().request).toEqual({
+      projectRoot: "/paper", filePath: "main.tex", line: 2,
+      sourceLine: "\\begin{frame}[t]{Slide result}",
+    });
   } finally {
     act(() => root.unmount());
     vi.useRealTimers();
