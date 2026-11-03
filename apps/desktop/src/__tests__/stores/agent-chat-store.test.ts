@@ -224,6 +224,7 @@ describe("Codex turn lifecycle", () => {
       undefined,
       "Fix equations",
       "tab1",
+      "default",
     );
     expect(save.mock.invocationCallOrder[0]).toBeLessThan(
       vi.mocked(backend.agent.send).mock.invocationCallOrder[0],

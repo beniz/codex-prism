@@ -447,6 +447,15 @@ export function AgentChatDrawer({
               </p>
             )}
             <ChatHistory key={t.id} messages={t.messages} viewport={viewport} />
+            {!t.isStreaming && !t.error && t.mode === "plan" && t.messages.some((m) => m.type === "proposedPlan" && m.status === "completed") && [...t.messages].reverse().find((m) => m.type === "userMessage" || m.type === "proposedPlan")?.status === "completed" && (
+              <div className="flex gap-2" aria-label="Plan actions">
+                <Button onClick={() => {
+                  useAgentChatStore.setState((state) => ({ tabs: state.tabs.map((tab) => tab.id === t.id ? { ...tab, mode: "default" } : tab) }));
+                  void s.sendPrompt("Implement the plan.");
+                }}>Implement plan</Button>
+                <Button variant="outline" onClick={() => document.querySelector<HTMLTextAreaElement>("textarea")?.focus()}>Refine plan</Button>
+              </div>
+            )}
             {t.isStreaming && (
               <div
                 role="status"
@@ -567,6 +576,11 @@ export function AgentChatDrawer({
                 onChange={(e) => setDraft(e.target.value)}
                 onKeyDown={(e) => {
                   if (e.nativeEvent.isComposing) return;
+                  if (e.key === "Tab" && e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey && !t.isStreaming && !s.restoringChats) {
+                    e.preventDefault();
+                    useAgentChatStore.setState((state) => ({ tabs: state.tabs.map((tab) => tab.id === t.id ? { ...tab, mode: tab.mode === "plan" ? "default" : "plan" } : tab) }));
+                    return;
+                  }
                   if (
                     e.key === "Enter" &&
                     e.shiftKey &&
@@ -768,7 +782,7 @@ export function AgentChatDrawer({
                 )}
               </span>
               <span className="shrink-0">
-                Enter to send · Shift+Enter for newline / next list item
+                {t.mode === "plan" ? "Plan" : "Agent"} · Shift+Tab to switch · Enter to send
               </span>
             </div>
           </div>
@@ -781,6 +795,7 @@ export function AgentChatDrawer({
 function Request({ event: e }: { event: AgentEvent }) {
   const respond = useAgentChatStore((s) => s.respond);
   const [answers, setAnswers] = useState<Record<string, string>>({});
+  const [submitting, setSubmitting] = useState(false);
   const p = e.params;
   if (e.method === "item/tool/requestUserInput")
     return (
@@ -802,7 +817,7 @@ function Request({ event: e }: { event: AgentEvent }) {
                 key={o.label}
                 onClick={() => setAnswers({ ...answers, [q.id]: o.label })}
               >
-                {o.label}{" "}
+                {o.label}{o.description ? ` — ${o.description}` : ""}
               </Button>
             ))}
           </label>
@@ -810,7 +825,10 @@ function Request({ event: e }: { event: AgentEvent }) {
         <Button
           variant="outline"
           size="sm"
-          onClick={() =>
+          disabled={submitting || (p.questions ?? []).some((q: any) => !answers[q.id]?.trim())}
+          onClick={() => {
+            if (submitting) return;
+            setSubmitting(true);
             void respond(e, {
               answers: Object.fromEntries(
                 Object.entries(answers).map(([id, value]) => [
@@ -818,8 +836,8 @@ function Request({ event: e }: { event: AgentEvent }) {
                   { answers: [value] },
                 ]),
               ),
-            })
-          }
+            }).finally(() => setSubmitting(false));
+          }}
         >
           Answer
         </Button>

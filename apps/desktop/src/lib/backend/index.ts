@@ -181,6 +181,7 @@ export interface PrismBackend {
       mainDocument?: string,
       historyPrompt?: string,
       chatId?: string,
+      mode?: "plan" | "default",
     ): Promise<any>;
     control(
       projectId: string,
@@ -244,6 +245,7 @@ export const backend: PrismBackend = {
       mainDocument,
       historyPrompt,
       chatId,
+      mode,
     ) =>
       invoke("codex_send", {
         projectId,
@@ -255,6 +257,7 @@ export const backend: PrismBackend = {
         mainDocument: mainDocument ?? null,
         historyPrompt: historyPrompt ?? null,
         chatId: chatId ?? null,
+        mode: mode ?? "default",
       }),
     control: (projectId, threadId, turnId, prompt) =>
       invoke("codex_control", {

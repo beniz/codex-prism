@@ -69,3 +69,30 @@ it("continues a list with Shift+Enter and sends its Markdown unchanged with Ente
     useAgentSetupStore.setState(originalSetup);
   }
 });
+
+it("toggles Plan with Shift+Tab only when idle and implements in the same chat", async () => {
+  const original = useAgentChatStore.getState();
+  const setup = useAgentSetupStore.getState();
+  const sendPrompt = vi.fn(async () => {});
+  useAgentSetupStore.setState({ status: "ready", checkStatus: vi.fn(async () => {}) });
+  useAgentChatStore.setState({ locked: false, sendPrompt, tabs: original.tabs.map(t => ({ ...t, mode: "default", draft: "my draft", isStreaming: false, error: null, messages: [{ id: "plan", type: "proposedPlan", status: "completed", text: "A plan" }] })) });
+  const host = document.createElement("div");
+  const root = createRoot(host);
+  try {
+    await act(async () => root.render(<AgentChatDrawer />));
+    const toggle = () => host.querySelector("textarea")!.dispatchEvent(new KeyboardEvent("keydown", {key: "Tab", shiftKey: true, bubbles: true, cancelable: true}));
+    await act(async () => { toggle(); });
+    expect(useAgentChatStore.getState().tabs[0].mode).toBe("plan");
+    const implement = Array.from(host.querySelectorAll("button")).find(b => b.textContent === "Implement plan")!;
+    await act(async () => implement.click());
+    expect(sendPrompt).toHaveBeenCalledWith("Implement the plan.");
+    expect(useAgentChatStore.getState().tabs[0].draft).toBe("my draft");
+    await act(async () => useAgentChatStore.setState(s => ({ tabs: s.tabs.map(t => ({ ...t, isStreaming: true })) })));
+    await act(async () => { toggle(); });
+    expect(useAgentChatStore.getState().tabs[0].mode).toBe("default");
+  } finally {
+    await act(async () => root.unmount());
+    useAgentChatStore.setState(original);
+    useAgentSetupStore.setState(setup);
+  }
+});

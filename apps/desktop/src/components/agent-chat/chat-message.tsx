@@ -66,7 +66,7 @@ export const Message = memo(function Message({ item: m }: { item: ChatItem }) {
       </details>
     );
   }
-  if (m.type !== "agentMessage" && m.type !== "userMessage") {
+  if (m.type !== "agentMessage" && m.type !== "userMessage" && m.type !== "proposedPlan") {
     const activity = summarizeActivity(m);
     return (
       <div

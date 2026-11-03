@@ -1,6 +1,6 @@
 export interface SavedChatTabs {
   activeTabId: string;
-  tabs: { id: string; title: string; sessionId: string | null; draft: string }[];
+  tabs: { id: string; title: string; sessionId: string | null; draft: string; mode?: "plan" | "default" }[];
 }
 const key = (root: string) => `prism-chat-tabs-v1:${root}`;
 

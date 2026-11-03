@@ -194,6 +194,36 @@ impl Backend {
             main_document,
             history_prompt,
             chat_id,
+            None,
+        )
+        .await
+    }
+    pub async fn codex_send_for_chat_mode(
+        &self,
+        project_id: String,
+        thread_id: Option<String>,
+        prompt: String,
+        model: Option<String>,
+        effort: Option<String>,
+        images: Option<Vec<String>>,
+        main_document: Option<String>,
+        history_prompt: Option<String>,
+        chat_id: Option<String>,
+        mode: Option<String>,
+    ) -> Result<Value, String> {
+        let _operation = self.enter()?;
+        codex::codex_send_for_chat(
+            self.clone(),
+            project_id,
+            thread_id,
+            prompt,
+            model,
+            effort,
+            images,
+            main_document,
+            history_prompt,
+            chat_id,
+            mode,
         )
         .await
     }

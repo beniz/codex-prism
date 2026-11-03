@@ -68,6 +68,10 @@ type Files = BTreeMap<String, Vec<u8>>;
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct Proposal {
+    #[serde(default)]
+    pub planning: bool,
+    #[serde(default)]
+    planning_conflicts: Vec<String>,
     pub id: String,
     pub project_id: String,
     pub thread_id: Option<String>,
@@ -161,6 +165,8 @@ fn create(
     parent: Option<String>,
 ) -> Result<Proposal, String> {
     let p = Proposal {
+        planning: false,
+        planning_conflicts: vec![],
         id: uuid::Uuid::new_v4().to_string(),
         project_id: project.into(),
         thread_id: thread,
@@ -265,9 +271,14 @@ pub(crate) fn begin_for_chat(
         "running"
     }
     .into();
+    p.planning_conflicts = p.conflicts.clone();
     p.conflicts.clear();
     save(app, &p)?;
     Ok(p)
+}
+pub(crate) fn set_planning(app: &Backend, p: &mut Proposal, planning: bool) -> Result<(), String> {
+    p.planning = planning;
+    save(app, p)
 }
 pub(crate) fn bind(app: &Backend, p: &mut Proposal, thread: String) -> Result<(), String> {
     let _lock = app.inner.projects.0.lock().map_err(|e| e.to_string())?;
@@ -281,6 +292,7 @@ pub(crate) fn finish(app: &Backend, id: &str, interrupted: bool) -> Result<(), S
         return Ok(());
     }
     let mut r = snapshot(app, &p)?;
+    let previous_after = r.after.clone();
     r.after = match projects::isolated_snapshot(&root(app, &p)?) {
         Ok(files) => files,
         Err(error) => {
@@ -293,7 +305,12 @@ pub(crate) fn finish(app: &Backend, id: &str, interrupted: bool) -> Result<(), S
     };
     p.generation += 1;
     review_storage::save(&snapshot_path(app, &p)?, &r)?;
-    p.state = if interrupted || p.cancel_requested {
+    p.state = if p.planning && r.before == r.after && p.parent.is_none() {
+        "discarded"
+    } else if p.planning && previous_after == r.after && !p.planning_conflicts.is_empty() {
+        p.conflicts = p.planning_conflicts.clone();
+        "conflicts"
+    } else if interrupted || p.cancel_requested {
         "interrupted"
     } else {
         "ready"
@@ -780,6 +797,21 @@ mod tests {
         let p = projects::project_register(app.clone(), root.to_string_lossy().into()).unwrap();
         workflow::initialize(&p.root.to_string_lossy(), None).unwrap();
         (d, app, p)
+    }
+    #[test]
+    fn planning_releases_empty_workspaces_but_retains_pending_edits() {
+        let (_d, app, project) = fixture();
+        let mut p = begin(&app, &project.id, Some("plan"), None).unwrap();
+        set_planning(&app, &mut p, true).unwrap();
+        finish(&app, &p.id, false).unwrap();
+        assert!(!locked(&app, &project.id).unwrap());
+        let edited = edit(&app, &project.id, "plan", "main.tex", b"pending");
+        let mut p = begin(&app, &project.id, Some("plan"), None).unwrap();
+        set_planning(&app, &mut p, true).unwrap();
+        finish(&app, &p.id, true).unwrap();
+        assert!(locked(&app, &project.id).unwrap());
+        assert_eq!(snapshot(&app, &p).unwrap().before, snapshot(&app, &edited).unwrap().before);
+        assert_eq!(fs::read(root(&app, &p).unwrap().join("main.tex")).unwrap(), b"pending");
     }
     fn edit(app: &Backend, project: &str, thread: &str, file: &str, content: &[u8]) -> Proposal {
         let mut p = begin(app, project, Some(thread), None).unwrap();

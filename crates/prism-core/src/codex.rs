@@ -310,7 +310,7 @@ async fn connection(app: &crate::Backend) -> Result<Arc<Connection>, String> {
         .lock()
         .map_err(|e| e.to_string())?
         .extend([reader, stderr_reader]);
-    let initialized=c.call("initialize",json!({"clientInfo":{"name":"codex_prism","title":"codex-prism","version":"0.1.0"},"capabilities":{}})).await;
+    let initialized=c.call("initialize",json!({"clientInfo":{"name":"codex_prism","title":"codex-prism","version":"0.1.0"},"capabilities":{"experimentalApi":true}})).await;
     if let Err(e) = initialized {
         let _ = c.stop().await;
         return Err(e);
@@ -734,6 +734,7 @@ pub(crate) async fn codex_send(
         main_document,
         history_prompt,
         None,
+        None,
     )
     .await
 }
@@ -748,7 +749,10 @@ pub(crate) async fn codex_send_for_chat(
     main_document: Option<String>,
     history_prompt: Option<String>,
     chat_id: Option<String>,
+    mode: Option<String>,
 ) -> Result<Value, String> {
+    let mode = mode.as_deref().unwrap_or("default");
+    if !["plan", "default"].contains(&mode) { return Err("Unknown collaboration mode".into()); }
     let project = projects::get(&app, &project_id)?;
     if review_path(&app, &project_id)?.exists() {
         return Err(
@@ -756,6 +760,11 @@ pub(crate) async fn codex_send_for_chat(
         );
     }
     let c = connection(&app).await?;
+    let presets = c.call("collaborationMode/list", json!({})).await;
+    if mode == "plan" && !presets.as_ref().ok().and_then(|v| v["data"].as_array()).is_some_and(|items| items.iter().any(|v| v["mode"] == "plan")) {
+        return Err("Native Plan mode requires a compatible Codex version. Update Codex and retry.".into());
+    }
+    let supports_modes = presets.as_ref().ok().and_then(|v| v["data"].as_array()).is_some_and(|items| items.iter().any(|v| v["mode"] == "default"));
     // Serialize only startup/binding. Running turns are reserved per proposal.
     let _startup = app.inner.codex.service_lock.lock().await;
     if let Some(id) = &thread_id {
@@ -774,6 +783,7 @@ pub(crate) async fn codex_send_for_chat(
         history_prompt,
         chat_id.clone(),
     )?;
+    crate::proposals::set_planning(&app, &mut proposal, mode == "plan")?;
     let workspace = crate::proposals::root(&app, &proposal)?;
     let prompt = prompt.replace(&project.root.to_string_lossy().to_string(), ".");
     let _ = main_document;
@@ -793,6 +803,10 @@ pub(crate) async fn codex_send_for_chat(
         for url in images.unwrap_or_default() { input.push(json!({"type":"image","imageUrl":url})); }
         let mut params = json!({"threadId":id,"cwd":workspace,"sandboxPolicy":{"type":"workspaceWrite","writableRoots":[workspace],"networkAccess":false,"excludeTmpdirEnvVar":false,"excludeSlashTmp":false},"input":input});
         if let Some(e) = effort.filter(|s|!s.is_empty()) { params["effort"] = json!(e); }
+        if supports_modes {
+            let effective_model = thread["model"].as_str().or(thread["thread"]["model"].as_str()).ok_or("Codex did not return a model for collaboration mode")?;
+            params["collaborationMode"] = json!({"mode":mode,"settings":{"model":effective_model,"reasoning_effort":params.get("effort"),"developer_instructions":null}});
+        }
         let turn = c.call("turn/start", params).await?;
         if let Some(id) = turn["turn"]["id"].as_str() { crate::proposals::set_turn(&app, &proposal.id, id)?; }
         Ok(json!({"threadId":id,"turn":turn["turn"],"proposalId":proposal.id}))

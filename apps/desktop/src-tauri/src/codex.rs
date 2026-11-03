@@ -56,9 +56,10 @@ pub async fn codex_send(
     main_document: Option<String>,
     history_prompt: Option<String>,
     chat_id: Option<String>,
+    mode: Option<String>,
 ) -> Result<serde_json::Value, String> {
     backend
-        .codex_send_for_chat(
+        .codex_send_for_chat_mode(
             project_id,
             thread_id,
             prompt,
@@ -68,6 +69,7 @@ pub async fn codex_send(
             main_document,
             history_prompt,
             chat_id,
+            mode,
         )
         .await
 }

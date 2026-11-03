@@ -32,6 +32,7 @@ export interface ChatItem {
   activity?: Record<string, any>;
 }
 export interface TabState {
+  mode?: "plan" | "default";
   id: string;
   title: string;
   projectPath: string | null;
@@ -259,7 +260,7 @@ export const useAgentChatStore = create<ChatState>((set, get) => ({
               try {
                 const result = await backend.agent.thread(p.id, t.sessionId, "read");
                 t.messages = (result.thread?.turns ?? []).flatMap((turn: any) =>
-                  (turn.items ?? []).map(toItem));
+                  (turn.items ?? []).map((item: any) => { const mapped = toItem(item); return mapped.type === "proposedPlan" ? { ...mapped, status: turn.status } : mapped; }));
               } catch (e) {
                 t.error = `Could not restore conversation: ${String(e)}`;
               }
@@ -546,6 +547,7 @@ export const useAgentChatStore = create<ChatState>((set, get) => ({
           : undefined,
         prompt,
         t.id,
+        t.mode ?? "default",
       );
       await get().refreshReview();
       set((s) => ({
@@ -597,7 +599,7 @@ export const useAgentChatStore = create<ChatState>((set, get) => ({
     t.title = title || "Chat";
     t.projectPath = root;
     t.messages = (result.thread?.turns ?? []).flatMap((turn: any) =>
-      (turn.items ?? []).map(toItem),
+      (turn.items ?? []).map((item: any) => { const mapped = toItem(item); return mapped.type === "proposedPlan" ? { ...mapped, status: turn.status } : mapped; }),
     );
     set((s) => ({
       projectId: p.id,
@@ -694,7 +696,7 @@ export const useAgentChatStore = create<ChatState>((set, get) => ({
       }));
     }
     if (e.method.endsWith("/delta")) {
-      const type = e.method.includes("reasoning")
+      const type = e.method === "item/plan/delta" ? "proposedPlan" : e.method.includes("reasoning")
         ? "reasoning"
         : e.method.includes("command")
           ? "commandExecution"
@@ -737,7 +739,7 @@ export const useAgentChatStore = create<ChatState>((set, get) => ({
         error: s.activeTabId === t.id ? error : s.error,
         requests: s.requests.filter((r) => r.params?.threadId !== p.threadId),
         tabs: s.tabs.map((x) =>
-          x.id === t.id ? { ...x, isStreaming: false, error } : x,
+          x.id === t.id ? { ...x, isStreaming: false, error, messages: x.messages.map(m => m.type === "proposedPlan" && m.status !== "completed" ? { ...m, status: p.turn.status ?? (error ? "failed" : "completed") } : m) } : x,
         ),
       }));
       void get()
@@ -753,7 +755,7 @@ export const useAgentChatStore = create<ChatState>((set, get) => ({
 function toItem(item: any): ChatItem {
   return {
     id: item.id,
-    type: item.type,
+    type: item.type === "plan" ? "proposedPlan" : item.type,
     status: item.status,
     ...(item.phase != null ? { phase: item.phase } : {}),
     ...(!["agentMessage", "userMessage", "reasoning"].includes(item.type)
@@ -816,8 +818,8 @@ useAgentChatStore.subscribe((state) => {
   try {
     writeChatTabs(state.activeProjectPath, {
       activeTabId: state.activeTabId,
-      tabs: state.tabs.map(({ id, title, sessionId, draft }) => ({
-        id, title, sessionId, draft,
+      tabs: state.tabs.map(({ id, title, sessionId, draft, mode }) => ({
+        id, title, sessionId, draft, mode,
       })),
     });
   } catch {
