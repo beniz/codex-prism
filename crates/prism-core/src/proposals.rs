@@ -644,8 +644,9 @@ pub(crate) fn service(
                 target: Some(target.clone()),
             };
             let warning = record_with(app, &j, Some(&target))?;
+            let reused = crate::visual_review::promote_proposal_builds(app, &p.id, &main.root, &j.after);
             app.emit_review(json!({"projectId":project}))?;
-            Ok(json!({"conflicts":[],"historyWarning":warning}))
+            Ok(json!({"conflicts":[],"historyWarning":warning,"reusedBuilds":reused}))
         }
         "proposal_repair" => {
             let mut candidate = create(

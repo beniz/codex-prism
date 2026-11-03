@@ -4,7 +4,7 @@ import { useAgentChatStore } from "@/stores/agent-chat-store";
 import { useDocumentStore } from "@/stores/document-store";
 import { useSettingsStore } from "@/stores/settings-store";
 import { backend, proposals } from "@/lib/backend";
-import { compileLatex, resolveCompileTarget } from "@/lib/latex-compiler";
+import { compileLatex, loadExistingPdf, resolveCompileTarget } from "@/lib/latex-compiler";
 vi.mock("@/lib/backend", () => ({
   proposals: { list: vi.fn(async () => []), operate: vi.fn() },
   backend: {
@@ -36,6 +36,7 @@ vi.mock("@/stores/document-store", () => ({
 vi.mock("@/lib/latex-compiler", () => ({
   resolveCompileTarget: vi.fn(() => null),
   compileLatex: vi.fn(),
+  loadExistingPdf: vi.fn(),
   formatCompileError: (error: unknown) => String(error),
 }));
 const save = vi.fn(async () => {});
@@ -721,4 +722,25 @@ describe("project chat restoration", () => {
     expect(useAgentChatStore.getState().tabs[0].sessionId).toBe("thread2");
     expect(useAgentChatStore.getState().error).toContain("offline");
   });
+});
+
+it.each([true, false])("Keep reuses a matching reviewed build (%s), otherwise compiles", async (reuse) => {
+  const pdf = new Uint8Array([37,80,68,70]);
+  const doc = useDocumentStore.getState();
+  const setPdfData = vi.fn();
+  const setIsCompiling = vi.fn();
+  vi.mocked(useDocumentStore.getState).mockReturnValue({ ...doc, setPdfData, setIsCompiling, setCompileError: vi.fn() } as any);
+  useAgentChatStore.setState({ proposals: [{ id: "proposal", projectId: "p1", chatId: "tab1", state: "ready", generation: 1 }] as any });
+  vi.mocked(proposals.operate).mockResolvedValueOnce({ conflicts: [], reusedBuilds: reuse ? ["main.tex"] : [] });
+  vi.mocked(resolveCompileTarget).mockReturnValue({ rootId: "main.tex", targetPath: "main.tex" });
+  vi.mocked(loadExistingPdf).mockResolvedValueOnce(pdf);
+  vi.mocked(compileLatex).mockResolvedValueOnce(pdf);
+  await useAgentChatStore.getState().decideProposal("apply");
+  expect(setPdfData).toHaveBeenCalledWith(pdf, "main.tex");
+  if (reuse) {
+    expect(compileLatex).not.toHaveBeenCalled();
+    expect(setIsCompiling).not.toHaveBeenCalled();
+  } else {
+    expect(compileLatex).toHaveBeenCalledOnce();
+  }
 });

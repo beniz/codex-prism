@@ -188,6 +188,7 @@ async fn build(app: &Backend, project: &str, key: &str) -> Result<(), String> {
         locations.len()
     );
     projects::save_json(&dir.join("locations.json"), &locations)?;
+    fs::write(dir.join("build-root.txt"), work.path().to_string_lossy().as_bytes()).map_err(|e| e.to_string())?;
     fs::write(dir.join("output.tmp"), pdf).map_err(|e| e.to_string())?;
     fs::rename(dir.join("output.tmp"), dir.join("output.pdf")).map_err(|e| e.to_string())?;
     projects::save_json(&directory(app, project)?.join("latest.json"), &key)?;
@@ -738,4 +739,81 @@ pub(crate) async fn proposal_pdf(
     Ok(
         json!({"artifactId":key,"bytes":fs::read(dir.join("output.pdf")).map_err(|e|e.to_string())?,"locations":locations}),
     )
+}
+
+/// Promote only complete immutable builds whose entire input set matches acceptance.
+/// Failure is an optimization miss: the caller will compile normally.
+pub(crate) fn promote_proposal_builds(app: &Backend, workspace: &str, root: &std::path::Path, files: &BTreeMap<String, Vec<u8>>) -> Vec<String> {
+    let mut promoted = Vec::new();
+    let Ok(base) = directory(app, workspace) else { return promoted; };
+    let Ok(entries) = fs::read_dir(base) else { return promoted; };
+    let hashes: BTreeMap<_, _> = files.iter().map(|(p,b)| (p.clone(), projects::revision(b))).collect();
+    for entry in entries.flatten() {
+        let attempt = || -> Result<String, String> {
+            let dir = entry.path();
+            let manifest: Manifest = serde_json::from_slice(&fs::read(dir.join("manifest.json")).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+            if manifest.inputs != hashes || manifest.project != workspace { return Err("Different inputs".into()); }
+            let pdf = fs::read(dir.join("output.pdf")).map_err(|e| e.to_string())?;
+            if !pdf.starts_with(b"%PDF-") { return Err("Invalid PDF".into()); }
+            let original = fs::read_to_string(dir.join("build-root.txt")).map_err(|e| e.to_string())?;
+            if original.is_empty() { return Err("Missing build origin".into()); }
+            use std::io::Read;
+            let mut sync = String::new();
+            flate2::read::GzDecoder::new(fs::File::open(dir.join("output.synctex.gz")).map_err(|e|e.to_string())?).read_to_string(&mut sync).map_err(|e|e.to_string())?;
+            let relative = format!(".prism/accepted/{}", uuid::Uuid::new_v4());
+            let dest = projects::resolve(root, &relative)?;
+            fs::create_dir_all(&dest).map_err(|e| e.to_string())?;
+            let dest = fs::canonicalize(dest).map_err(|e| e.to_string())?;
+            for (name, bytes) in files {
+                let path = projects::resolve(&dest, name)?;
+                fs::create_dir_all(path.parent().ok_or("Invalid source")?).map_err(|e|e.to_string())?;
+                fs::write(path, bytes).map_err(|e|e.to_string())?;
+            }
+            let stem = std::path::Path::new(&manifest.main).file_stem().and_then(|s|s.to_str()).ok_or("Invalid main")?;
+            fs::write(dest.join(format!("{stem}.synctex")), sync.replace(&original, &dest.to_string_lossy())).map_err(|e|e.to_string())?;
+            fs::write(dest.join(format!("{stem}.pdf")), pdf).map_err(|e|e.to_string())?;
+            let pointer = projects::resolve(root, &format!(".prism/accepted-{}.json", projects::revision(manifest.main.as_bytes())))?;
+            projects::save_json(&pointer, &format!("{relative}/{stem}.pdf"))?;
+            Ok(manifest.main)
+        };
+        if let Ok(main) = attempt() { promoted.push(main); }
+    }
+    promoted
+}
+
+#[cfg(test)]
+mod promotion_tests {
+    use super::*;
+    #[tokio::test]
+    async fn accepted_build_requires_identical_inputs_and_preserves_navigation() {
+        let (tmp, app) = crate::test_backend();
+        let root = tmp.path().join("document");
+        fs::create_dir(&root).unwrap();
+        let workspace = uuid::Uuid::new_v4().to_string();
+        let files = BTreeMap::from([("main.tex".into(), b"\\section{Title}\n".to_vec()), ("image.png".into(), vec![1,2,3])]);
+        let key = capture(&app, &workspace, "main.tex", &files).unwrap();
+        let dir = artifact(&app, &workspace, &key).unwrap();
+        assert!(promote_proposal_builds(&app, &workspace, &root, &files).is_empty());
+        fs::write(dir.join("output.pdf"), b"%PDF-1.4 reviewed").unwrap();
+        fs::write(dir.join("build-root.txt"), "/old/build").unwrap();
+        use std::io::Write;
+        let mut gzip = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+        gzip.write_all(b"Input:1:/old/build/main.tex\n").unwrap();
+        fs::write(dir.join("output.synctex.gz"), gzip.finish().unwrap()).unwrap();
+        let mut merged = files.clone();
+        merged.insert("image.png".into(), vec![4]);
+        assert!(promote_proposal_builds(&app, &workspace, &root, &merged).is_empty());
+        assert_eq!(promote_proposal_builds(&app, &workspace, &root, &files), vec!["main.tex"]);
+        let pdf = latex::load_existing_pdf(&app.inner.latex, root.to_string_lossy().into(), "main.tex".into()).await.unwrap().unwrap();
+        assert_eq!(pdf, b"%PDF-1.4 reviewed");
+        let pointer: String = serde_json::from_slice(&fs::read(root.join(format!(".prism/accepted-{}.json", projects::revision(b"main.tex")))).unwrap()).unwrap();
+        let accepted = root.join(pointer);
+        let work = accepted.parent().unwrap();
+        assert_eq!(fs::read(work.join("main.tex")).unwrap(), files["main.tex"]);
+        let sync = fs::read_to_string(accepted.with_extension("synctex")).unwrap();
+        assert!(sync.contains(&work.to_string_lossy().to_string()));
+        assert!(!sync.contains("/old/build"));
+        fs::remove_file(dir.join("output.pdf")).unwrap();
+        assert!(promote_proposal_builds(&app, &workspace, &root, &files).is_empty());
+    }
 }

@@ -955,7 +955,14 @@ fn find_pdf_revision(
         .ok_or("Invalid TeX filename")?;
     let beside_source = main.with_extension("pdf").to_string_lossy().to_string();
     let mut candidates = Vec::new();
-    for relative in [format!(".prism/build/{stem}.pdf"), beside_source] {
+    let mut paths = vec![format!(".prism/build/{stem}.pdf"), beside_source];
+    let pointer = crate::projects::resolve(root, &format!(".prism/accepted-{}.json", crate::projects::revision(main_file.as_bytes())))?;
+    if let Ok(bytes) = std::fs::read(pointer) {
+        if let Ok(relative) = serde_json::from_slice::<String>(&bytes) {
+            if relative.starts_with(".prism/accepted/") { paths.push(relative); }
+        }
+    }
+    for relative in paths {
         let path = crate::projects::resolve(root, &relative)?;
         match std::fs::metadata(&path) {
             Ok(meta) if meta.is_file() => candidates.push((
@@ -1149,7 +1156,7 @@ pub(crate) fn synctex_view(
     };
     // Builds use a copied source tree. Check the requested heading against it
     // so unsaved line insertions cannot send the PDF to unrelated text.
-    let source_root = if work.starts_with(root.join(".prism/build")) {
+    let source_root = if work.starts_with(root.join(".prism/build")) || work.starts_with(root.join(".prism/accepted")) {
         work
     } else {
         root

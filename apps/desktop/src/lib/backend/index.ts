@@ -305,7 +305,7 @@ export const proposals = {
       args: {},
     }),
   operate: <
-    T = { conflicts?: string[]; historyWarning?: string; prompt?: string },
+    T = { conflicts?: string[]; historyWarning?: string; prompt?: string; reusedBuilds?: string[] },
   >(
     p: Proposal,
     action: "apply" | "discard" | "repair" | "read" | "compile" | "recover",

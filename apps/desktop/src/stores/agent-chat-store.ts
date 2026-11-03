@@ -178,13 +178,20 @@ export const useAgentChatStore = create<ChatState>((set, get) => ({
       ) {
         const doc = useDocumentStore.getState();
         await doc.refreshFiles();
-        const { compileLatex, resolveCompileTarget, formatCompileError } =
+        const { compileLatex, loadExistingPdf, resolveCompileTarget, formatCompileError } =
           await import("@/lib/latex-compiler");
         const target = resolveCompileTarget(
           getCurrentPdfRootId() ?? doc.activeFileId,
           doc.files,
         );
         if (target && doc.projectRoot) {
+          if (result?.reusedBuilds?.includes(target.targetPath)) {
+            const pdf = await loadExistingPdf(doc.projectRoot, target.targetPath).catch(() => null);
+            if (pdf && get().projectId === p.projectId) {
+              doc.setPdfData(pdf, target.rootId);
+              return;
+            }
+          }
           doc.setIsCompiling(true);
           try {
             const pdf = await compileLatex(doc.projectRoot, target.targetPath);
