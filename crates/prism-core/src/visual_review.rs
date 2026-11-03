@@ -741,6 +741,31 @@ pub(crate) async fn proposal_pdf(
     )
 }
 
+/// Rebase only SyncTeX input records, using native path joins. In particular,
+/// Windows verbatim paths must not acquire forward slashes from TeX output.
+fn rebase_synctex(data: &str, original: &str, destination: &std::path::Path) -> String {
+    let normalize = |path: &str| {
+        let path = path.replace('\\', "/");
+        path.strip_prefix("//?/").unwrap_or(&path).trim_end_matches('/').to_string()
+    };
+    let prefix = format!("{}/", normalize(original));
+    let mut result = String::new();
+    for line in data.lines() {
+        let rewritten = line.strip_prefix("Input:")
+            .and_then(|rest| rest.split_once(':'))
+            .and_then(|(tag, path)| {
+                let path = normalize(path);
+                let relative = path.strip_prefix(&prefix)?;
+                let mut target = destination.to_path_buf();
+                for part in relative.split('/') { target.push(part); }
+                Some(format!("Input:{tag}:{}", target.display()))
+            });
+        result.push_str(rewritten.as_deref().unwrap_or(line));
+        result.push('\n');
+    }
+    result
+}
+
 /// Promote only complete immutable builds whose entire input set matches acceptance.
 /// Failure is an optimization miss: the caller will compile normally.
 pub(crate) fn promote_proposal_builds(app: &Backend, workspace: &str, root: &std::path::Path, files: &BTreeMap<String, Vec<u8>>) -> Vec<String> {
@@ -770,7 +795,7 @@ pub(crate) fn promote_proposal_builds(app: &Backend, workspace: &str, root: &std
                 fs::write(path, bytes).map_err(|e|e.to_string())?;
             }
             let stem = std::path::Path::new(&manifest.main).file_stem().and_then(|s|s.to_str()).ok_or("Invalid main")?;
-            fs::write(dest.join(format!("{stem}.synctex")), sync.replace(&original, &dest.to_string_lossy())).map_err(|e|e.to_string())?;
+            fs::write(dest.join(format!("{stem}.synctex")), rebase_synctex(&sync, &original, &dest)).map_err(|e|e.to_string())?;
             fs::write(dest.join(format!("{stem}.pdf")), pdf).map_err(|e|e.to_string())?;
             let pointer = projects::resolve(root, &format!(".prism/accepted-{}.json", projects::revision(manifest.main.as_bytes())))?;
             projects::save_json(&pointer, &format!("{relative}/{stem}.pdf"))?;
@@ -784,6 +809,21 @@ pub(crate) fn promote_proposal_builds(app: &Backend, workspace: &str, root: &std
 #[cfg(test)]
 mod promotion_tests {
     use super::*;
+    #[test]
+    fn rebases_windows_and_unix_inputs_without_rewriting_other_records() {
+        let dest = PathBuf::from("accepted");
+        for (original, input) in [
+            (r"C:\old\build", "C:/old/build/chapter/main.tex"),
+            (r"\\?\C:\old\build", "C:/old/build/chapter/main.tex"),
+            (r"\\?\C:\old\build", r"\\?\C:\old\build\chapter\main.tex"),
+            ("/old/build", "/old/build/chapter/main.tex"),
+        ] {
+            let data = format!("Input:12:{input}\nInput:2:/external/style.sty\nOutput:pdf\n");
+            let rebased = rebase_synctex(&data, original, &dest);
+            assert_eq!(rebased, format!("Input:12:{}\nInput:2:/external/style.sty\nOutput:pdf\n", dest.join("chapter").join("main.tex").display()));
+        }
+        assert_eq!(rebase_synctex("Input:1:/old/build-other/main.tex\n", "/old/build", &dest), "Input:1:/old/build-other/main.tex\n");
+    }
     #[tokio::test]
     async fn accepted_build_requires_identical_inputs_and_preserves_navigation() {
         let (tmp, app) = crate::test_backend();
@@ -811,7 +851,8 @@ mod promotion_tests {
         let work = accepted.parent().unwrap();
         assert_eq!(fs::read(work.join("main.tex")).unwrap(), files["main.tex"]);
         let sync = fs::read_to_string(accepted.with_extension("synctex")).unwrap();
-        assert!(sync.contains(&work.to_string_lossy().to_string()));
+        let source = sync.lines().find_map(|line| line.strip_prefix("Input:1:")).unwrap();
+        assert_eq!(fs::canonicalize(source).unwrap(), fs::canonicalize(work.join("main.tex")).unwrap());
         assert!(!sync.contains("/old/build"));
         fs::remove_file(dir.join("output.pdf")).unwrap();
         assert!(promote_proposal_builds(&app, &workspace, &root, &files).is_empty());
