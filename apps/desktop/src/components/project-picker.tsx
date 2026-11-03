@@ -685,7 +685,7 @@ function ProjectPreviewSurface({
       <img
         src={preview.data.url}
         alt={`${projectName} preview`}
-        className="h-full w-full bg-white object-cover object-top"
+        className="h-full w-full bg-white object-contain object-center"
       />
     );
   }
