@@ -164,7 +164,7 @@ export function TemplateCard({ template }: TemplateCardProps) {
             <img
               src={thumbnailUrl}
               alt={template.name}
-              className="h-full w-full object-cover object-top"
+              className="h-full w-full object-contain object-center"
             />
           ) : (
             <div className="relative h-full w-full">
