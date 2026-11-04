@@ -19,7 +19,7 @@ GitHub release builds target Ubuntu 26.04 LTS x86_64, Windows x64, and macOS App
 ### Setup
 
 ```bash
-git clone https://git.jolibrain.com/beniz/codex-prism.git
+git clone https://github.com/beniz/codex-prism.git
 cd codex-prism
 pnpm install
 ```
@@ -40,20 +40,15 @@ pnpm build:desktop
 
 ```
 codex-prism/
-├── apps/
-│   └── desktop/              # Tauri desktop app
-│       ├── src/              # React frontend (TypeScript)
-│       └── src-tauri/        # Rust backend
-│           ├── src/
-│           │   ├── lib.rs           # Tauri plugin registration
-│           │   ├── history.rs       # Git-based version history
-│           │   ├── latex.rs         # TeX Live compilation & SyncTeX
-│           │   ├── codex.rs         # Codex app-server integration & review
-│           │   ├── projects.rs      # Project IDs and file operations
-│           │   └── skills.rs        # Optional scientific skills management
-│           └── Cargo.toml
-├── .gitea/workflows/         # Linux release workflow
-└── biome.json                # Linter config
+├── apps/desktop/
+│   ├── src/                 # React/TypeScript frontend and tests
+│   └── src-tauri/           # Tauri host, adapters, and platform packaging
+├── crates/prism-core/      # Shared headless backend: Codex, proposals, Git, TeX
+├── scripts/                # Development and release tooling
+├── .github/workflows/      # Current Linux, Windows, and macOS release builds
+├── .gitea/workflows/       # Legacy publishing workflows
+├── AGENTS.md              # Repository guidance for coding agents
+└── biome.json             # Linter configuration
 ```
 
 ## Testing

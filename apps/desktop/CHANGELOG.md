@@ -1,4 +1,7 @@
-# Changelog
+# Claude Prism upstream changelog (archive)
+
+This file preserves pre-fork package history. Current codex-prism changes are
+recorded in the [project changelog](../../CHANGELOG.md). Do not append new releases here.
 
 ## \[0.5.3]
 

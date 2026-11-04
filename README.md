@@ -61,7 +61,7 @@ Python environments and external scientific skills are optional and can be confi
 
 ### 3. Open a project and start writing
 
-Open an existing LaTeX project or create one from a template. Ask Codex to help draft or revise your document, and review edits with **Keep** or **Undo**. Sending another chat prompt implicitly keeps pending changes once the new turn starts successfully.
+Open an existing LaTeX project or create one from a template. Ask Codex to help draft or revise your document, and review each chat’s proposal with **Keep** or **Discard changes**. Chats can work concurrently in isolated copies. Follow-up prompts refine that chat’s pending proposal; Keep merges it into the latest main document and reports any conflicts.
 
 In **All Projects**, use **New folder** in the sidebar to organize projects into virtual folders. The selector on each project card changes its folder without moving files on disk. Folder assignments are saved locally; removing a folder returns its projects to **Unfiled**. The project library has no ten-project limit.
 
