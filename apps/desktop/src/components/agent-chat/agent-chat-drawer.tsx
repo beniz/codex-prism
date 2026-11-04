@@ -377,7 +377,14 @@ export function AgentChatDrawer({
               aria-label="Open chats"
               className="flex shrink-0 gap-1 overflow-x-auto px-3 pb-1"
             >
-              {s.tabs.map((x) => (
+              {s.tabs.map((x) => {
+                const proposal = proposals.find((p) =>
+                  p.projectId === s.projectId && p.state !== "original" &&
+                  ((x.sessionId && p.threadId === x.sessionId) || p.chatId === x.id));
+                const awaitingReview = !!proposal?.changes.length &&
+                  !x.isStreaming &&
+                  !["running", "repairing", "applying"].includes(proposal.state);
+                return (
                 <div
                   key={x.id}
                   className={cn(
@@ -390,23 +397,24 @@ export function AgentChatDrawer({
                     onClick={() => s.setActiveTab(x.id)}
                   >
                     {x.title}{" "}
-                    {proposals.find(
-                      (p) =>
-                        p.threadId === x.sessionId && p.state !== "original",
-                    )?.state === "conflicts"
+                    {proposal?.state === "conflicts"
                       ? " · Conflicts"
-                      : proposals.some(
-                            (p) =>
-                              p.threadId === x.sessionId &&
-                              p.state === "repairing",
-                          )
+                      : proposal?.state === "repairing"
                         ? " · Repairing"
                         : x.isStreaming
                           ? " · Running"
-                          : proposals.some((p) => p.threadId === x.sessionId)
+                          : awaitingReview
                             ? " · Changes ready"
                             : ""}
                   </button>
+                  {awaitingReview && (
+                    <span
+                      role="img"
+                      aria-label={`${x.title}: changes awaiting review`}
+                      title="Changes awaiting review"
+                      className="size-2 shrink-0 rounded-full bg-amber-500"
+                    />
+                  )}
                   <Button
                     variant="ghost"
                     size="icon-xs"
@@ -417,7 +425,8 @@ export function AgentChatDrawer({
                     <XIcon />
                   </Button>
                 </div>
-              ))}
+              );
+              })}
             </nav>
           )}
           <div
