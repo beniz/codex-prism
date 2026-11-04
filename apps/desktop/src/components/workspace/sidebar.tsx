@@ -1303,6 +1303,7 @@ export function Sidebar({
                               const parent = parentFolderOfPath(id);
                               setPasteTargetFolder(parent);
                               setActiveFile(id);
+                              layoutControls?.setCodeVisible(true);
                             }}
                             onItemClick={handleTreeItemClick}
                             onItemContextMenu={handleTreeItemContextMenu}
