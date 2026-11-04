@@ -4,12 +4,11 @@
   "version": "1.6.3",
   "repository": {
     "type": "git",
-    "url": "https://git.jolibrain.com/beniz/codex-prism"
+    "url": "https://github.com/beniz/codex-prism"
   },
   "private": true,
   "workspaces": [
-    "apps/*",
-    "packages/*"
+    "apps/*"
   ],
   "scripts": {
     "dev:desktop": "node scripts/dev-desktop.mjs",
@@ -22,7 +21,6 @@
     "release:prepare": "node scripts/release.mjs prepare",
     "release:check": "node scripts/release.mjs check",
     "release:build": "node scripts/release.mjs build",
-    "release:publish": "node scripts/release.mjs publish",
     "test:release": "node --test scripts/release.test.mjs scripts/github-release.test.mjs"
   },
   "devDependencies": {

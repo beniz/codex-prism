@@ -1,7 +1,7 @@
 import { repairAppImage } from "./appimage.mjs";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { createReadStream, openAsBlob } from "node:fs";
+import { createReadStream } from "node:fs";
 import {
   readFile,
   writeFile,
@@ -168,112 +168,6 @@ export async function collect(cwd = root) {
   );
   return dir;
 }
-export async function publish({
-  cwd = root,
-  token = process.env.GITEA_TOKEN,
-  fetchImpl = fetch,
-} = {}) {
-  if (!token)
-    throw new Error(
-      "Set GITEA_TOKEN to a Gitea token with repository release write permission",
-    );
-  const version = await check(cwd);
-  const tag = `v${version}`;
-  const commit = git(["rev-parse", "HEAD"], cwd);
-  if (git(["status", "--porcelain"], cwd))
-    throw new Error("Commit all changes before publishing");
-  if (git(["rev-parse", `${tag}^{commit}`], cwd) !== commit)
-    throw new Error("Release tag must point to HEAD");
-  const dir = join(cwd, "dist/releases", tag);
-  const manifest = JSON.parse(
-    await readFile(join(dir, "release.json"), "utf8"),
-  );
-  if (
-    manifest.version !== version ||
-    manifest.commit !== commit ||
-    manifest.dirty
-  )
-    throw new Error(
-      "Build artifacts from this clean, tagged checkout before publishing",
-    );
-  for (const artifact of manifest.artifacts) {
-    if (artifact.name !== artifact.name.split(/[\\/]/).pop())
-      throw new Error("Invalid artifact path");
-    if ((await hash(join(dir, artifact.name))) !== artifact.sha256)
-      throw new Error(`Checksum mismatch: ${artifact.name}`);
-  }
-  const sums = manifest.artifacts
-    .map((a) => `${a.sha256}  ${a.name}\n`)
-    .join("");
-  if ((await readFile(join(dir, "SHA256SUMS"), "utf8")) !== sums)
-    throw new Error("SHA256SUMS does not match the manifest");
-  const server = "https://git.jolibrain.com";
-  const base = `${server}/api/v1/repos/beniz/codex-prism`;
-  const headers = { Authorization: `token ${token}` };
-  async function request(path, options = {}, allow404 = false) {
-    const response = await fetchImpl(`${base}${path}`, {
-      ...options,
-      headers: { ...headers, ...options.headers },
-      redirect: "error",
-    });
-    if (allow404 && response.status === 404) return null;
-    if (!response.ok)
-      throw new Error(
-        `Gitea ${options.method ?? "GET"} ${path}: HTTP ${response.status}`,
-      );
-    return response.json();
-  }
-  const remoteTag = await request(`/tags/${tag}`);
-  if (remoteTag.commit?.sha !== commit)
-    throw new Error("Push the matching release tag to Gitea before uploading");
-  let release = await request(`/releases/tags/${tag}`, {}, true);
-  if (release && !release.draft)
-    throw new Error(
-      "Release is already published; existing public releases are not modified",
-    );
-  if (!release)
-    release = await request("/releases", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        tag_name: tag,
-        target_commitish: commit,
-        name: `codex-prism ${tag}`,
-        draft: true,
-        prerelease: version.includes("-"),
-        body: await readFile(join(dir, "RELEASE_NOTES.md"), "utf8"),
-      }),
-    });
-  const assets = await request(`/releases/${release.id}/assets`);
-  for (const name of [
-    ...manifest.artifacts.map((a) => a.name),
-    "SHA256SUMS",
-    "release.json",
-  ]) {
-    const existing = assets.find((a) => a.name === name);
-    if (existing) {
-      const url = new URL(existing.browser_download_url);
-      if (url.origin !== server)
-        throw new Error("Unexpected asset download host");
-      const response = await fetchImpl(url, { headers, redirect: "error" });
-      if (!response.ok) throw new Error(`Cannot verify existing asset ${name}`);
-      const digest = createHash("sha256");
-      for await (const chunk of response.body) digest.update(chunk);
-      if (digest.digest("hex") !== (await hash(join(dir, name))))
-        throw new Error(
-          `Existing asset differs: ${name}. Remove the conflicting draft asset before retrying.`,
-        );
-      continue;
-    }
-    const body = new FormData();
-    body.set("attachment", await openAsBlob(join(dir, name)), name);
-    await request(
-      `/releases/${release.id}/assets?name=${encodeURIComponent(name)}`,
-      { method: "POST", body },
-    );
-  }
-  return release.html_url;
-}
 async function main() {
   const [command, argument] = process.argv.slice(2);
   if (command === "prepare") {
@@ -351,11 +245,9 @@ async function main() {
     if (images.length !== 1) throw new Error("Expected exactly one AppImage to normalize");
     await repairAppImage(images[0]);
     console.log(`Release files: ${await collect()}`);
-  } else if (command === "publish")
-    console.log(`Draft release: ${await publish()}`);
-  else
+  } else
     console.log(
-      "Usage: corepack pnpm release <prepare VERSION|check [TAG]|build|publish>\nSee docs/releases/README.md for local and Gitea Actions releases.",
+      "Usage: corepack pnpm release <prepare VERSION|check [TAG]|build>\nSee docs/releases/README.md for local builds and GitHub releases.",
     );
 }
 if (

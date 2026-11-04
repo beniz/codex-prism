@@ -159,7 +159,7 @@ For development or running directly from a repository checkout on Ubuntu 26.04 L
 2. Install Rust with rustup. This checkout pins Rust 1.88.0.
 3. Clone the repository and start the app:
    ```sh
-   git clone https://git.jolibrain.com/beniz/codex-prism.git
+   git clone https://github.com/beniz/codex-prism.git
    cd codex-prism
    corepack pnpm install --frozen-lockfile
    corepack pnpm dev:desktop
@@ -200,8 +200,8 @@ For a hands-on acceptance check, open a disposable LaTeX project, ask Codex to e
 - `crates/prism-core` contains the headless Rust backend: projects/files, compilation, history, agent supervision/review, Python environments and scientific skills. The desktop crate supplies thin Tauri commands, event delivery and native integration.
 - The Rust backend supervises one `codex app-server --listen stdio://` process. The webview receives conversation events and approval requests; credentials remain in Codex's normal credential store.
 - Projects have persistent UUIDs. File operations carry `{projectId, path}` with paths relative to the project directory. The desktop adapter resolves host paths for native pickers and assets. Rename preserves the project ID; a backend relocate operation is also available for a later project-management UI.
-- The agent saves dirty buffers before starting, runs with `workspace-write` and `on-request` approvals, and allows one active turn per project. Unrelated CLI sessions are not imported into its chat list.
-- File editing is locked during a turn and pending review, but pending review does not block the next chat prompt. Sending a new prompt implicitly keeps pending changes once Codex confirms the new turn has started; Undo then applies only to the new turn. A failed start preserves the prior review. At completion, the app reviews the actual project source/asset changes, including command-generated changes. Keep accepts the current disk contents; Undo restores the saved bytes only if the file still matches the completed turn. Text saves likewise refuse to overwrite an external edit.
+- The agent saves dirty buffers before starting, runs with `workspace-write` and `on-request` approvals, and allows one active turn per chat. Unrelated CLI sessions are not imported into its chat list.
+- Manual file editing is locked while agents run or proposals await review. Chats edit isolated copies concurrently; follow-up prompts refine their own pending proposal. Keep merges the selected chat’s proposal into the latest main document, preserving accepted changes from other chats or reporting a conflict without modifying main. Discard affects only that proposal. Text saves likewise refuse to overwrite an external edit.
 - Review baselines and session mappings persist in the application's data directory, separately from project source. Restart recovers interrupted reviews. Prompts are never automatically resubmitted after a disconnect. Generated build files, hidden/environment directories and symlinks are excluded from snapshots; changes outside that scope cannot be undone by project review.
 - LaTeX/PDF and history features remain; Python and external scientific skills are optional. Existing private Git history migrates to a normal document repository with commits, labels and remotes preserved. New project instructions use `AGENTS.md`; scientific skills use `.agents/skills`.
 - Hosts construct a shared `prism_core::Backend` with explicit application-data, home and temporary paths, an `EventSink`, and optionally a native directory-permission hook. Construction recovers interrupted reviews; `shutdown().await` rejects new work, stops the agent and background installers, drains admitted work, and retains persisted projects/builds. The headless default never opens native permission dialogs.
@@ -209,13 +209,13 @@ For a hands-on acceptance check, open a disposable LaTeX project, ask Codex to e
 
 ### Creating releases
 
-Linux releases target Ubuntu 26.04 LTS x86_64 and are hosted on [Gitea](https://github.com/beniz/codex-prism/releases). The release tooling supports local builds without a CI runner, checks version consistency, and collects packages with checksums. Uploads create a draft for review before publication.
+GitHub Actions builds Linux x86_64, Windows x64, and macOS Apple Silicon packages and stages them together in a [draft GitHub release](https://github.com/beniz/codex-prism/releases). Linux packages target Ubuntu 26.04 LTS. Releases include checksums and source provenance and are published after verification.
 
-See [the release guide](docs/releases/README.md) for version preparation, tagging, building, uploading, and optional Gitea Actions setup.
+See [the release guide](docs/releases/README.md) for version preparation, tagging, builds, and publication.
 
 ## Contributing
 
-See [CONTRIBUTING.md](./CONTRIBUTING.md) for the inherited development guidelines. The build and verification commands above describe this fork.
+See [CONTRIBUTING.md](./CONTRIBUTING.md) for development guidelines and verification commands.
 
 ## License
 

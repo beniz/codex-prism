@@ -46,7 +46,6 @@ codex-prism/
 ├── crates/prism-core/      # Shared headless backend: Codex, proposals, Git, TeX
 ├── scripts/                # Development and release tooling
 ├── .github/workflows/      # Current Linux, Windows, and macOS release builds
-├── .gitea/workflows/       # Legacy publishing workflows
 ├── AGENTS.md              # Repository guidance for coding agents
 └── biome.json             # Linter configuration
 ```

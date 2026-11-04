@@ -71,8 +71,8 @@ move the appropriate changes into its version section and add
 `docs/releases/<version>.md`; do not present unpublished changes as released.
 
 Follow `docs/releases/README.md` for release preparation and platform validation.
-New releases are built/published on GitHub (`beniz/codex-prism`); `.gitea` and the
-Gitea publisher are legacy. Check remotes rather than assuming `origin` is GitHub.
+New releases are built/published on GitHub (`beniz/codex-prism`).
+Check remotes rather than assuming `origin` is GitHub.
 In this checkout, the GitHub remote is named `github`.
 
 - Prepare synchronized versions with `corepack pnpm release:prepare <version>` in a clean checkout. Use an isolated checkout if unrelated local files prevent preparation; never delete them to make the tree clean.

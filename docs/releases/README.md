@@ -10,7 +10,7 @@ The workflow validates the tag against the package, Cargo and Tauri versions, th
 | Windows 10/11 x64 | `-setup.exe` | GitHub `windows-2022` runner |
 | macOS Apple Silicon | `.dmg` | GitHub `macos-15` runner |
 
-After all builds and tests pass, one publishing job creates a **draft GitHub release** containing all four packages, `SHA256SUMS`, `RELEASE_NOTES.md`, and `release.json` with the source commit and artifact hashes. It uses the workflow's built-in `GITHUB_TOKEN`; no Gitea token or signing secrets are required. Build jobs have read-only repository permissions; only the publishing job can write releases.
+After all builds and tests pass, one publishing job creates a **draft GitHub release** containing all four packages, `SHA256SUMS`, `RELEASE_NOTES.md`, and `release.json` with the source commit and artifact hashes. It uses the workflow's built-in `GITHUB_TOKEN`; no separate publishing token or signing secrets are required. Build jobs have read-only repository permissions; only the publishing job can write releases.
 
 Windows packages are unsigned. macOS packages are ad-hoc signed, not Apple-notarized. Linux packages target Ubuntu 26.04 and are not promised to work on older distributions. Automatic application updates are not enabled.
 
@@ -70,9 +70,3 @@ corepack pnpm release:build
 Artifacts go to `dist/releases/v<version>/`. Packaging embeds a portable PNG `.DirIcon` and validates the AppImage after extraction into a separate directory, before generating checksums. AppImage filenames omit `linux` to follow catalog conventions. Signing, if added, must happen after this normalization.
 
 Local `release:build` can build an uncommitted checkout for testing. The `codex-prism` symlink in `~/.local/bin` continues launching the repository checkout; remove or rename it if an installed package should take precedence.
-
-## Legacy publishing
-
-The Gitea publisher (`release:publish`) and `.gitea/workflows/release-linux.yml` remain available as legacy tooling. They are not used by the GitHub release workflow. Push new release tags to the `github` remote only; do not invoke the Gitea publisher for this release process.
-
-`deferred-platforms.yml.disabled` and `deferred-macos.sh.disabled` retain historical recipes containing obsolete Tectonic steps. Use the current GitHub workflows and [Windows guide](windows.md) instead.

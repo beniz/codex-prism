@@ -9,7 +9,6 @@ import {
   check,
   prepare,
   collect,
-  publish,
   validateVersion,
 } from "./release.mjs";
 async function fixture(t) {
@@ -109,104 +108,6 @@ test("collect includes version-specific release notes and hashes their exact byt
     createHash("sha256").update(notes).digest("hex"),
   );
 });
-test("publisher validates remote tag and uploads a draft through the Gitea API", async (t) => {
-  const { cwd, git } = await fixture(t);
-  await collect(cwd);
-  const calls = [];
-  const uploads = new Map();
-  let exists = false;
-  const fetchImpl = async (input, options) => {
-    const url = String(input);
-    calls.push({ url, options });
-    assert.equal(options.headers.Authorization, "token test-token");
-    const json = (value) => Response.json(value);
-    if (url.includes("/download/"))
-      return new Response(uploads.get(url.split("/download/")[1]));
-    if (url.endsWith("/tags/v1.3.0") && !url.includes("/releases/"))
-      return json({ commit: { sha: git("rev-parse", "HEAD") } });
-    if (url.endsWith("/releases/tags/v1.3.0"))
-      return exists
-        ? json({
-            id: 7,
-            draft: true,
-            html_url: "https://git.jolibrain.com/release/7",
-          })
-        : new Response(null, { status: 404 });
-    if (options.method === "POST" && url.endsWith("/releases")) {
-      const body = JSON.parse(options.body);
-      assert.equal(body.draft, true);
-      exists = true;
-      return json({ id: 7, html_url: "https://git.jolibrain.com/release/7" });
-    }
-    if (url.endsWith("/assets"))
-      return json(
-        [...uploads.keys()].map((name) => ({
-          name,
-          browser_download_url: `https://git.jolibrain.com/download/${name}`,
-        })),
-      );
-    if (options.method === "POST" && url.includes("/assets?")) {
-      const file = options.body.get("attachment");
-      uploads.set(file.name, await file.arrayBuffer());
-      return json({ id: uploads.size });
-    }
-    throw new Error(`Unexpected request ${url}`);
-  };
-  assert.equal(
-    await publish({ cwd, token: "test-token", fetchImpl }),
-    "https://git.jolibrain.com/release/7",
-  );
-  assert.equal(uploads.size, 5);
-  const count = calls.filter((c) => c.options.method === "POST").length;
-  await publish({ cwd, token: "test-token", fetchImpl });
-  assert.equal(calls.filter((c) => c.options.method === "POST").length, count);
-  const dir = join(cwd, "dist/releases/v1.3.0");
-  await writeFile(join(dir, "codex-prism-1.3.0-linux-x86_64.deb"), "tampered");
-  await assert.rejects(
-    publish({ cwd, token: "test-token", fetchImpl }),
-    /Checksum mismatch/,
-  );
-});
-test("dirty artifacts cannot be published even after committing", async (t) => {
-  const { cwd, git } = await fixture(t);
-  await writeFile(join(cwd, "change.txt"), "change");
-  await collect(cwd);
-  git("add", ".");
-  git("commit", "-m", "change");
-  git("tag", "-f", "v1.3.0");
-  await assert.rejects(
-    publish({ cwd, token: "test-token" }),
-    /clean, tagged checkout/,
-  );
-});
-
-test("publisher refuses mismatched remote tags and already published releases", async (t) => {
-  const { cwd, git } = await fixture(t);
-  await collect(cwd);
-  let writes = 0;
-  const wrongTag = async (_url, options) => {
-    if (options.method === "POST") writes++;
-    return Response.json({ commit: { sha: "wrong" } });
-  };
-  await assert.rejects(
-    publish({ cwd, token: "test-token", fetchImpl: wrongTag }),
-    /matching release tag/,
-  );
-  const publicRelease = async (url, options) => {
-    if (options.method === "POST") writes++;
-    return Response.json(
-      String(url).includes("/releases/")
-        ? { id: 7, draft: false }
-        : { commit: { sha: git("rev-parse", "HEAD") } },
-    );
-  };
-  await assert.rejects(
-    publish({ cwd, token: "test-token", fetchImpl: publicRelease }),
-    /already published/,
-  );
-  assert.equal(writes, 0);
-});
-
 test("AppDir icon survives relocation instead of depending on the build path", async (t) => {
   const base = await mkdtemp(join(tmpdir(), "prism-appdir-test-"));
   t.after(() => rm(base, { recursive: true, force: true }));
