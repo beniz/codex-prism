@@ -200,6 +200,8 @@ export interface CaptureResult {
 interface PdfViewerProps {
   data: ArrayBuffer;
   artifactId?: string;
+  /** One-time destination when a different PDF is loaded. */
+  pageOnLoad?: number;
   sourceLocation?: { page: number; x: number; y: number } | null;
   selectedRegion?: { page: number; x: number; y: number };
   onPageClick?: (page: number, x: number, y: number) => void;
@@ -227,6 +229,7 @@ interface PdfViewerProps {
 export const PdfViewer = memo(function PdfViewer({
   data,
   artifactId,
+  pageOnLoad,
   selectedRegion,
   sourceLocation,
   onPageClick,
@@ -473,6 +476,7 @@ export const PdfViewer = memo(function PdfViewer({
     const scrollToPageEl = (targetPage: number, maxAttempts = 30) => {
       const attempt = (remaining: number) => {
         const container = containerRef.current;
+        if (gen !== loadGenRef.current) return;
         if (!container || remaining <= 0) {
           if (contentRef.current) contentRef.current.style.minHeight = "";
           return;
@@ -505,10 +509,8 @@ export const PdfViewer = memo(function PdfViewer({
       isFirstLoad.current = false;
       onLoadSuccess?.(syncResult.pageSizes.length);
 
-      if (rootFileId) {
-        const targetPage = scrollPositionCache.get(rootFileId) ?? 0;
-        if (targetPage > 0) scrollToPageEl(targetPage);
-      }
+      const targetPage = pageOnLoad ?? (rootFileId ? scrollPositionCache.get(rootFileId) : undefined) ?? savedPageRef.current;
+      if (targetPage > 0) scrollToPageEl(Math.min(targetPage, syncResult.pageSizes.length));
       return;
     }
 
@@ -533,10 +535,10 @@ export const PdfViewer = memo(function PdfViewer({
         isFirstLoad.current = false;
         onLoadSuccess?.(sizes.length);
 
-        const targetPage = savedPageRef.current;
+        const targetPage = pageOnLoad ?? savedPageRef.current;
         if (targetPage > 0) {
           savedPageRef.current = 0;
-          scrollToPageEl(targetPage);
+          scrollToPageEl(Math.min(targetPage, sizes.length));
         }
       } catch (err) {
         if (gen !== loadGenRef.current) return;
