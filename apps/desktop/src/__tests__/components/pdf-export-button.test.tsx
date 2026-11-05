@@ -45,21 +45,35 @@ async function setup() {
     },
   };
 }
-it("offers ebook export by default and writes the optimized bytes", async () => {
+it("offers high quality export by default and writes the optimized bytes", async () => {
   const bytes = new TextEncoder().encode("%PDF-small");
   vi.mocked(optimizePdf).mockResolvedValue({ bytes, reduced: true });
   const { data, click, cleanup } = await setup();
   try {
     expect(
-      document.querySelector<HTMLInputElement>('input[value="ebook"]')!.checked,
+      document.querySelector<HTMLInputElement>('input[value="high-quality"]')!.checked,
     ).toBe(true);
     await click("Export");
-    expect(optimizePdf).toHaveBeenCalledWith("/paper", data);
+    expect(optimizePdf).toHaveBeenCalledWith("/paper", data, "high-quality");
     expect(save).toHaveBeenCalledWith(
       expect.objectContaining({
-        defaultPath: expect.stringContaining("-ebook.pdf"),
+        defaultPath: expect.stringContaining("-high-quality.pdf"),
       }),
     );
+    expect(writeFile).toHaveBeenCalledWith("/tmp/export.pdf", bytes);
+  } finally {
+    await cleanup();
+  }
+});
+it("exports the selected compact profile", async () => {
+  const bytes = new TextEncoder().encode("%PDF-small");
+  vi.mocked(optimizePdf).mockResolvedValue({ bytes, reduced: true });
+  const { data, click, cleanup } = await setup();
+  try {
+    await act(async () => document.querySelector<HTMLInputElement>('input[value="compact"]')!.click());
+    await click("Export");
+    expect(optimizePdf).toHaveBeenCalledWith("/paper", data, "compact");
+    expect(save).toHaveBeenCalledWith(expect.objectContaining({ defaultPath: expect.stringContaining("-compact.pdf") }));
     expect(writeFile).toHaveBeenCalledWith("/tmp/export.pdf", bytes);
   } finally {
     await cleanup();

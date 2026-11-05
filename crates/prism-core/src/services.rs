@@ -31,7 +31,12 @@ pub(crate) async fn project_service(
             .as_str()
             .ok_or("Missing PDF data")?
             .to_owned();
-        return crate::pdf_export::optimize(&app, encoded).await;
+        let profile = match args.get("profile") {
+            Some(value) => serde_json::from_value(value.clone())
+                .map_err(|_| "Invalid PDF export profile")?,
+            None => crate::pdf_export::ExportProfile::default(),
+        };
+        return crate::pdf_export::optimize(&app, encoded, profile).await;
     }
     if operation.starts_with("visual_") {
         return crate::visual_review::service(&app, &project_id, &operation, args).await;

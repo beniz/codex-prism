@@ -1,6 +1,36 @@
 use base64::{engine::general_purpose::STANDARD, Engine};
 use std::path::{Path, PathBuf};
 
+#[derive(Clone, Copy, Debug, Default, serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub(crate) enum ExportProfile {
+    #[default]
+    HighQuality,
+    Compact,
+}
+
+impl ExportProfile {
+    fn options(self) -> &'static [&'static str] {
+        match self {
+            Self::Compact => &["-dPDFSETTINGS=/ebook"],
+            Self::HighQuality => &[
+                "-dPDFSETTINGS=/default",
+                "-dDownsampleColorImages=true",
+                "-dDownsampleGrayImages=true",
+                "-dColorImageResolution=300",
+                "-dGrayImageResolution=300",
+                "-dColorImageDownsampleType=/Bicubic",
+                "-dGrayImageDownsampleType=/Bicubic",
+                // Keep line art and text inside images free of JPEG artifacts.
+                "-dAutoFilterColorImages=false",
+                "-dAutoFilterGrayImages=false",
+                "-dColorImageFilter=/FlateEncode",
+                "-dGrayImageFilter=/FlateEncode",
+            ],
+        }
+    }
+}
+
 struct ExportDirectory(PathBuf);
 impl Drop for ExportDirectory {
     fn drop(&mut self) {
@@ -32,6 +62,7 @@ fn ghostscript() -> Result<PathBuf, String> {
 pub(crate) async fn optimize(
     app: &crate::Backend,
     encoded: String,
+    profile: ExportProfile,
 ) -> Result<serde_json::Value, String> {
     // Bound IPC decoding; do not accept filenames or user-supplied gs options.
     if encoded.len() > 140_000_000 {
@@ -61,7 +92,7 @@ pub(crate) async fn optimize(
     tokio::fs::write(work.0.join("input.pdf"), &input)
         .await
         .map_err(|e| e.to_string())?;
-    run(&program, &work.0, app.inner.cancel.subscribe()).await?;
+    run(&program, &work.0, app.inner.cancel.subscribe(), profile).await?;
     let output = tokio::fs::read(work.0.join("output.pdf"))
         .await
         .map_err(|e| format!("Cannot read optimized PDF: {e}"))?;
@@ -80,21 +111,25 @@ async fn run(
     program: &Path,
     work: &Path,
     cancel: tokio::sync::watch::Receiver<bool>,
+    profile: ExportProfile,
 ) -> Result<(), String> {
+    let mut options = vec![
+        "-dSAFER",
+        "-dBATCH",
+        "-dNOPAUSE",
+        "-dQUIET",
+        "-sDEVICE=pdfwrite",
+    ];
+    options.extend_from_slice(profile.options());
+    options.extend_from_slice(&[
+        "-dCompatibilityLevel=1.5",
+        "-dAutoRotatePages=/None",
+        "-sOutputFile=output.pdf",
+        "input.pdf",
+    ]);
     let output = crate::latex::run_preview_program(
         program,
-        &[
-            "-dSAFER",
-            "-dBATCH",
-            "-dNOPAUSE",
-            "-dQUIET",
-            "-sDEVICE=pdfwrite",
-            "-dPDFSETTINGS=/ebook",
-            "-dCompatibilityLevel=1.5",
-            "-dAutoRotatePages=/None",
-            "-sOutputFile=output.pdf",
-            "input.pdf",
-        ],
+        &options,
         work,
         cancel,
         tokio::time::Instant::now() + std::time::Duration::from_secs(60),
@@ -137,23 +172,31 @@ mod tests {
         )
         .await
         .unwrap();
-        let result = optimize(&backend, STANDARD.encode(&input)).await.unwrap();
-        let output = STANDARD
-            .decode(result["pdfBase64"].as_str().unwrap())
-            .unwrap();
-        assert!(output.starts_with(b"%PDF-"));
-        assert!(output.len() <= input.len());
-        assert_eq!(
-            input,
-            std::fs::read(project.join(".prism/build/main.pdf")).unwrap()
-        );
-        assert_eq!(
-            std::fs::read_dir(temp.path().join("tmp")).unwrap().count(),
-            0
-        );
-        assert!(optimize(&backend, STANDARD.encode(b"not pdf"))
-            .await
-            .is_err());
+        for profile in [ExportProfile::HighQuality, ExportProfile::Compact] {
+            let result = optimize(&backend, STANDARD.encode(&input), profile)
+                .await
+                .unwrap();
+            let output = STANDARD
+                .decode(result["pdfBase64"].as_str().unwrap())
+                .unwrap();
+            assert!(output.starts_with(b"%PDF-"));
+            assert!(output.len() <= input.len());
+            assert_eq!(
+                input,
+                std::fs::read(project.join(".prism/build/main.pdf")).unwrap()
+            );
+            assert_eq!(
+                std::fs::read_dir(temp.path().join("tmp")).unwrap().count(),
+                0
+            );
+        }
+        assert!(optimize(
+            &backend,
+            STANDARD.encode(b"not pdf"),
+            ExportProfile::HighQuality
+        )
+        .await
+        .is_err());
         backend.shutdown().await;
     }
 }

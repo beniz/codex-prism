@@ -3,7 +3,7 @@ import { DownloadIcon, LoaderIcon } from "lucide-react";
 import { toast } from "sonner";
 import { writeFile } from "@tauri-apps/plugin-fs";
 import { save, openExternal } from "@/lib/backend/desktop-host";
-import { optimizePdf, pdfSize } from "@/lib/pdf-export";
+import { optimizePdf, pdfSize, type PdfExportProfile } from "@/lib/pdf-export";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -22,7 +22,7 @@ export function PdfExportButton({
   getPdf: () => ArrayBuffer | null;
 }) {
   const [open, setOpen] = useState(false);
-  const [profile, setProfile] = useState<"ebook" | "original">("ebook");
+  const [profile, setProfile] = useState<PdfExportProfile | "original">("high-quality");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [size, setSize] = useState(0);
@@ -53,10 +53,10 @@ export function PdfExportButton({
     try {
       let bytes = new Uint8Array(data);
       let reduced = false;
-      if (profile === "ebook") {
+      if (profile !== "original") {
         if (!projectRoot)
           throw new Error("Open a project to optimize its PDF.");
-        const result = await optimizePdf(projectRoot, data);
+        const result = await optimizePdf(projectRoot, data, profile);
         bytes = result.bytes;
         reduced = result.reduced;
       }
@@ -78,7 +78,7 @@ export function PdfExportButton({
         .join("-");
       const path = await save({
         title: "Export PDF",
-        defaultPath: `${name}-${timestamp}${profile === "ebook" ? "-ebook" : ""}.pdf`,
+        defaultPath: `${name}-${timestamp}${profile !== "original" ? `-${profile}` : ""}.pdf`,
         filters: [{ name: "PDF", extensions: ["pdf"] }],
       });
       if (!path || job !== generation.current) return;
@@ -133,26 +133,28 @@ export function PdfExportButton({
             </DialogDescription>
           </DialogHeader>
           <fieldset disabled={busy} className="space-y-3">
-            <label className="flex cursor-pointer items-start gap-3 rounded-md border p-3">
-              <input
-                type="radio"
-                name="pdf-export-profile"
-                value="ebook"
-                checked={profile === "ebook"}
-                onChange={() => {
-                  setProfile("ebook");
-                  setError(null);
-                }}
-                className="mt-1"
-              />
-              <span>
-                <span className="block font-medium">Optimized PDF (ebook)</span>
-                <span className="text-muted-foreground text-sm">
-                  Smaller file for screen reading. Images may lose detail.
-                  Requires Ghostscript.
+            {([
+              ["high-quality", "High quality (300 dpi)", "Preserves more image detail for figures and slides. Requires Ghostscript."],
+              ["compact", "Compact (150 dpi)", "Smaller file for screen reading. Images may lose detail. Requires Ghostscript."],
+            ] as const).map(([value, title, description]) => (
+              <label key={value} className="flex cursor-pointer items-start gap-3 rounded-md border p-3">
+                <input
+                  type="radio"
+                  name="pdf-export-profile"
+                  value={value}
+                  checked={profile === value}
+                  onChange={() => {
+                    setProfile(value);
+                    setError(null);
+                  }}
+                  className="mt-1"
+                />
+                <span>
+                  <span className="block font-medium">{title}</span>
+                  <span className="text-muted-foreground text-sm">{description}</span>
                 </span>
-              </span>
-            </label>
+              </label>
+            ))}
             <label className="flex cursor-pointer items-start gap-3 rounded-md border p-3">
               <input
                 type="radio"
@@ -192,7 +194,7 @@ export function PdfExportButton({
           )}
           {busy && (
             <p role="status" className="text-muted-foreground text-sm">
-              {profile === "ebook"
+              {profile !== "original"
                 ? "Preparing optimized PDF…"
                 : "Exporting PDF…"}
             </p>

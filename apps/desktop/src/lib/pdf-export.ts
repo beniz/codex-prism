@@ -8,13 +8,19 @@ export function pdfBase64(data: ArrayBuffer): Promise<string> {
     reader.readAsDataURL(new Blob([data], { type: "application/pdf" }));
   });
 }
-export async function optimizePdf(projectRoot: string, data: ArrayBuffer) {
+export type PdfExportProfile = "high-quality" | "compact";
+
+export async function optimizePdf(
+  projectRoot: string,
+  data: ArrayBuffer,
+  profile: PdfExportProfile,
+) {
   const result = await invoke<{
     pdfBase64: string;
     originalBytes: number;
     exportBytes: number;
     reduced: boolean;
-  }>("optimize_pdf", { projectRoot, pdfBase64: await pdfBase64(data) });
+  }>("optimize_pdf", { projectRoot, profile, pdfBase64: await pdfBase64(data) });
   const binary = atob(result.pdfBase64);
   const bytes = new Uint8Array(binary.length);
   for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);

@@ -5,6 +5,8 @@ and detailed release notes are in [docs/releases](docs/releases/README.md).
 
 ## Unreleased
 
+- Default PDF export to High quality (300 dpi), with Compact (150 dpi) and Original alternatives.
+
 - List Beamer frames in the outline, including frame titles, untitled slides, and editor/PDF navigation. Custom commands that generate frames are not expanded.
 - Reveal the source panel when opening a file from the Files navigator.
 - Navigate newly compiled agent PDFs to the earliest page mapped to changed source; retain the current page when no location can be mapped.
