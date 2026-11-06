@@ -5,17 +5,16 @@ and detailed release notes are in [docs/releases](docs/releases/README.md).
 
 ## Unreleased
 
+## 1.6.6
+
 - Double-click LaTeX text to show its matching PDF position, falling back to the nearest mapped line in the same file, while retaining word selection.
-
 - Discover existing Windows Codex installations in WinGet package and machine link directories, and continue discovery when WinGet reports Codex is already installed.
-
 - Recall sent prompts with Up in an empty chat composer; use Down to return through history to an empty draft.
-
 - Open project settings from the project title to rename the project and edit its shared prompt.
-
 - Remember the last chat model and reasoning effort separately for each project.
-
 - Add persistent project instructions shared by all chats and applied to each new turn.
+
+[Release notes](docs/releases/1.6.6.md)
 
 ## 1.6.5
 
