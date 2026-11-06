@@ -744,3 +744,28 @@ it.each([true, false])("Keep reuses a matching reviewed build (%s), otherwise co
     expect(compileLatex).toHaveBeenCalledOnce();
   }
 });
+
+
+describe("project model preferences", () => {
+  it("persists choices and restores them without leaking across projects", async () => {
+    useAgentChatStore.setState({ selectedModel: "custom-model", effortLevel: "high" });
+    expect(readChatTabs("/paper")).toMatchObject({ selectedModel: "custom-model", effortLevel: "high" });
+    useAgentChatStore.getState().resetForProject("/other");
+    await vi.waitFor(() => expect(useAgentChatStore.getState().restoringChats).toBe(false));
+    expect(useAgentChatStore.getState().selectedModel).toBe("gpt-5.6-sol");
+    useAgentChatStore.setState({ selectedModel: "", effortLevel: "" });
+    useAgentChatStore.getState().resetForProject("/paper");
+    await vi.waitFor(() => expect(useAgentChatStore.getState().restoringChats).toBe(false));
+    expect(useAgentChatStore.getState()).toMatchObject({ selectedModel: "custom-model", effortLevel: "high" });
+    useAgentChatStore.getState().resetForProject("/other");
+    await vi.waitFor(() => expect(useAgentChatStore.getState().restoringChats).toBe(false));
+    expect(useAgentChatStore.getState()).toMatchObject({ selectedModel: "", effortLevel: "" });
+  });
+  it("keeps legacy saved tabs when optional preferences are absent or malformed", () => {
+    const saved = { activeTabId: "old", tabs: [{ id: "old", title: "Old", sessionId: null, draft: "draft" }] };
+    writeChatTabs("/legacy", saved);
+    expect(readChatTabs("/legacy")?.selectedModel).toBeUndefined();
+    localStorage.setItem("prism-chat-tabs-v1:/legacy", JSON.stringify({ ...saved, selectedModel: 42, effortLevel: null }));
+    expect(readChatTabs("/legacy")).toMatchObject({ tabs: saved.tabs, selectedModel: undefined, effortLevel: undefined });
+  });
+});

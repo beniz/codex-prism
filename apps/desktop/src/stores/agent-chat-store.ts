@@ -239,6 +239,8 @@ export const useAgentChatStore = create<ChatState>((set, get) => ({
     const t = tab();
     set({
       restoringChats: !!root,
+      selectedModel: saved?.selectedModel ?? "gpt-5.6-sol",
+      effortLevel: saved?.effortLevel ?? "xhigh",
       tabs: [t],
       activeTabId: t.id,
       activeProjectPath: root,
@@ -819,12 +821,14 @@ export function activeProposal(
   );
 }
 
-// Persist only tab identity and drafts; Codex remains the source of message history.
+// Persist tab identity, drafts and project model preferences; Codex remains the source of message history.
 useAgentChatStore.subscribe((state) => {
   if (!state.activeProjectPath || !state.projectId || state.restoringChats) return;
   try {
     writeChatTabs(state.activeProjectPath, {
       activeTabId: state.activeTabId,
+      selectedModel: state.selectedModel,
+      effortLevel: state.effortLevel,
       tabs: state.tabs.map(({ id, title, sessionId, draft, mode }) => ({
         id, title, sessionId, draft, mode,
       })),

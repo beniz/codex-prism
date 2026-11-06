@@ -1,5 +1,7 @@
 export interface SavedChatTabs {
   activeTabId: string;
+  selectedModel?: string;
+  effortLevel?: string;
   tabs: { id: string; title: string; sessionId: string | null; draft: string; mode?: "plan" | "default" }[];
 }
 const key = (root: string) => `prism-chat-tabs-v1:${root}`;
@@ -13,7 +15,11 @@ export function readChatTabs(root: string): SavedChatTabs | null {
         t && typeof t.id === "string" && typeof t.title === "string" &&
         (t.sessionId === null || typeof t.sessionId === "string") &&
         typeof t.draft === "string")) return null;
-    return saved;
+    return {
+      ...saved,
+      selectedModel: typeof saved.selectedModel === "string" ? saved.selectedModel : undefined,
+      effortLevel: typeof saved.effortLevel === "string" ? saved.effortLevel : undefined,
+    };
   } catch {
     return null;
   }

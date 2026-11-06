@@ -5,6 +5,8 @@ and detailed release notes are in [docs/releases](docs/releases/README.md).
 
 ## Unreleased
 
+- Remember the last chat model and reasoning effort separately for each project.
+
 - Add persistent project instructions shared by all chats and applied to each new turn.
 
 ## 1.6.5
