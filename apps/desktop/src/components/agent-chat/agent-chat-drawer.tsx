@@ -104,6 +104,7 @@ export function AgentChatDrawer({
   const viewport = useRef<HTMLDivElement>(null);
   const followMessages = useRef(true);
   const input = useRef<HTMLTextAreaElement>(null);
+  const promptHistory = useRef<{ chatId: string; prompts: string[]; index: number; value: string } | null>(null);
   const composer = useRef<HTMLDivElement>(null);
   const [inputHeight, setInputHeight] = useState<number | null>(null);
   const resizeStart = useRef<{ y: number; height: number } | null>(null);
@@ -126,6 +127,7 @@ export function AgentChatDrawer({
     if (el && followMessages.current) el.scrollTop = el.scrollHeight;
   }, [t.messages, s.requests, open]);
   useEffect(() => {
+    promptHistory.current = null;
     followMessages.current = true;
     const el = viewport.current;
     if (el) el.scrollTop = el.scrollHeight;
@@ -175,6 +177,7 @@ export function AgentChatDrawer({
   const send = () => {
     if (!canSend) return;
     const prompt = t.draft;
+    promptHistory.current = null;
     setDraft("");
     followMessages.current = true;
     void s.sendPrompt(prompt);
@@ -582,9 +585,29 @@ export function AgentChatDrawer({
                       : "Ask Codex anything about your project…"
                 }
                 value={t.draft}
-                onChange={(e) => setDraft(e.target.value)}
+                onChange={(e) => { promptHistory.current = null; setDraft(e.target.value); }}
                 onKeyDown={(e) => {
                   if (e.nativeEvent.isComposing) return;
+                  if ((e.key === "ArrowUp" || e.key === "ArrowDown") && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
+                    let history = promptHistory.current;
+                    if (history && (history.chatId !== t.id || history.value !== t.draft)) {
+                      promptHistory.current = null;
+                      history = null;
+                    }
+                    if (!history && e.key === "ArrowUp" && t.draft === "") {
+                      const prompts = t.messages.filter(m => m.type === "userMessage" && m.text?.trim()).map(m => m.text!);
+                      if (prompts.length) history = { chatId: t.id, prompts, index: prompts.length, value: "" };
+                    }
+                    if (history) {
+                      e.preventDefault();
+                      history.index = Math.max(0, Math.min(history.prompts.length, history.index + (e.key === "ArrowUp" ? -1 : 1)));
+                      history.value = history.prompts[history.index] ?? "";
+                      promptHistory.current = history.index === history.prompts.length ? null : history;
+                      setDraft(history.value);
+                      return;
+                    }
+                  }
+
                   if (e.key === "Tab" && e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey && !t.isStreaming && !s.restoringChats) {
                     e.preventDefault();
                     useAgentChatStore.setState((state) => ({ tabs: state.tabs.map((tab) => tab.id === t.id ? { ...tab, mode: tab.mode === "plan" ? "default" : "plan" } : tab) }));

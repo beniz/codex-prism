@@ -96,3 +96,37 @@ it("toggles Plan with Shift+Tab only when idle and implements in the same chat",
     useAgentSetupStore.setState(setup);
   }
 });
+
+it("recalls this chat's prompts while running and returns to an empty composer", async () => {
+  const original = useAgentChatStore.getState();
+  const setup = useAgentSetupStore.getState();
+  const sendPrompt = vi.fn(async () => {});
+  useAgentSetupStore.setState({ checkStatus: vi.fn(async () => {}) });
+  useAgentChatStore.setState({ sendPrompt, tabs: original.tabs.map(t => ({ ...t, draft: "", isStreaming: true, messages: [
+    { id: "u1", type: "userMessage", text: "First\nmultiline prompt" },
+    { id: "a1", type: "agentMessage", text: "Answer" },
+    { id: "u2", type: "userMessage", text: "Latest prompt" },
+  ] })) });
+  const host = document.createElement('div'); const root = createRoot(host);
+  try {
+    await act(async () => root.render(<AgentChatDrawer />));
+    const field = host.querySelector('textarea')!;
+    const key = async (key: string, shiftKey = false) => act(async () => { field.dispatchEvent(new KeyboardEvent('keydown', { key, shiftKey, bubbles: true, cancelable: true })); });
+    await key('ArrowUp', true); expect(field.value).toBe('');
+    await key('ArrowUp'); expect(field.value).toBe('Latest prompt');
+    await key('ArrowUp'); expect(field.value).toBe('First\nmultiline prompt');
+    await key('ArrowUp'); expect(field.value).toBe('First\nmultiline prompt');
+    await key('ArrowDown'); expect(field.value).toBe('Latest prompt');
+    await key('ArrowDown'); expect(field.value).toBe('');
+    expect(sendPrompt).not.toHaveBeenCalled();
+    await key('ArrowUp');
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(field, 'Edited draft');
+      field.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await key('ArrowDown'); expect(field.value).toBe('Edited draft');
+  } finally {
+    await act(async () => root.unmount());
+    useAgentChatStore.setState(original); useAgentSetupStore.setState(setup);
+  }
+});

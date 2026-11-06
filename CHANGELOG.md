@@ -5,6 +5,8 @@ and detailed release notes are in [docs/releases](docs/releases/README.md).
 
 ## Unreleased
 
+- Recall sent prompts with Up in an empty chat composer; use Down to return through history to an empty draft.
+
 - Open project settings from the project title to rename the project and edit its shared prompt.
 
 - Remember the last chat model and reasoning effort separately for each project.
