@@ -1,3 +1,4 @@
+import { ProjectInstructions } from "@/components/agent-chat/project-instructions";
 import { useState, useCallback, useMemo, useRef, useEffect } from "react";
 import { getVersion } from "@tauri-apps/api/app";
 import {
@@ -400,6 +401,7 @@ export function Sidebar({
   const deleteFile = useDocumentStore((s) => s.deleteFile);
   const deleteFolder = useDocumentStore((s) => s.deleteFolder);
   const renameFile = useDocumentStore((s) => s.renameFile);
+  const instructionsProjectId = useDocumentStore(s => s.projectId);
   const renameProject = useDocumentStore((s) => s.renameProject);
   const createNewFile = useDocumentStore((s) => s.createNewFile);
   const createFolder = useDocumentStore((s) => s.createFolder);
@@ -918,10 +920,7 @@ export function Sidebar({
   const [renameDialogOpen, setRenameDialogOpen] = useState(false);
   const [renameFileId, setRenameFileId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
-  const [projectRenameDialogOpen, setProjectRenameDialogOpen] = useState(false);
-  const [projectRenameValue, setProjectRenameValue] = useState("");
-  const [projectRenameError, setProjectRenameError] = useState("");
-  const [isRenamingProject, setIsRenamingProject] = useState(false);
+
   const [newFileName, setNewFileName] = useState("");
   const [newFolderName, setNewFolderName] = useState("");
 
@@ -1031,28 +1030,6 @@ export function Sidebar({
     setRenameValue(name);
     setNameError("");
     setRenameDialogOpen(true);
-  };
-
-  const openProjectRenameDialog = () => {
-    if (!projectRoot) return;
-    setProjectRenameValue(projectName);
-    setProjectRenameError("");
-    setProjectRenameDialogOpen(true);
-  };
-
-  const handleProjectRename = async () => {
-    const name = projectRenameValue.trim();
-    if (!name || isRenamingProject) return;
-    setIsRenamingProject(true);
-    setProjectRenameError("");
-    try {
-      await renameProject(name);
-      setProjectRenameDialogOpen(false);
-    } catch (err) {
-      setProjectRenameError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setIsRenamingProject(false);
-    }
   };
 
   const handleRename = () => {
@@ -1193,21 +1170,7 @@ export function Sidebar({
                 <HomeIcon className="size-3.5" />
               </Button>
             </div>
-            <button
-              type="button"
-              className={cn(
-                "w-full min-w-0 rounded-md px-2 py-1 font-semibold text-sm transition-colors",
-                projectRoot
-                  ? "hover:bg-sidebar-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                  : "cursor-default",
-              )}
-              onClick={openProjectRenameDialog}
-              disabled={!projectRoot}
-              title={projectRoot ? "Rename project folder" : undefined}
-              aria-label="Rename project folder"
-            >
-              <span className="block truncate">{projectName}</span>
-            </button>
+            {instructionsProjectId ? <ProjectInstructions key={instructionsProjectId} projectId={instructionsProjectId} projectName={projectName} renameProject={renameProject} /> : <span className="truncate text-sm font-semibold">{projectName}</span>}
             <div className="flex items-center justify-end gap-1">
               <CodePaneToggle controls={layoutControls} className="size-6" />
               <LayoutPaneSwitcher
@@ -1487,53 +1450,6 @@ export function Sidebar({
                   disabled={!newFolderName.trim()}
                 >
                   Create
-                </Button>
-              </DialogFooter>
-            </DialogContent>
-          </Dialog>
-
-          {/* Rename Project Dialog */}
-          <Dialog
-            open={projectRenameDialogOpen}
-            onOpenChange={(open) => {
-              if (!isRenamingProject) setProjectRenameDialogOpen(open);
-            }}
-          >
-            <DialogContent className="sm:max-w-md">
-              <DialogHeader>
-                <DialogTitle>Rename Project</DialogTitle>
-              </DialogHeader>
-              <div className="space-y-2 py-4">
-                <Input
-                  value={projectRenameValue}
-                  onChange={(e) => {
-                    setProjectRenameValue(e.target.value);
-                    setProjectRenameError("");
-                  }}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") handleProjectRename();
-                  }}
-                  autoFocus
-                />
-                {projectRenameError && (
-                  <p className="text-destructive text-xs">
-                    {projectRenameError}
-                  </p>
-                )}
-              </div>
-              <DialogFooter>
-                <Button
-                  variant="outline"
-                  onClick={() => setProjectRenameDialogOpen(false)}
-                  disabled={isRenamingProject}
-                >
-                  Cancel
-                </Button>
-                <Button
-                  onClick={handleProjectRename}
-                  disabled={!projectRenameValue.trim() || isRenamingProject}
-                >
-                  {isRenamingProject ? "Renaming..." : "Rename"}
                 </Button>
               </DialogFooter>
             </DialogContent>

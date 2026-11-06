@@ -227,7 +227,7 @@ This project is a fork of [ClaudePrism](https://github.com/delibae/claude-prism)
 
 ### Shared project instructions
 
-Use **Project instructions** in the chat header to save standing context for all
+Click the project title to open **Project settings**, then edit the shared project prompt to save standing context for all
 chats in a project. Instructions are stored locally in Prism and supplied on each
 new turn, including resumed chats. Changes do not interrupt running turns.
 Reference files must already be available in the project; instructions do not
