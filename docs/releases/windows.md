@@ -27,6 +27,12 @@ MiKTeX or Codex is missing. Setup accepts the package/source agreements for thes
 prerequisites. Vendor licenses apply; prerequisites are separate installations
 and remain installed when codex-prism is uninstalled.
 
+Setup passes `--no-upgrade` to WinGet for both Codex and MiKTeX. Existing
+versions are never upgraded by these install requests, even if setup missed
+their executables. Updating those tools remains the user's or IT administrator's
+responsibility. If an existing tool cannot be found, make its executable
+available on PATH; setup still requires discoverable prerequisites to finish.
+
 Setup detects tools rather than requiring a particular TeX distribution. It
 searches the current and saved Windows PATH, standard MiKTeX locations and
 `C:\texlive\*\bin\windows`, and checks compiler availability with `--version`.

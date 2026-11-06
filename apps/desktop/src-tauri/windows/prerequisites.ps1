@@ -94,9 +94,11 @@ function Invoke-Checked([string]$Program, [string[]]$Arguments) {
 function Install-WinGetPackage([string]$Id) {
     $winget = Find-Tool 'winget.exe'
     if (!$winget) { throw 'Windows App Installer (winget) is required for prerequisite downloads. Install App Installer from Microsoft, then rerun setup.' }
-    Write-Host "Installing $Id..."
+    Write-Host "Installing $Id if missing (existing versions will not be upgraded)..."
+    # `winget install` otherwise upgrades packages already registered with
+    # WinGet, even when executable discovery above missed their installation.
     Invoke-Checked $winget @('install', '--id', $Id, '--exact', '--source', 'winget',
-        '--scope', 'user', '--silent', '--accept-source-agreements', '--accept-package-agreements', '--disable-interactivity')
+        '--no-upgrade', '--scope', 'user', '--silent', '--accept-source-agreements', '--accept-package-agreements', '--disable-interactivity')
     Update-ToolPath
 }
 

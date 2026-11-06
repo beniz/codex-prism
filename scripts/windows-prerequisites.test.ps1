@@ -48,6 +48,31 @@ Invoke-Checked $env:ComSpec @('/d', '/c', 'echo benign diagnostic 1>&2')
 $failed = $false
 try { Invoke-Checked $env:ComSpec @('/d', '/c', 'exit 7') } catch { $failed = $_ -match 'exit code 7' }
 Assert $failed 'Native command failures must be checked independently of stderr'
+# Exercise the real WinGet wrapper before mocking installation decisions.
+# A missed executable must never turn an install request into an upgrade.
+$savedFindTool = ${function:Find-Tool}
+$savedInvokeChecked = ${function:Invoke-Checked}
+$savedUpdateToolPath = ${function:Update-ToolPath}
+try {
+    function Find-Tool([string]$Name) { if ($Name -eq 'winget.exe') { return 'fixture-winget.exe' } }
+    function Update-ToolPath { }
+    function Invoke-Checked([string]$Program, [string[]]$Arguments) {
+        $script:wingetProgram = $Program
+        $script:wingetArguments = $Arguments
+    }
+    foreach ($id in @('OpenAI.Codex', 'MiKTeX.MiKTeX')) {
+        Install-WinGetPackage $id
+        Assert ($script:wingetProgram -eq 'fixture-winget.exe') 'Use the discovered WinGet executable'
+        Assert ($script:wingetArguments[0] -eq 'install') 'Only install missing prerequisites'
+        Assert ($script:wingetArguments[2] -eq $id) 'Install only the requested package'
+        Assert ($script:wingetArguments -contains '--no-upgrade') 'Never upgrade an existing prerequisite, including one missed by executable discovery'
+        Assert ($script:wingetArguments -notcontains '--force') 'Never force replacement of an existing prerequisite'
+    }
+} finally {
+    ${function:Find-Tool} = $savedFindTool
+    ${function:Invoke-Checked} = $savedInvokeChecked
+    ${function:Update-ToolPath} = $savedUpdateToolPath
+}
 function Update-ToolPath { }
 function Find-Tool([string]$Name) { if ($script:available -contains $Name) { return $Name } }
 function Test-TexEngine([string]$Name) { return ($script:available -contains $Name -and $script:unusable -notcontains $Name) }

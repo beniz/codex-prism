@@ -5,6 +5,8 @@ and detailed release notes are in [docs/releases](docs/releases/README.md).
 
 ## Unreleased
 
+- Prevent Windows prerequisite setup from upgrading existing Codex or MiKTeX installations through WinGet.
+
 ## 1.6.4
 
 - Default PDF export to High quality (300 dpi), with Compact (150 dpi) and Original alternatives.
