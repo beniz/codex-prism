@@ -139,6 +139,8 @@ export interface PrismBackend {
     ): Promise<{ project: Project; mainFile: string }>;
   };
   projects: {
+    getInstructions(projectId: string): Promise<string>;
+    setInstructions(projectId: string, text: string): Promise<string>;
     rename(projectId: string, name: string): Promise<Project>;
     register(root: string): Promise<Project>;
     relocate(projectId: string, root: string): Promise<Project>;
@@ -214,6 +216,8 @@ export const backend: PrismBackend = {
       invoke("template_create_project", { id, revision, destination }),
   },
   projects: {
+    getInstructions: (projectId) => invoke("project_service", { projectId, operation: "instructions_get", args: {} }),
+    setInstructions: (projectId, text) => invoke("project_service", { projectId, operation: "instructions_set", args: { text } }),
     rename: (projectId, name) => invoke("project_rename", { projectId, name }),
     register: (root) => invoke("project_register", { root }),
     relocate: (projectId, root) =>

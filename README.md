@@ -224,3 +224,11 @@ See [CONTRIBUTING.md](./CONTRIBUTING.md) for development guidelines and verifica
 ## Acknowledgments
 
 This project is a fork of [ClaudePrism](https://github.com/delibae/claude-prism) by delibae, adapted to use Codex as its AI backend. ClaudePrism started from [Open Prism](https://github.com/assistant-ui/open-prism) by [assistant-ui](https://github.com/assistant-ui).
+
+### Shared project instructions
+
+Use **Project instructions** in the chat header to save standing context for all
+chats in a project. Instructions are stored locally in Prism and supplied on each
+new turn, including resumed chats. Changes do not interrupt running turns.
+Reference files must already be available in the project; instructions do not
+upload files or change `AGENTS.md`. Save an empty value to clear them.

@@ -775,6 +775,8 @@ pub(crate) async fn codex_send_for_chat(
             return Err("Unknown project session".into());
         }
     }
+    let instructions = projects::instructions(&app, &project_id, None)?
+        .replace(&project.root.to_string_lossy().to_string(), ".");
     history_result(&app, &project_id, history_before_turn(&app, &project_id));
     let mut proposal = crate::proposals::begin_for_chat(
         &app,
@@ -790,6 +792,8 @@ pub(crate) async fn codex_send_for_chat(
     let _ = app.emit_review(json!({"projectId":project_id}));
     let result: Result<Value, String> = async {
         let mut config = json!({"cwd":workspace,"approvalPolicy":"on-request","approvalsReviewer":"user","sandbox":"workspace-write","config":{"sandbox_workspace_write.network_access":false,"sandbox_workspace_write.writable_roots":[],"sandbox_workspace_write.exclude_tmpdir_env_var":false,"sandbox_workspace_write.exclude_slash_tmp":false},"developerInstructions":concat!("You are the scientific writing assistant in codex-prism. This is an isolated proposal workspace. It may have been refreshed from the latest main document since your previous turn: inspect current files before editing. Keep project edits in this workspace. Temporary files may use /tmp and TMPDIR. Commands requiring unrestricted execution may request user approval. Project changes require user acceptance.\n\n",include_str!("writing-guidance.txt"))});
+        let base = config["developerInstructions"].as_str().unwrap_or_default();
+        config["developerInstructions"] = json!(format!("{base}\n\nProject instructions (current standing defaults; explicit user requests may override these; replaces any previous project instructions):\n{}", if instructions.trim().is_empty() { "No project instructions configured." } else { &instructions }));
         if let Some(m) = model.filter(|s| !s.is_empty()) { config["model"] = json!(m); }
         let thread = if let Some(id) = thread_id { config["threadId"] = json!(id); c.call("thread/resume", config).await? } else { c.call("thread/start", config).await? };
         let id = thread["thread"]["id"].as_str().ok_or("Missing thread ID")?.to_string();

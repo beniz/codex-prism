@@ -5,6 +5,8 @@ and detailed release notes are in [docs/releases](docs/releases/README.md).
 
 ## Unreleased
 
+- Add persistent project instructions shared by all chats and applied to each new turn.
+
 ## 1.6.5
 
 - Prevent Windows prerequisite setup from upgrading existing Codex or MiKTeX installations through WinGet.

@@ -7,6 +7,12 @@ pub(crate) async fn project_service(
     operation: String,
     args: Value,
 ) -> Result<Value, String> {
+    if operation == "instructions_get" || operation == "instructions_set" {
+        let update = if operation == "instructions_set" {
+            Some(args["text"].as_str().ok_or("Missing instructions text")?)
+        } else { None };
+        return Ok(json!(projects::instructions(&app, &project_id, update)?));
+    }
     if operation == "project_preview" {
         return tokio::task::spawn_blocking(move || {
             crate::project_preview::discover(&app, &project_id)

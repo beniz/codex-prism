@@ -490,3 +490,49 @@ pub(crate) fn project_rename(
     }
     Ok(result)
 }
+
+// Application metadata, deliberately outside document snapshots and history.
+pub(crate) fn instructions(app: &crate::Backend, id: &str, update: Option<&str>) -> Result<String, String> {
+    let _guard = app.inner.projects.0.lock().map_err(|e| e.to_string())?;
+    get(app, id)?;
+    let path = data_dir(app)?.join("project-instructions.json");
+    let mut all: BTreeMap<String, String> = match fs::read(&path) {
+        Ok(bytes) => serde_json::from_slice(&bytes).map_err(|e| format!("Cannot read project instructions: {e}"))?,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => BTreeMap::new(),
+        Err(e) => return Err(e.to_string()),
+    };
+    if let Some(text) = update {
+        all.insert(id.to_owned(), text.to_owned());
+        save_json(&path, &all)?;
+    }
+    Ok(all.get(id).cloned().unwrap_or_default())
+}
+
+#[cfg(test)]
+mod instruction_tests {
+    use super::*;
+    #[test]
+    fn instructions_are_persistent_isolated_and_clearable() {
+        let temp = tempfile::tempdir().unwrap();
+        let config = crate::BackendConfig {
+            data_dir: temp.path().join("data"),
+            home_dir: temp.path().join("home"),
+            temp_dir: temp.path().join("tmp"),
+        };
+        let app = crate::Backend::new(config.clone(), std::sync::Arc::new(crate::NoopEventSink)).unwrap();
+        let one = temp.path().join("one");
+        let two = temp.path().join("two");
+        fs::create_dir(&one).unwrap(); fs::create_dir(&two).unwrap();
+        let a = project_register(app.clone(), one.to_string_lossy().into()).unwrap();
+        let b = project_register(app.clone(), two.to_string_lossy().into()).unwrap();
+        assert_eq!(instructions(&app, &a.id, None).unwrap(), "");
+        instructions(&app, &a.id, Some("Use the draft paper")).unwrap();
+        assert_eq!(instructions(&app, &b.id, None).unwrap(), "");
+        let reopened = crate::Backend::new(config, std::sync::Arc::new(crate::NoopEventSink)).unwrap();
+        assert_eq!(instructions(&reopened, &a.id, None).unwrap(), "Use the draft paper");
+        instructions(&reopened, &a.id, Some("")).unwrap();
+        assert_eq!(instructions(&reopened, &a.id, None).unwrap(), "");
+        assert!(!one.join("AGENTS.md").exists());
+        assert!(instructions(&app, "unknown", Some("no")).is_err());
+    }
+}

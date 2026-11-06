@@ -1,3 +1,4 @@
+import { ProjectInstructions } from "./project-instructions";
 import { listContinuation } from "@/lib/composer-lists";
 import { ChatHistory } from "./chat-history";
 import { useEffect, useRef, useState } from "react";
@@ -254,6 +255,7 @@ export function AgentChatDrawer({
       )}
     >
       <header className="flex shrink-0 items-center gap-1 px-3 py-2">
+        {s.projectId && <ProjectInstructions key={s.projectId} projectId={s.projectId} />}
         <Button
           variant="ghost"
           size="sm"
