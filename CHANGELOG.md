@@ -5,7 +5,11 @@ and detailed release notes are in [docs/releases](docs/releases/README.md).
 
 ## Unreleased
 
+## 1.6.5
+
 - Prevent Windows prerequisite setup from upgrading existing Codex or MiKTeX installations through WinGet.
+
+[Release notes](docs/releases/1.6.5.md)
 
 ## 1.6.4
 
