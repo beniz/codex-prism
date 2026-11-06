@@ -5,6 +5,8 @@ and detailed release notes are in [docs/releases](docs/releases/README.md).
 
 ## Unreleased
 
+- Discover existing Windows Codex installations in WinGet package and machine link directories, and continue discovery when WinGet reports Codex is already installed.
+
 - Recall sent prompts with Up in an empty chat composer; use Down to return through history to an empty draft.
 
 - Open project settings from the project title to rename the project and edit its shared prompt.

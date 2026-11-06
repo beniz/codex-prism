@@ -117,3 +117,17 @@ missing-dependency setup by uninstalling the dependencies on a test PC, confirmi
 their tools are absent, then running setup and repeating the compilation/export
 checks. Also verify that setup reuses existing tools; decision tests use mocks
 and complement these real installation checks.
+
+### Diagnosing an existing Codex installation
+
+Setup and the app also inspect user and machine WinGet links and the native
+executables in `OpenAI.Codex_*` package directories under standard WinGet roots.
+The default user npm directory is checked as well. A WinGet “already installed”
+response for Codex triggers another discovery check; it does not trigger an
+upgrade or prove that the executable is present. Custom package roots still
+require adding the executable directory to PATH (or configuring its path in the
+app after installation).
+
+To test discovery without installing dependencies, run the prerequisite script
+with `-CheckOnly` as described above. Include the resulting installer log when
+reporting an unresolved detection failure.

@@ -121,7 +121,56 @@ pub(crate) fn find_tex(name: &str) -> Option<PathBuf> {
 }
 
 pub(crate) fn find(name: &str) -> Option<PathBuf> {
-    find_in(name, &directories())
+    let mut dirs = directories();
+    if name == "codex" {
+        if let Some(appdata) = std::env::var_os("APPDATA") {
+            dirs.push(PathBuf::from(appdata).join("npm"));
+        }
+        if let Some(path) = find_in(name, &dirs) {
+            return Some(path);
+        }
+        for (variable, suffix) in [
+            ("LOCALAPPDATA", r"Microsoft\WinGet"),
+            ("ProgramW6432", "WinGet"),
+            ("ProgramFiles", "WinGet"),
+            ("ProgramFiles(x86)", "WinGet"),
+        ] {
+            if let Some(base) = std::env::var_os(variable) {
+                if let Some(path) = winget_codex(&PathBuf::from(base).join(suffix)) {
+                    return Some(path);
+                }
+            }
+        }
+        return None;
+    }
+    find_in(name, &dirs)
+}
+
+fn winget_codex(root: &Path) -> Option<PathBuf> {
+    let link = root.join(r"Links\codex.exe");
+    if link.is_file() {
+        return Some(link);
+    }
+    let mut packages: Vec<_> = std::fs::read_dir(root.join("Packages"))
+        .ok()?
+        .flatten()
+        .filter(|e| e.file_name().to_string_lossy().starts_with("OpenAI.Codex_"))
+        .map(|e| e.path())
+        .collect();
+    packages.sort();
+    for package in packages {
+        for name in [
+            "codex.exe",
+            "codex-x86_64-pc-windows-msvc.exe",
+            "codex-aarch64-pc-windows-msvc.exe",
+        ] {
+            let path = package.join(name);
+            if path.is_file() {
+                return Some(path);
+            }
+        }
+    }
+    None
 }
 
 fn find_in(name: &str, directories: &[PathBuf]) -> Option<PathBuf> {
@@ -169,6 +218,16 @@ fn npm_codex(prefix: &Path) -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn discovers_winget_package_without_alias() {
+        let temp = tempfile::tempdir().unwrap();
+        let package = temp.path().join("Packages").join("OpenAI.Codex_fixture");
+        std::fs::create_dir_all(&package).unwrap();
+        let binary = package.join("codex-x86_64-pc-windows-msvc.exe");
+        std::fs::write(&binary, b"fixture").unwrap();
+        assert_eq!(winget_codex(temp.path()), Some(binary));
+    }
 
     #[test]
     fn selects_one_usable_tex_installation_without_mixing_tools() {

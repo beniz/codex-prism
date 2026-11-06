@@ -56,12 +56,14 @@ $savedUpdateToolPath = ${function:Update-ToolPath}
 try {
     function Find-Tool([string]$Name) { if ($Name -eq 'winget.exe') { return 'fixture-winget.exe' } }
     function Update-ToolPath { }
-    function Invoke-Checked([string]$Program, [string[]]$Arguments) {
+    function Invoke-Checked([string]$Program, [string[]]$Arguments, [int[]]$AllowedExitCodes) {
+        $script:allowedCodes = $AllowedExitCodes
         $script:wingetProgram = $Program
         $script:wingetArguments = $Arguments
     }
     foreach ($id in @('OpenAI.Codex', 'MiKTeX.MiKTeX')) {
         Install-WinGetPackage $id
+        Assert (($script:allowedCodes -contains -1978335135) -eq ($id -eq 'OpenAI.Codex')) 'Only Codex may continue after an already-installed response'
         Assert ($script:wingetProgram -eq 'fixture-winget.exe') 'Use the discovered WinGet executable'
         Assert ($script:wingetArguments[0] -eq 'install') 'Only install missing prerequisites'
         Assert ($script:wingetArguments[2] -eq $id) 'Install only the requested package'
@@ -73,8 +75,30 @@ try {
     ${function:Invoke-Checked} = $savedInvokeChecked
     ${function:Update-ToolPath} = $savedUpdateToolPath
 }
+# A WinGet portable package may exist even when its Links entry is missing.
+$discoveryRoot = Join-Path ([IO.Path]::GetTempPath()) ([Guid]::NewGuid().ToString())
+$oldLocal = $env:LOCALAPPDATA
+$oldFind = ${function:Find-Tool}
+try {
+    $env:LOCALAPPDATA = $discoveryRoot
+    $package = Join-Path $discoveryRoot 'Microsoft\WinGet\Packages\OpenAI.Codex_fixture'
+    New-Item -ItemType Directory -Path $package -Force | Out-Null
+    $candidate = Join-Path $package 'codex-x86_64-pc-windows-msvc.exe'
+    [IO.File]::WriteAllBytes($candidate, @())
+    function Find-Tool([string]$Name) { if ($Name -eq $candidate) { return $Name } }
+    Assert ((Find-Codex) -eq $candidate) 'Discover native WinGet binary without a PATH alias'
+} finally {
+    $env:LOCALAPPDATA = $oldLocal
+    ${function:Find-Tool} = $oldFind
+    Remove-Item -LiteralPath $discoveryRoot -Recurse -Force
+}
 function Update-ToolPath { }
 function Find-Tool([string]$Name) { if ($script:available -contains $Name) { return $Name } }
+function Find-Codex {
+    $path = Find-Tool 'codex.exe'
+    if (!$path) { $path = Find-Tool 'codex.cmd' }
+    return $path
+}
 function Test-TexEngine([string]$Name) { return ($script:available -contains $Name -and $script:unusable -notcontains $Name) }
 function Get-UsableTexEngines { @('pdflatex.exe', 'xelatex.exe', 'lualatex.exe') | Where-Object { Test-TexEngine $_ } }
 function Find-TexTool([string]$Name) { Find-Tool $Name }

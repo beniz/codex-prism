@@ -24,6 +24,29 @@ function Find-Tool([string]$Name) {
     if ($command) { return $command.Source }
 }
 
+function Find-Codex {
+    foreach ($name in @('codex.exe', 'codex.cmd')) {
+        $path = Find-Tool $name
+        if ($path) { return $path }
+    }
+    $nativePrograms = $env:ProgramW6432
+    if (!$nativePrograms) { $nativePrograms = $env:ProgramFiles }
+    $roots = @("$env:LOCALAPPDATA\Microsoft\WinGet", "$nativePrograms\WinGet", "${env:ProgramFiles(x86)}\WinGet")
+    foreach ($root in $roots) {
+        $path = Find-Tool (Join-Path $root 'Links\codex.exe')
+        if ($path) { return $path }
+        # Only inspect Codex package folders, never recursively scan a drive.
+        foreach ($package in @(Get-ChildItem (Join-Path $root 'Packages\OpenAI.Codex_*') -Directory -ErrorAction SilentlyContinue | Sort-Object FullName)) {
+            foreach ($name in @('codex.exe', 'codex-x86_64-pc-windows-msvc.exe', 'codex-aarch64-pc-windows-msvc.exe')) {
+                $path = Find-Tool (Join-Path $package.FullName $name)
+                if ($path) { return $path }
+            }
+        }
+    }
+    $path = Find-Tool "$env:APPDATA\npm\codex.cmd"
+    if ($path) { return $path }
+}
+
 function Test-TexEngine([string]$Name) {
     $path = Find-Tool $Name
     if (!$path) { return $false }
@@ -78,7 +101,7 @@ function Get-DownloadSha256([string]$Path) {
     finally { $stream.Dispose(); $algorithm.Dispose() }
 }
 
-function Invoke-Checked([string]$Program, [string[]]$Arguments) {
+function Invoke-Checked([string]$Program, [string[]]$Arguments, [int[]]$AllowedExitCodes = @(0)) {
     if (!$Program) { throw 'A required prerequisite executable was not found.' }
     # Windows PowerShell treats native stderr as ErrorRecord objects. Preserve
     # diagnostic output and judge native programs by their exit code.
@@ -88,7 +111,7 @@ function Invoke-Checked([string]$Program, [string[]]$Arguments) {
         & $Program @Arguments 2>&1 | ForEach-Object { Write-Host "$_" }
         $exitCode = $LASTEXITCODE
     } finally { $ErrorActionPreference = $previousPreference }
-    if ($exitCode -ne 0) { throw "$Program failed with exit code $exitCode" }
+    if ($AllowedExitCodes -notcontains $exitCode) { throw "$Program failed with exit code $exitCode" }
 }
 
 function Install-WinGetPackage([string]$Id) {
@@ -97,16 +120,19 @@ function Install-WinGetPackage([string]$Id) {
     Write-Host "Installing $Id if missing (existing versions will not be upgraded)..."
     # `winget install` otherwise upgrades packages already registered with
     # WinGet, even when executable discovery above missed their installation.
+    $allowedCodes = @(0)
+    if ($Id -eq 'OpenAI.Codex') { $allowedCodes += -1978335135 }
     Invoke-Checked $winget @('install', '--id', $Id, '--exact', '--source', 'winget',
-        '--no-upgrade', '--scope', 'user', '--silent', '--accept-source-agreements', '--accept-package-agreements', '--disable-interactivity')
+        '--no-upgrade', '--scope', 'user', '--silent', '--accept-source-agreements', '--accept-package-agreements', '--disable-interactivity') $allowedCodes
+    # Already installed is not an upgrade failure. The caller must still find
+    # the executable; package registration alone is not proof it can be used.
     Update-ToolPath
 }
 
 function Install-Prerequisites {
     Update-ToolPath
     $engines = @(Get-UsableTexEngines)
-    $codex = Find-Tool 'codex.exe'
-    if (!$codex) { $codex = Find-Tool 'codex.cmd' }
+    $codex = Find-Codex
     $ghostscript = Find-Ghostscript
     if ($codex) { Write-Host "Codex: FOUND - $codex" }
     else { Write-Host 'Codex: NOT FOUND' }
@@ -134,7 +160,7 @@ function Install-Prerequisites {
                 'pgf', 'booktabs', 'hyperref', 'fontspec', 'amsmath', 'geometry', 'xcolor', 'lm')
             $engines = @(Get-UsableTexEngines)
         }
-        if (!(Find-Tool 'codex.exe') -and !(Find-Tool 'codex.cmd')) {
+        if (!(Find-Codex)) {
             Install-WinGetPackage 'OpenAI.Codex'
         }
         if (!(Find-Ghostscript) -and !$SkipGhostscript) {
@@ -165,9 +191,8 @@ function Install-Prerequisites {
     $missing += @('bibtex.exe', 'biber.exe') |
         Where-Object { !(Find-TexTool $_) }
     if ($missing) { Write-Warning "Some LaTeX tools are unavailable: $($missing -join ', '). Documents that use them require completing your existing TeX installation. Documents use pdflatex by default; select an available alternative with a % !TEX program comment." }
-    $codex = Find-Tool 'codex.exe'
-    if (!$codex) { $codex = Find-Tool 'codex.cmd' }
-    if (!$codex) { throw 'Codex CLI is missing.' }
+    $codex = Find-Codex
+    if (!$codex) { throw 'Codex is not discoverable. If WinGet reports it is installed, add its executable directory to your user PATH and rerun setup. Existing installations were not upgraded.' }
     Write-Host "Codex: READY - $codex"
     $ghostscript = Find-Ghostscript
     if ($ghostscript) { Write-Host "PDF tools (Ghostscript): READY - $ghostscript" }
