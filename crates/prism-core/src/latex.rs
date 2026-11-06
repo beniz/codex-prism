@@ -1124,13 +1124,19 @@ pub(crate) async fn compile_latex(
 }
 
 /// Resolve an outline link only against the PDF currently displayed by the client.
-pub(crate) fn synctex_view(
+#[cfg(test)]
+pub(crate) fn synctex_view(project_dir: &str, main_file: &str, file: &str, line: u32, source_line: &str, pdf_revision: &str) -> Result<Option<SourceBox>, String> {
+    synctex_view_source(project_dir, main_file, file, line, source_line, pdf_revision, None)
+}
+
+pub(crate) fn synctex_view_source(
     project_dir: &str,
     main_file: &str,
     file: &str,
     line: u32,
     source_line: &str,
     pdf_revision: &str,
+    source_content: Option<&str>,
 ) -> Result<Option<SourceBox>, String> {
     // resolve() returns canonical paths (including Windows verbatim prefixes).
     // Compare like-for-like so builds use their captured source, not live files.
@@ -1168,6 +1174,10 @@ pub(crate) fn synctex_view(
     // The editor may have gained or lost lines since this PDF was built.
     // Resolve an unchanged heading in the compiled source rather than silently
     // dropping the click. Refuse ambiguous matches instead of guessing a section.
+    let line = if let Some(current) = source_content {
+        let Some(mapped) = match_source_line(current, &text, line) else { return Ok(None); };
+        mapped
+    } else { line };
     let line = if text
         .lines()
         .nth(line.saturating_sub(1) as usize)
@@ -1193,7 +1203,7 @@ pub(crate) fn synctex_view(
     Ok(boxes
         .into_iter()
         .filter(|b| {
-            b.file == file && b.line >= line.saturating_sub(1) && b.line <= line.saturating_add(2)
+            b.file == file && (source_content.is_some() || (b.line >= line.saturating_sub(1) && b.line <= line.saturating_add(2)))
         })
         .min_by(|a, b| {
             a.line
@@ -2495,5 +2505,36 @@ mod outline_navigation_tests {
         }
         std::fs::remove_file(work.join("main.synctex")).unwrap();
         assert!(locate("\\section{Results}", &revision).is_none());
+    }
+}
+
+fn match_source_line(current: &str, captured: &str, line: u32) -> Option<u32> {
+    let lines: Vec<_> = current.lines().collect();
+    let index = line.checked_sub(1)? as usize;
+    lines.get(index)?;
+    if current == captured { return Some(line); }
+    if lines[index].trim().is_empty() { return None; }
+    let start = index.saturating_sub(2);
+    let end = (index + 3).min(lines.len());
+    let expected = &lines[start..end];
+    let built: Vec<_> = captured.lines().collect();
+    let mut matches = built.windows(expected.len()).enumerate().filter(|(_, chunk)| *chunk == expected);
+    match (matches.next(), matches.next()) {
+        (Some((at, _)), None) => Some((at + index - start + 1) as u32),
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+mod editor_source_matching_tests {
+    use super::match_source_line;
+    #[test]
+    fn matches_only_unchanged_unique_neighborhoods() {
+        let text = "a\nb\nc\nd\ne";
+        assert_eq!(match_source_line(text, text, 3), Some(3));
+        assert_eq!(match_source_line(text, &format!("intro\n{text}"), 3), Some(4));
+        assert_eq!(match_source_line(text, &format!("{text}\n{text}"), 3), None);
+        assert_eq!(match_source_line(text, "a\nb\nchanged\nd\ne", 3), None);
+        assert_eq!(match_source_line("\n", "\n", 1), Some(1));
     }
 }

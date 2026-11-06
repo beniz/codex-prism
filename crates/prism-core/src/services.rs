@@ -225,8 +225,9 @@ pub(crate) async fn project_service(
                 .ok_or("Invalid source line")?;
             let source_line = str_arg("sourceLine")?;
             let revision = str_arg("pdfRevision")?;
+            let source_content = args["sourceContent"].as_str().map(str::to_owned);
             tokio::task::spawn_blocking(move || {
-                latex::synctex_view(&root, &main, &file, line, &source_line, &revision)
+                latex::synctex_view_source(&root, &main, &file, line, &source_line, &revision, source_content.as_deref())
                     .map(|location| json!(location))
             })
             .await

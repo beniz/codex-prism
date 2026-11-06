@@ -1,3 +1,4 @@
+import { matchSourceLine } from "@/lib/source-line-match";
 import { useEffect, useReducer, useRef } from "react";
 import { activeProposal, useAgentChatStore } from "@/stores/agent-chat-store";
 import { useDocumentStore } from "@/stores/document-store";
@@ -160,7 +161,7 @@ export async function safeChatSource(
 /** Outline headings may move between main source and the displayed proposal. */
 export async function chatHeadingLocation(
   artifact: ChatPdfArtifact,
-  request: { filePath: string; line: number; sourceLine: string },
+  request: { filePath: string; line: number; sourceLine: string; sourceContent?: string },
 ): Promise<SourceBox | null> {
   const project = useDocumentStore.getState().projectId;
   if (project !== artifact.proposal.projectId) return null;
@@ -172,10 +173,10 @@ export async function chatHeadingLocation(
   const matches = lines.flatMap((line, i) =>
     line.trim() === request.sourceLine.trim() ? [i + 1] : []);
   // Ambiguous or changed headings must not jump to unrelated text.
-  if (matches.length !== 1) return null;
-  const line = matches[0];
+  const line = request.sourceContent !== undefined ? matchSourceLine(request.sourceContent, new TextDecoder().decode(new Uint8Array(result.bytes)), request.line) : matches.length === 1 ? matches[0] : null;
+  if (line === null) return null;
   const box = artifact.build.locations
-    .filter((b) => b.file === request.filePath && b.line >= line - 1 && b.line <= line + 2)
+    .filter((b) => b.file === request.filePath && (request.sourceContent !== undefined || (b.line >= line - 1 && b.line <= line + 2)))
     .sort((a, b) => Math.abs(a.line - line) - Math.abs(b.line - line) ||
       a.page - b.page || a.y - b.y)[0];
   // A fresh object ensures repeated clicks on the same heading scroll again.

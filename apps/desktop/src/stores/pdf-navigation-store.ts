@@ -5,6 +5,9 @@ export interface PdfSourceRequest {
   filePath: string;
   line: number;
   sourceLine: string;
+  origin?: "editor";
+  chatId?: string;
+  sourceContent?: string;
 }
 
 // A separate request keeps PDF navigation independent of editor cursor updates.

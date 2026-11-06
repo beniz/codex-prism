@@ -281,6 +281,7 @@ export function PdfPreview() {
     enabled: !artifact,
   });
 
+  const navigationChatId = useAgentChatStore(s => s.activeTabId);
   const navigation = usePdfNavigationStore((s) => s.request);
   const [chatSourceLocation, setChatSourceLocation] = useState<
     import("@/lib/visual-review").SourceBox | null
@@ -288,17 +289,20 @@ export function PdfPreview() {
   useEffect(() => {
     let cancelled = false;
     setChatSourceLocation(null);
-    if (artifact && navigation && navigation.projectRoot === projectRoot) {
+    if (artifact && navigation && (!navigation.chatId || navigation.chatId === navigationChatId) && navigation.projectRoot === projectRoot) {
       void chatHeadingLocation(artifact, navigation)
         .then((box) => {
-          if (!cancelled) setChatSourceLocation(box);
+          if (!cancelled) {
+            setChatSourceLocation(box);
+            if (!box && navigation.origin === "editor") toast.info("No matching position in the current PDF; compile the document and try again.");
+          }
         })
         .catch(() => {});
     }
     return () => {
       cancelled = true;
     };
-  }, [artifact, navigation, projectRoot, contentGeneration]);
+  }, [artifact, navigation, navigationChatId, projectRoot, contentGeneration]);
   const sourceLocation = artifact ? chatSourceLocation : mainSourceLocation;
   const locateDisplayedSource = useCallback(
     async (page: number, x: number, y: number) => {

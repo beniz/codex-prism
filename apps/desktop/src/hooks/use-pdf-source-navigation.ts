@@ -1,3 +1,5 @@
+import { useAgentChatStore } from "@/stores/agent-chat-store";
+import { toast } from "sonner";
 import { useEffect, useState } from "react";
 import { invoke } from "@/lib/backend";
 import { visualBackend, type SourceBox } from "@/lib/visual-review";
@@ -20,11 +22,17 @@ export function usePdfSourceNavigation({
   artifactId?: string;
   enabled: boolean;
 }) {
+  const chatId = useAgentChatStore(s => s.activeTabId);
   const request = usePdfNavigationStore((s) => s.request);
   const [location, setLocation] = useState<SourceBox | null>(null);
   useEffect(() => {
     let cancelled = false;
     setLocation(null);
+    if (request?.chatId && request.chatId !== chatId) return;
+    const unavailable = () => {
+      if (!cancelled && request?.origin === "editor") toast.info("No matching position in the current PDF; compile the document and try again.");
+    };
+    if (enabled && request?.origin === "editor" && request.projectRoot === projectRoot && request.filePath === activeFilePath && (!data || !mainFile)) unavailable();
     if (
       !enabled ||
       !request ||
@@ -36,7 +44,7 @@ export function usePdfSourceNavigation({
       return;
     async function locate() {
       let result: SourceBox | null;
-      if (artifactId && projectId) {
+      if (artifactId && projectId && request?.origin !== "editor") {
         const boxes = await visualBackend.locations(
           projectId,
           artifactId,
@@ -65,19 +73,24 @@ export function usePdfSourceNavigation({
           filePath: request!.filePath,
           line: request!.line,
           sourceLine: request!.sourceLine,
+          sourceContent: request!.sourceContent,
           pdfRevision,
         });
       }
-      if (!cancelled) setLocation(result);
+      if (!cancelled) {
+        setLocation(result);
+        if (!result && request?.origin === "editor") toast.info("No matching position in the current PDF; compile the document and try again.");
+      }
     }
     // Missing/stale SyncTeX is an ordinary unavailable location. The editor
     // still navigates, and we never start a build just to follow an outline link.
-    void locate().catch(() => {});
+    void locate().catch(unavailable);
     return () => {
       cancelled = true;
     };
   }, [
     request,
+    chatId,
     projectRoot,
     projectId,
     mainFile,

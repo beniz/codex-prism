@@ -575,9 +575,17 @@ export const PdfViewer = memo(function PdfViewer({
         sourceLocation.y * scale -
         60;
     }
+    if (container && page) {
+      container.scrollLeft += page.getBoundingClientRect().left - container.getBoundingClientRect().left + sourceLocation.x * scale - container.clientWidth / 2;
+      const marker = document.createElement("div");
+      Object.assign(marker.style, { position: "absolute", pointerEvents: "none", left: `${sourceLocation.x * scale}px`, top: `${sourceLocation.y * scale}px`, width: "48px", height: "18px", background: "rgba(255, 190, 0, 0.35)", outline: "1px solid #d99a00", zIndex: "10" });
+      page.appendChild(marker);
+      const timer = window.setTimeout(() => marker.remove(), 1200);
+      return () => { window.clearTimeout(timer); marker.remove(); };
+    }
     // Each click creates a new location, so clicking the same heading again
     // restores its position without changing zoom or moving editor focus.
-  }, [sourceLocation, pageSizes]);
+  }, [sourceLocation, pageSizes, scale]);
 
   // IntersectionObserver for lazy page rendering — only when active
   useEffect(() => {

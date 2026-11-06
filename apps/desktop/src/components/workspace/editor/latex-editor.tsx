@@ -1,3 +1,5 @@
+import { usePdfNavigationStore } from "@/stores/pdf-navigation-store";
+import { usePreviewStore } from "@/stores/preview-store";
 import { activeProposal } from "@/stores/agent-chat-store";
 import { readProjectBytes } from "@/lib/tauri/fs";
 import { getPdfArrayBuffer } from "@/lib/mupdf/pdf-data";
@@ -635,6 +637,20 @@ export function LatexEditor() {
     const state = EditorState.create({
       doc: currentContent,
       extensions: [
+        EditorView.domEventHandlers({
+          dblclick(event, view) {
+            if (event.ctrlKey || event.metaKey || event.altKey || event.shiftKey || !(event.target instanceof HTMLElement) || !event.target.closest(".cm-content")) return false;
+            const doc = useDocumentStore.getState();
+            const file = doc.files.find(f => f.id === doc.activeFileId);
+            if (!doc.projectRoot || file?.type !== "tex") return false;
+            const position = view.posAtCoords({ x: event.clientX, y: event.clientY });
+            if (position === null) return false;
+            const line = view.state.doc.lineAt(position);
+            usePdfNavigationStore.getState().navigate({ projectRoot: doc.projectRoot, filePath: file.relativePath, line: line.number, sourceLine: line.text, sourceContent: view.state.doc.toString(), origin: "editor", chatId: useAgentChatStore.getState().activeTabId });
+            usePreviewStore.getState().setVisible(true);
+            return false; // Retain CodeMirror word selection and editor focus.
+          },
+        }),
         EditorState.transactionFilter.of((tr) =>
           tr.docChanged &&
           !tr.annotation(backendReload) &&

@@ -232,3 +232,7 @@ chats in a project. Instructions are stored locally in Prism and supplied on eac
 new turn, including resumed chats. Changes do not interrupt running turns.
 Reference files must already be available in the project; instructions do not
 upload files or change `AGENTS.md`. Save an empty value to clear them.
+
+Double-click LaTeX text to navigate to its position in the current PDF, without
+changing editor focus or word selection. This uses the existing compiled PDF;
+changed or ambiguous source may require recompilation before navigation works.
