@@ -5,6 +5,8 @@ and detailed release notes are in [docs/releases](docs/releases/README.md).
 
 ## Unreleased
 
+- Shorten repeated main-document compilation to one LaTeX pass when recorded dependencies and unchanged auxiliary state prove it safe; uncertain and bibliography builds retain the full pass sequence.
+
 ## 1.6.6
 
 - Double-click LaTeX text to show its matching PDF position, falling back to the nearest mapped line in the same file, while retaining word selection.

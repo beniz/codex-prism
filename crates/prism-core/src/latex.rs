@@ -1,3 +1,5 @@
+#[path = "latex_incremental.rs"]
+mod incremental;
 use std::collections::{HashMap, HashSet};
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -498,6 +500,7 @@ fn compile_with_texlive_using(
         .file_stem()
         .and_then(|s| s.to_str())
         .unwrap_or("document");
+    let incremental = incremental::begin(work_dir, main_file, &engine_path);
     // A persistent build may still contain a Biber control file from an earlier
     // bibliography configuration. Only a freshly generated file may select Biber.
     let bcf = crate::projects::resolve(work_dir, &format!("{main_stem}.bcf"))?;
@@ -514,13 +517,23 @@ fn compile_with_texlive_using(
     // Intermediate passes may need to recover from stale bibliography/auxiliary files.
     let common_args: Vec<&str> = vec![
         "-synctex=1",
+        "-recorder",
         "-interaction=nonstopmode",
         &output_dir_arg,
         main_file,
     ];
 
     // Pass 1
-    run(&engine_path, &common_args, work_dir)?;
+    let first_output = run(&engine_path, &common_args, work_dir)?;
+    if first_output.status.success()
+        && !has_real_errors(&std::fs::read_to_string(work_dir.join(format!("{main_stem}.log"))).unwrap_or_default())
+        && incremental.as_ref().is_some_and(|c| c.can_finish(work_dir, main_stem))
+    {
+        incremental::save(work_dir, main_file, main_stem, &engine_path);
+        eprintln!("[latex] incremental: stable auxiliary state; one pass");
+        return Ok(());
+    }
+    eprintln!("[latex] full compilation: no proven stable incremental result");
 
     // Bib pass (if needed)
     let bib_tool = generated_bib_tool(work_dir, main_stem)?;
@@ -557,6 +570,7 @@ fn compile_with_texlive_using(
     if has_real_errors(&log) {
         return Err(extract_error_lines(&log));
     }
+    incremental::save(work_dir, main_file, main_stem, &engine_path);
     Ok(())
 }
 
