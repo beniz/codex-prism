@@ -5,6 +5,8 @@ and detailed release notes are in [docs/releases](docs/releases/README.md).
 
 ## Unreleased
 
+- Skip unchanged BibTeX/Biber processing during incremental compilation when generated controls, resolved databases/styles, tool identity, and bibliography output are verified. Unsupported Biber sources/configuration retain full processing.
+
 - Add a persisted Incremental compilation toggle next to Auto and Changes. Disabling it forces full main-document and proposal build requests while preserving Keep PDF reuse.
 
 - Shorten repeated main-document compilation to one LaTeX pass when recorded dependencies and unchanged auxiliary state prove it safe; uncertain and bibliography builds retain the full pass sequence.

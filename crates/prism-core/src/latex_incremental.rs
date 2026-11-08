@@ -45,7 +45,8 @@ fn state(work: &Path, stem: &str) -> Option<BTreeMap<String, String>> {
         if !matches!(
             ext,
             "aux" | "toc" | "lof" | "lot" | "out" | "nav" | "snm" | "vrb" | "bcf"
-        ) {
+        ) && !relative.ends_with(".run.xml")
+        {
             return None;
         }
         result.insert(relative, hash(&path)?);
@@ -79,14 +80,15 @@ fn dependencies(work: &Path, stem: &str) -> Option<BTreeMap<String, String>> {
         Some(result)
     }
 }
-fn settled(work: &Path, stem: &str) -> bool {
+pub(super) fn settled(work: &Path, stem: &str) -> bool {
     let Ok(log) = fs::read_to_string(work.join(format!("{stem}.log"))) else {
         return false;
     };
     let lower = log.to_lowercase();
     ![
-        "rerun",
-        "re-run",
+        "rerun to",
+        "please rerun",
+        "please re-run",
         "undefined",
         "please (re)run",
         "shell escape",
@@ -108,7 +110,7 @@ pub(super) fn begin(work: &Path, main: &str, engine: &Path) -> Option<Candidate>
     // A failed or interrupted attempt must not leave reusable metadata.
     let _ = fs::remove_file(path);
     let previous: Record = serde_json::from_slice(&bytes?).ok()?;
-    if previous.version != 1 || previous.main != main || previous.engine != hash(engine)? {
+    if previous.version != 2 || previous.main != main || previous.engine != hash(engine)? {
         return None;
     }
     let now = sources(work)?;
@@ -140,13 +142,8 @@ pub(super) fn save(work: &Path, main: &str, stem: &str, engine: &Path) -> Option
     if !settled(work, stem) {
         return None;
     }
-    // BibTeX/Biber can read dependencies absent from the engine recorder. Until
-    // those dependencies are explicitly captured, bibliography builds stay full.
-    if work.join(format!("{stem}.bbl")).exists() || work.join(format!("{stem}.bcf")).exists() {
-        return None;
-    }
     let record = Record {
-        version: 1,
+        version: 2,
         main: main.into(),
         engine: hash(engine)?,
         sources: sources(work)?,
@@ -189,7 +186,7 @@ mod tests {
         assert!(!candidate.can_finish(&work, "main"));
     }
     #[test]
-    fn bibliography_requires_full_build() {
+    fn incomplete_bibliography_build_cannot_seed_incremental_state() {
         let dir = tempfile::tempdir().unwrap();
         fs::write(dir.path().join("main.log"), "Output written").unwrap();
         fs::write(dir.path().join("main.bbl"), "bibliography").unwrap();

@@ -1,3 +1,5 @@
+#[path = "latex_bibliography.rs"]
+mod bibliography;
 #[path = "latex_incremental.rs"]
 mod incremental;
 use std::collections::{HashMap, HashSet};
@@ -290,6 +292,22 @@ fn sync_source_files(src: &Path, dst: &Path) -> std::io::Result<()> {
     if !dst.exists() {
         std::fs::create_dir_all(dst)?;
     }
+    // Bibliography inputs must never survive deletion in the source tree.
+    // Walk destination directories too, including directories deleted at source.
+    fn remove_deleted_bibliography(src: &Path, dst: &Path) -> std::io::Result<()> {
+        for entry in std::fs::read_dir(dst)? {
+            let entry = entry?;
+            let target = entry.path();
+            let source = src.join(entry.file_name());
+            if entry.file_type()?.is_dir() {
+                remove_deleted_bibliography(&source, &target)?;
+            } else if matches!(target.extension().and_then(|e| e.to_str()), Some("bib" | "bst")) && !source.is_file() {
+                std::fs::remove_file(target)?;
+            }
+        }
+        Ok(())
+    }
+    remove_deleted_bibliography(src, dst)?;
     for entry in std::fs::read_dir(src)? {
         let entry = entry?;
         let src_path = entry.path();
@@ -335,18 +353,8 @@ fn sync_source_files(src: &Path, dst: &Path) -> std::io::Result<()> {
                 // placeholders with 0 bytes. Reading the file forces a download.
                 let metadata = std::fs::metadata(&src_path)?;
 
-                if metadata.len() > 0 {
-                    if let Ok(dst_meta) = std::fs::metadata(&dst_path) {
-                        if metadata.len() == dst_meta.len() {
-                            if let (Ok(src_m), Ok(dst_m)) =
-                                (metadata.modified(), dst_meta.modified())
-                            {
-                                if src_m == dst_m {
-                                    continue;
-                                }
-                            }
-                        }
-                    }
+                if metadata.len() > 0 && std::fs::read(&dst_path).ok().as_deref() == Some(std::fs::read(&src_path)?.as_slice()) {
+                    continue;
                 }
 
                 if metadata.len() == 0 {
@@ -507,6 +515,7 @@ fn compile_with_texlive_policy(
         .file_stem()
         .and_then(|s| s.to_str())
         .unwrap_or("document");
+    let previous_bibliography = bibliography::take(work_dir, main_stem);
     let incremental = incremental::begin(work_dir, main_file, &engine_path).filter(|_| allow_incremental);
     // A persistent build may still contain a Biber control file from an earlier
     // bibliography configuration. Only a freshly generated file may select Biber.
@@ -532,16 +541,6 @@ fn compile_with_texlive_policy(
 
     // Pass 1
     let first_output = run(&engine_path, &common_args, work_dir)?;
-    if first_output.status.success()
-        && !has_real_errors(&std::fs::read_to_string(work_dir.join(format!("{main_stem}.log"))).unwrap_or_default())
-        && incremental.as_ref().is_some_and(|c| c.can_finish(work_dir, main_stem))
-    {
-        incremental::save(work_dir, main_file, main_stem, &engine_path);
-        eprintln!("[latex] incremental: stable auxiliary state; one pass");
-        return Ok(());
-    }
-    eprintln!("[latex] full compilation: no proven stable incremental result");
-
     // Bib pass (if needed)
     let bib_tool = generated_bib_tool(work_dir, main_stem)?;
     let bibliography_program = match bib_tool {
@@ -549,8 +548,27 @@ fn compile_with_texlive_policy(
         BibTool::BibTeX => Some("bibtex"),
         BibTool::None => None,
     };
-    if let Some(program) = bibliography_program {
-        let executable = find_texlive_binary(program)?;
+    let bibliography_executable = bibliography_program.map(find_texlive_binary).transpose()?;
+    let signature = bibliography_executable.as_ref().and_then(|tool| {
+        bibliography_signature(work_dir, main_stem, tool, matches!(bib_tool, BibTool::Biber), &mut run)
+    });
+    let skip_bibliography = allow_incremental && first_output.status.success()
+        && !has_real_errors(&std::fs::read_to_string(work_dir.join(format!("{main_stem}.log"))).unwrap_or_default())
+        && incremental::settled(work_dir, main_stem)
+        && signature.as_ref().is_some_and(|s| s.reusable()) && signature == previous_bibliography;
+    let bibliography_valid = bibliography_program.is_none() || skip_bibliography;
+    if bibliography_valid && first_output.status.success()
+        && !has_real_errors(&std::fs::read_to_string(work_dir.join(format!("{main_stem}.log"))).unwrap_or_default())
+        && incremental.as_ref().is_some_and(|c| c.can_finish(work_dir, main_stem))
+    {
+        incremental::save(work_dir, main_file, main_stem, &engine_path);
+        eprintln!("[latex] incremental: stable auxiliary state; one pass");
+        if let Some(sig) = &signature { bibliography::save(work_dir, main_stem, sig); }
+        return Ok(());
+    }
+    eprintln!("[latex] full compilation: no proven stable incremental result");
+
+    if let Some(executable) = bibliography_executable.as_ref().filter(|_| !skip_bibliography) {
         let output = run(&executable, &[main_stem], work_dir)?;
         if !output.status.success() {
             return Err(format!(
@@ -565,7 +583,7 @@ fn compile_with_texlive_policy(
     let mut final_output = run(&engine_path, &common_args, work_dir)?;
 
     // Pass 3: stabilize citations (only if bib was used)
-    if !matches!(bib_tool, BibTool::None) {
+    if bibliography_program.is_some() && !skip_bibliography {
         final_output = run(&engine_path, &common_args, work_dir)?;
     }
 
@@ -578,7 +596,32 @@ fn compile_with_texlive_policy(
         return Err(extract_error_lines(&log));
     }
     incremental::save(work_dir, main_file, main_stem, &engine_path);
+    if incremental::settled(work_dir, main_stem) {
+        if let Some(tool) = &bibliography_executable {
+            if let Some(sig) = bibliography_signature(work_dir, main_stem, tool, matches!(bib_tool, BibTool::Biber), &mut run) {
+                if signature.as_ref().is_some_and(|before| before.same_inputs(&sig)) && sig.reusable() {
+                    bibliography::save(work_dir, main_stem, &sig);
+                }
+            }
+        }
+    }
+    eprintln!("[latex] bibliography skipped: {skip_bibliography}");
     Ok(())
+}
+
+fn bibliography_signature(
+    work: &Path, stem: &str, tool: &Path, biber: bool,
+    run: &mut impl FnMut(&Path, &[&str], &Path) -> Result<std::process::Output, String>,
+) -> Option<bibliography::Signature> {
+    let resolver = find_texlive_binary("kpsewhich").ok()?;
+    bibliography::capture(work, stem, tool, biber, |name| {
+        let output = run(&resolver, &[name], work).ok()?;
+        if !output.status.success() { return None; }
+        let text = std::str::from_utf8(&output.stdout).ok()?.trim();
+        if text.is_empty() || text.lines().count() != 1 { return None; }
+        let path = Path::new(text);
+        Some(if path.is_absolute() { path.to_path_buf() } else { work.join(path) })
+    })
 }
 
 async fn preview_cancelled(cancel: &mut tokio::sync::watch::Receiver<bool>) {
@@ -1317,6 +1360,59 @@ pub(crate) async fn cleanup_all_builds(state: &LatexCompilerState) {
 mod tests {
     use super::*;
 
+    #[test]
+    fn sync_removes_deleted_bibliography_in_deleted_directories() {
+        let source = tempfile::tempdir().unwrap();
+        let build = tempfile::tempdir().unwrap();
+        std::fs::create_dir(build.path().join("old")).unwrap();
+        std::fs::write(build.path().join("old/refs.bib"), "stale").unwrap();
+        std::fs::write(build.path().join("plain.bst"), "stale").unwrap();
+        std::fs::write(build.path().join("main.bbl"), "generated").unwrap();
+        sync_source_files(source.path(), build.path()).unwrap();
+        assert!(!build.path().join("old/refs.bib").exists());
+        assert!(!build.path().join("plain.bst").exists());
+        assert!(build.path().join("main.bbl").exists());
+    }
+
+    #[test]
+    #[ignore = "requires local pdfLaTeX, BibTeX and Biber"]
+    fn real_incremental_bibliography_invocations() {
+        for biber in [false, true] {
+            let dir = tempfile::tempdir().unwrap();
+            let work = dir.path();
+            let source = if biber {
+                r"\documentclass{article}\usepackage[backend=biber]{biblatex}\addbibresource{refs.bib}\begin{document}Old wording \cite{one}.\printbibliography\end{document}"
+            } else {
+                r"\documentclass{article}\begin{document}Old wording \cite{one}.\bibliographystyle{plain}\bibliography{refs}\end{document}"
+            };
+            std::fs::write(work.join("main.tex"), source).unwrap();
+            std::fs::write(work.join("refs.bib"), "@book{one,title={First},author={Author, A},year={2020}}\n@book{two,title={Second},author={Writer, B},year={2021}}\n").unwrap();
+            let build = |incremental| {
+                let mut calls = Vec::new();
+                compile_with_texlive_policy(work, "main.tex", None, incremental, |program, args, dir| {
+                    calls.push(program.file_stem().unwrap().to_string_lossy().to_string());
+                    let (last, flags) = args.split_last().unwrap();
+                    run_texlive_pass(program, flags, Path::new(last), dir)
+                }).unwrap();
+                calls
+            };
+            let tool = if biber { "biber" } else { "bibtex" };
+            assert!(build(true).iter().any(|p| p == tool));
+            // Warm once more if the initial final aux state still changed.
+            build(true);
+            std::fs::write(work.join("main.tex"), source.replace("Old wording", "New wording")).unwrap();
+            let calls = build(true);
+            assert!(!calls.iter().any(|p| p == tool), "{tool}: {calls:?}");
+            assert_eq!(calls.iter().filter(|p| *p == "pdflatex").count(), 1);
+            assert!(build(false).iter().any(|p| p == tool));
+            std::fs::write(work.join("main.tex"), source.replace("cite{one}", "cite{two}")).unwrap();
+            assert!(build(true).iter().any(|p| p == tool));
+            std::fs::write(work.join("refs.bib"), "@book{two,title={Changed},author={Writer, B},year={2022}}\n").unwrap();
+            assert!(build(true).iter().any(|p| p == tool));
+            std::fs::remove_file(work.join("main.bbl")).unwrap();
+            assert!(build(true).iter().any(|p| p == tool));
+        }
+    }
     #[cfg(unix)]
     #[test]
     fn bibliography_pass_uses_relative_job_and_build_directory() {
