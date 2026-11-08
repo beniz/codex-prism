@@ -1,3 +1,4 @@
+import { useSettingsStore } from "@/stores/settings-store";
 import { matchSourceLine } from "@/lib/source-line-match";
 import { useEffect, useReducer, useRef } from "react";
 import { activeProposal, useAgentChatStore } from "@/stores/agent-chat-store";
@@ -60,6 +61,7 @@ export function useChatPdf(main: string | undefined) {
       const build = await proposals.operate<ChatPdfBuild>(p, "compile", {
         mainFile: main,
         side: "result",
+        incremental: useSettingsStore.getState().incrementalCompilation,
       });
       const latest = useAgentChatStore
         .getState()

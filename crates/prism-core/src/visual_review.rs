@@ -39,6 +39,9 @@ pub(crate) fn capture(
     main: &str,
     inputs: &BTreeMap<String, Vec<u8>>,
 ) -> Result<String, String> {
+    capture_variant(app, id, main, inputs, "v1:synctex=1;interaction=nonstopmode;existing-bibliography-passes")
+}
+fn capture_variant(app: &Backend, id: &str, main: &str, inputs: &BTreeMap<String, Vec<u8>>, options: &str) -> Result<String, String> {
     let content = inputs
         .get(main)
         .ok_or("Main document missing from captured inputs")?;
@@ -55,7 +58,7 @@ pub(crate) fn capture(
             _ => "pdflatex",
         }
         .into(),
-        options: "v1:synctex=1;interaction=nonstopmode;existing-bibliography-passes".into(),
+        options: options.into(),
     };
     let bytes = serde_json::to_vec(&manifest).map_err(|e| e.to_string())?;
     let key = projects::revision(&bytes);
@@ -724,13 +727,8 @@ mod tests {
 
 /// Proposal artifacts are addressed by immutable inputs and owned by a workspace.
 /// They never consult or overwrite the legacy project review.
-pub(crate) async fn proposal_pdf(
-    app: &Backend,
-    workspace: &str,
-    main: &str,
-    files: &BTreeMap<String, Vec<u8>>,
-) -> Result<Value, String> {
-    let key = capture(app, workspace, main, files)?;
+pub(crate) async fn proposal_pdf_policy(app: &Backend, workspace: &str, main: &str, files: &BTreeMap<String, Vec<u8>>, incremental: bool) -> Result<Value, String> {
+    let key = if incremental { capture(app, workspace, main, files)? } else { capture_variant(app, workspace, main, files, &format!("full:{}", uuid::Uuid::new_v4()))? };
     build(app, workspace, &key).await?;
     let dir = artifact(app, workspace, &key)?;
     let locations: Vec<latex::SourceBox> =

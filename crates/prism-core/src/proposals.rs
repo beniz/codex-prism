@@ -759,7 +759,7 @@ pub(crate) async fn compile(app: Backend, project: String, args: Value) -> Resul
         &r.after
     };
     let main = args["mainFile"].as_str().ok_or("Missing mainFile")?;
-    let mut result = crate::visual_review::proposal_pdf(&app, id, main, files).await?;
+    let mut result = crate::visual_review::proposal_pdf_policy(&app, id, main, files, args["incremental"].as_bool().unwrap_or(false)).await?;
     result["projectId"] = json!(project);
     result["proposalId"] = json!(id);
     result["generation"] = json!(generation);

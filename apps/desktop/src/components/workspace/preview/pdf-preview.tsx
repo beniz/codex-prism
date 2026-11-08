@@ -96,6 +96,8 @@ const ZOOM_OPTIONS = [
 ];
 
 export function PdfPreview() {
+  const incremental = useSettingsStore((s) => s.incrementalCompilation);
+  const setIncremental = useSettingsStore((s) => s.setIncrementalCompilation);
   const autoRecompile = useSettingsStore((s) => s.autoRecompile);
   const setAutoRecompile = useSettingsStore((s) => s.setAutoRecompile);
   const visualChangeReports = useSettingsStore((s) => s.visualChangeReports);
@@ -1118,6 +1120,19 @@ export function PdfPreview() {
               }
             />
             Auto
+          </Button>
+          <Button
+            variant={incremental ? "secondary" : "ghost"}
+            size="sm"
+            className="h-7 shrink-0 gap-1.5 px-2 text-xs"
+            role="switch"
+            aria-label="Incremental compilation"
+            aria-checked={incremental}
+            title="Reuse validated build state; when off, requested builds run the full compilation sequence"
+            onClick={() => setIncremental(!incremental)}
+          >
+            <span className={incremental ? "size-1.5 rounded-full bg-primary" : "size-1.5 rounded-full bg-muted-foreground/40"} />
+            Incremental
           </Button>
           <Button
             variant={visualChangeReports ? "secondary" : "ghost"}

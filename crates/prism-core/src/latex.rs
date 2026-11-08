@@ -482,6 +482,13 @@ fn compile_with_texlive_using(
     work_dir: &Path,
     main_file: &str,
     engine: Option<TexEngine>,
+    run: impl FnMut(&Path, &[&str], &Path) -> Result<std::process::Output, String>,
+) -> Result<(), String> {
+    compile_with_texlive_policy(work_dir, main_file, engine, true, run)
+}
+
+fn compile_with_texlive_policy(
+    work_dir: &Path, main_file: &str, engine: Option<TexEngine>, allow_incremental: bool,
     mut run: impl FnMut(&Path, &[&str], &Path) -> Result<std::process::Output, String>,
 ) -> Result<(), String> {
     let engine_name = match engine {
@@ -500,7 +507,7 @@ fn compile_with_texlive_using(
         .file_stem()
         .and_then(|s| s.to_str())
         .unwrap_or("document");
-    let incremental = incremental::begin(work_dir, main_file, &engine_path);
+    let incremental = incremental::begin(work_dir, main_file, &engine_path).filter(|_| allow_incremental);
     // A persistent build may still contain a Biber control file from an earlier
     // bibliography configuration. Only a freshly generated file may select Biber.
     let bcf = crate::projects::resolve(work_dir, &format!("{main_stem}.bcf"))?;
@@ -1006,6 +1013,12 @@ pub(crate) async fn compile_latex(
     project_dir: String,
     main_file: String,
 ) -> Result<Vec<u8>, String> {
+    compile_latex_policy(state, project_dir, main_file, false).await
+}
+
+pub(crate) async fn compile_latex_policy(
+    state: &LatexCompilerState, project_dir: String, main_file: String, incremental: bool,
+) -> Result<Vec<u8>, String> {
     // Acquire semaphore permit (non-blocking)
     let _permit = state
         .semaphore
@@ -1093,7 +1106,10 @@ pub(crate) async fn compile_latex(
     let main_file_clone = main_file.clone();
     let compile_result = tokio::task::spawn_blocking(move || {
         lower_thread_priority();
-        compile_with_texlive(&work_dir_clone, &main_file_clone, engine)
+        compile_with_texlive_policy(&work_dir_clone, &main_file_clone, engine, incremental, |program, args, dir| {
+            let (main, flags) = args.split_last().ok_or("Missing compiler argument")?;
+            run_texlive_pass(program, flags, Path::new(main), dir)
+        })
     })
     .await
     .map_err(|e| format!("Compilation task panicked: {}", e))?;

@@ -57,7 +57,7 @@ pub(crate) async fn project_service(
         let root = project.root.to_string_lossy().to_string();
         return if operation == "compile_latex" {
             Ok(json!(
-                latex::compile_latex(&app.inner.latex, root, main).await?
+                latex::compile_latex_policy(&app.inner.latex, root, main, args["incremental"].as_bool().unwrap_or(false)).await?
             ))
         } else {
             Ok(json!(
@@ -211,7 +211,7 @@ pub(crate) async fn project_service(
             let main = str_arg("mainFile")?;
             projects::resolve(&project.root, &main)?;
             let state = &app.inner.latex;
-            Ok(json!(latex::compile_latex(&state, root, main).await?))
+            Ok(json!(latex::compile_latex_policy(&state, root, main, args["incremental"].as_bool().unwrap_or(false)).await?))
         }
         "synctex_view" => {
             let main = str_arg("mainFile")?;

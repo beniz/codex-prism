@@ -1,3 +1,4 @@
+import { useSettingsStore } from "@/stores/settings-store";
 import { invoke } from "@/lib/backend";
 import { resolveTexRoot, type ProjectFile } from "@/stores/document-store";
 import { createLogger } from "@/lib/debug/logger";
@@ -53,6 +54,7 @@ export async function compileLatex(
   const start = performance.now();
   // compile_latex returns raw PDF bytes via Tauri IPC Response
   const buffer = await invoke<ArrayBuffer>("compile_latex", {
+    incremental: useSettingsStore.getState().incrementalCompilation,
     projectDir,
     mainFile,
   });
