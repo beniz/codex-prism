@@ -2,8 +2,8 @@ import { useState, type Dispatch, type SetStateAction } from "react";
 import { Button } from "@/components/ui/button";
 import { testRemoteSource, type ProjectSettings, type SshConnection } from "@/lib/data-sources";
 
-export function SshDataSources({ projectId, settings, setSettings, disabled }: {
-  projectId: string; settings: ProjectSettings; setSettings: Dispatch<SetStateAction<ProjectSettings>>; disabled: boolean;
+export function SshDataSources({ projectId, settings, setSettings, disabled, onAddDirectory }: {
+  projectId: string; settings: ProjectSettings; setSettings: Dispatch<SetStateAction<ProjectSettings>>; disabled: boolean; onAddDirectory?: () => void;
 }) {
   const [tests, setTests] = useState<Record<string, { fingerprint: string; message: string }>>({});
   const [testing, setTesting] = useState<string | null>(null);
@@ -19,7 +19,10 @@ export function SshDataSources({ projectId, settings, setSettings, disabled }: {
     } finally { setTesting(null); }
   }
   return <div className="space-y-3">
+    <div className="flex flex-wrap items-center gap-2">
+    {onAddDirectory && <Button variant="outline" disabled={disabled} onClick={onAddDirectory}>Add directory</Button>}
     <Button variant="outline" disabled={disabled} onClick={() => setSettings(old => ({ ...old, connections: [...old.connections ?? [], { id: crypto.randomUUID(), name: "Remote research", host: "", executable: "", socket: "", port: null, tokenFile: "" }] }))}>Add SSH connection</Button>
+    </div>
     {(settings.connections ?? []).map(connection => {
       const sources = settings.sources.filter(s => s.connectionId === connection.id);
       const path = sources[0]?.path ?? "";

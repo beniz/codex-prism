@@ -75,12 +75,12 @@ export function ProjectInstructions({ projectId, projectName, renameProject }: {
           {renameError && <p role="alert" className="text-sm text-destructive">{renameError}</p>}
         </div>}
         <section className="space-y-2" aria-label="Data sources">
-          <div className="flex items-center justify-between"><h3 ref={sourcesHeading} tabIndex={-1} className="font-medium text-sm">Data sources</h3><Button variant="outline" disabled={loading || busy} onClick={() => void addSource()}>Add directory</Button></div>
+          <h3 ref={sourcesHeading} tabIndex={-1} className="font-medium text-sm">Data sources</h3>
           <div className="max-h-48 overflow-auto space-y-2">{settings.sources.filter(source => !source.connectionId).map(source => <div key={source.id}>
             <div className="flex gap-2"><input disabled={loading || busy} aria-label="Source name" className="min-w-0 flex-1 border rounded p-1" value={source.name} onChange={e => setSettings(old => ({ ...old, sources: old.sources.map(s => s.id === source.id ? { ...s, name: e.target.value } : s) }))} /><Button variant="ghost" disabled={busy} onClick={() => setSettings(old => ({ ...old, sources: old.sources.filter(s => s.id !== source.id) }))}>Remove</Button></div>
             <p className="break-all text-xs text-muted-foreground">{source.path}</p>
           </div>)}</div>
-          <SshDataSources projectId={projectId} settings={settings} setSettings={setSettings} disabled={loading || busy} />
+          <SshDataSources projectId={projectId} settings={settings} setSettings={setSettings} disabled={loading || busy} onAddDirectory={() => void addSource()} />
           <p className="text-xs text-muted-foreground">Read-only references shared by all chats from their next turn. Files are not imported automatically.</p>
         </section>
         <label htmlFor="project-shared-prompt" className="text-sm font-medium">Shared project prompt</label>
