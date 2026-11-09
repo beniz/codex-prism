@@ -2,6 +2,7 @@
 //! Construct once per application and call `shutdown().await` before dropping the host runtime.
 mod api;
 mod codex;
+mod data_sources;
 pub mod discovery;
 mod events;
 mod history;

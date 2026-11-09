@@ -7,6 +7,14 @@ pub(crate) async fn project_service(
     operation: String,
     args: Value,
 ) -> Result<Value, String> {
+    if operation == "settings_get" || operation == "settings_set" {
+        let update = if operation == "settings_set" { Some(serde_json::from_value(args).map_err(|e| e.to_string())?) } else { None };
+        return Ok(json!(crate::data_sources::settings(&app, &project_id, update)?));
+    }
+    if operation == "sources_status" {
+        let sources = crate::data_sources::settings(&app, &project_id, None)?.sources;
+        return Ok(json!(crate::data_sources::status(sources).await));
+    }
     if operation == "instructions_get" || operation == "instructions_set" {
         let update = if operation == "instructions_set" {
             Some(args["text"].as_str().ok_or("Missing instructions text")?)
