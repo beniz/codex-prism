@@ -1,3 +1,4 @@
+import { SshDataSources } from "./ssh-data-sources";
 import { getProjectSettings, saveProjectSettings, type ProjectSettings } from "@/lib/data-sources";
 import { open as openFiles } from "@/lib/backend/desktop-host";
 import { useEffect, useRef, useState } from "react";
@@ -65,8 +66,8 @@ export function ProjectInstructions({ projectId, projectName, renameProject }: {
   return <>
     <button type="button" className="w-full min-w-0 rounded-md px-2 py-1 font-semibold text-sm hover:bg-sidebar-accent focus-visible:ring-2 focus-visible:ring-ring" onClick={() => { setName(projectName ?? ""); setRenameError(null); setOpen(true); }} title="Project settings" aria-label="Project settings"><span className="block truncate">{projectName ?? "Project instructions"}</span>{saved.trim() && <span className="sr-only">Instructions configured</span>}</button>
     <Dialog open={open} onOpenChange={value => { if (!busy && !renaming) setOpen(value); }}>
-      <DialogContent>
-        <DialogHeader><DialogTitle>Project settings</DialogTitle><DialogDescription>Shared instructions apply to all chats in this project from their next turn. Data sources are read-only reference directories; required document assets are copied into the project. Stored locally in Prism.</DialogDescription></DialogHeader>
+      <DialogContent className="max-h-[90vh] overflow-y-auto">
+        <DialogHeader><DialogTitle>Project settings</DialogTitle><DialogDescription>Shared instructions apply to all chats in this project from their next turn. Data sources provide reference material; required document assets are copied into the project. Stored locally in Prism.</DialogDescription></DialogHeader>
         {renameProject && <div className="space-y-2">
           <label htmlFor="project-settings-name" className="text-sm font-medium">Project title</label>
           <div className="flex gap-2"><input id="project-settings-name" className="min-w-0 flex-1 rounded-md border bg-background p-2 text-sm" value={name} disabled={locked || renaming || busy} onChange={e => setName(e.target.value)} /><Button variant="outline" disabled={locked || renaming || busy || !name.trim() || name.trim() === projectName} onClick={() => void rename()}>{renaming ? "Renaming…" : "Rename"}</Button></div>
@@ -75,10 +76,11 @@ export function ProjectInstructions({ projectId, projectName, renameProject }: {
         </div>}
         <section className="space-y-2" aria-label="Data sources">
           <div className="flex items-center justify-between"><h3 ref={sourcesHeading} tabIndex={-1} className="font-medium text-sm">Data sources</h3><Button variant="outline" disabled={loading || busy} onClick={() => void addSource()}>Add directory</Button></div>
-          <div className="max-h-48 overflow-auto space-y-2">{settings.sources.map(source => <div key={source.id}>
+          <div className="max-h-48 overflow-auto space-y-2">{settings.sources.filter(source => !source.connectionId).map(source => <div key={source.id}>
             <div className="flex gap-2"><input disabled={loading || busy} aria-label="Source name" className="min-w-0 flex-1 border rounded p-1" value={source.name} onChange={e => setSettings(old => ({ ...old, sources: old.sources.map(s => s.id === source.id ? { ...s, name: e.target.value } : s) }))} /><Button variant="ghost" disabled={busy} onClick={() => setSettings(old => ({ ...old, sources: old.sources.filter(s => s.id !== source.id) }))}>Remove</Button></div>
             <p className="break-all text-xs text-muted-foreground">{source.path}</p>
           </div>)}</div>
+          <SshDataSources projectId={projectId} settings={settings} setSettings={setSettings} disabled={loading || busy} />
           <p className="text-xs text-muted-foreground">Read-only references shared by all chats from their next turn. Files are not imported automatically.</p>
         </section>
         <label htmlFor="project-shared-prompt" className="text-sm font-medium">Shared project prompt</label>

@@ -3,6 +3,8 @@
 mod api;
 mod codex;
 mod data_sources;
+mod remote_sources;
+pub mod source_mcp;
 pub mod discovery;
 mod events;
 mod history;
@@ -58,6 +60,7 @@ pub(crate) struct Inner {
     directory_preparer: Arc<dyn DirectoryPreparer>,
     projects: projects::Projects,
     codex: codex::CodexState,
+    remote: source_mcp::State,
     latex: latex::LatexCompilerState,
     templates: templates::TemplateState,
     lifecycle: Mutex<Lifecycle>,
@@ -115,6 +118,7 @@ impl Backend {
                 directory_preparer,
                 projects: Default::default(),
                 codex: Default::default(),
+                remote: Default::default(),
                 latex: Default::default(),
                 templates: Default::default(),
                 lifecycle: Default::default(),
@@ -195,6 +199,7 @@ impl Backend {
             }
             idle.await;
         }
+        source_mcp::shutdown(self).await;
         codex::shutdown(self).await;
         latex::cleanup_all_builds(&self.inner.latex).await;
         self.inner

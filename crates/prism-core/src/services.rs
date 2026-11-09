@@ -12,8 +12,16 @@ pub(crate) async fn project_service(
         return Ok(json!(crate::data_sources::settings(&app, &project_id, update)?));
     }
     if operation == "sources_status" {
-        let sources = crate::data_sources::settings(&app, &project_id, None)?.sources;
-        return Ok(json!(crate::data_sources::status(sources).await));
+        let settings = crate::data_sources::settings(&app, &project_id, None)?;
+        return Ok(json!(crate::data_sources::status(settings.sources, &settings.connections).await));
+    }
+    if operation == "source_test" {
+        projects::get(&app, &project_id)?;
+        let connection = serde_json::from_value(args["connection"].clone()).map_err(|e| e.to_string())?;
+        let path = args["path"].as_str().ok_or("Missing remote path")?;
+        if !crate::remote_sources::unix_path(path) { return Err("Remote path must be absolute".into()); }
+        crate::remote_sources::check(&connection, path).await?;
+        return Ok(json!({"reachable":true}));
     }
     if operation == "instructions_get" || operation == "instructions_set" {
         let update = if operation == "instructions_set" {

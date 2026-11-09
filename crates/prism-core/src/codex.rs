@@ -232,6 +232,7 @@ async fn connection(app: &crate::Backend) -> Result<Arc<Connection>, String> {
                         }
                         if let Ok(all) = sessions(&handle) {
                             if let Some(session) = all.iter().find(|s| s.id == thread) {
+                                crate::source_mcp::bind_turn(&handle, &session.project_id, thread, turn);
                                 let _ = confirm_review_start(&handle, &session.project_id);
                             }
                         }
@@ -252,21 +253,25 @@ async fn connection(app: &crate::Backend) -> Result<Arc<Connection>, String> {
                         }
                     }
                     let worker = handle.clone();
-                    completions.spawn_blocking(move || {
+                    completions.spawn(async move {
                         if let Some(thread) = v["params"]["threadId"].as_str() {
                             if let Ok(all) = sessions(&worker) {
-                                if let Some(s) = all.iter().find(|s| s.id == thread) {
-                                    let _ = crate::proposals::finish_turn(
-                                        &worker,
-                                        &s.project_id,
-                                        &s.id,
-                                        v["params"]["turn"]["id"].as_str(),
-                                    );
-                                    let _ = finish_review(&worker, &s.project_id);
+                                if let Some(session) = all.iter().find(|s| s.id == thread) {
+                                    crate::source_mcp::stop_thread(&worker, &session.project_id, thread, v["params"]["turn"]["id"].as_str().unwrap_or("")).await;
                                 }
                             }
                         }
-                        let _ = worker.emit_agent(&v);
+                        let _ = tokio::task::spawn_blocking(move || {
+                            if let Some(thread) = v["params"]["threadId"].as_str() {
+                                if let Ok(all) = sessions(&worker) {
+                                    if let Some(s) = all.iter().find(|s| s.id == thread) {
+                                        let _ = crate::proposals::finish_turn(&worker, &s.project_id, &s.id, v["params"]["turn"]["id"].as_str());
+                                        let _ = finish_review(&worker, &s.project_id);
+                                    }
+                                }
+                            }
+                            let _ = worker.emit_agent(&v);
+                        }).await;
                     });
                     continue;
                 }
@@ -275,6 +280,7 @@ async fn connection(app: &crate::Backend) -> Result<Arc<Connection>, String> {
                 read.receive_response(&v);
             }
         }
+        crate::source_mcp::shutdown(&handle).await;
         let _ = read.stop().await;
         while completions.join_next().await.is_some() {}
         if let Ok(mut pending) = read.pending.lock() {
@@ -776,7 +782,7 @@ pub(crate) async fn codex_send_for_chat(
         }
     }
     let source_settings = crate::data_sources::settings(&app, &project_id, None)?;
-    let source_status = crate::data_sources::status(source_settings.sources.clone()).await;
+    let source_status = crate::data_sources::status(source_settings.sources.iter().filter(|s| s.connection_id.is_none()).cloned().collect(), &[]).await;
     let source_manifest = serde_json::json!({"sources":source_settings.sources,"availability":source_status});
     let instructions = projects::instructions(&app, &project_id, None)?
         .replace(&project.root.to_string_lossy().to_string(), ".");
@@ -806,10 +812,26 @@ pub(crate) async fn codex_send_for_chat(
             config["config"]["sandbox_workspace_write.exclude_tmpdir_env_var"] = json!(true);
             config["config"]["sandbox_workspace_write.exclude_slash_tmp"] = json!(true);
         }
+        if source_settings.sources.iter().any(|s| s.connection_id.is_some()) {
+            let bridge = crate::source_mcp::start(&app, &proposal, source_settings.clone(), workspace.clone()).await?;
+            config["config"]["mcp_servers.prism_sources"] = bridge;
+            let base = config["developerInstructions"].as_str().unwrap_or_default().to_owned();
+            config["developerInstructions"] = json!(format!("{base}\nSSH sources have a connectionId and remote Unix paths, not local paths. Use prism_sources remote_research to delegate inspection and computation, and remote_import to copy needed assets into this proposal. Do not attempt SSH yourself, start remote servers, or modify sources. Availability is checked on demand. Remote source protection is instruction-based. Tool failures must be reported honestly."));
+        } else {
+            config["config"]["mcp_servers.prism_sources"] = json!({"command":std::env::current_exe().map_err(|e| e.to_string())?,"args":["--prism-source-mcp"],"enabled":false});
+        }
         if let Some(m) = model.filter(|s| !s.is_empty()) { config["model"] = json!(m); }
-        let thread = if let Some(id) = thread_id { config["threadId"] = json!(id); c.call("thread/resume", config).await? } else { c.call("thread/start", config).await? };
+        let thread = if let Some(id) = thread_id {
+            if source_settings.sources.iter().any(|s| s.connection_id.is_some()) || crate::source_mcp::configured(&app, &id) {
+                // Resume of an already loaded thread retains its MCP connections.
+                // This is our idle local thread, never a shared remote thread.
+                c.call("thread/unsubscribe", json!({"threadId":id})).await?;
+            }
+            config["threadId"] = json!(id); c.call("thread/resume", config).await?
+        } else { c.call("thread/start", config).await? };
         let id = thread["thread"]["id"].as_str().ok_or("Missing thread ID")?.to_string();
         crate::proposals::bind(&app, &mut proposal, id.clone())?;
+        if source_settings.sources.iter().any(|s| s.connection_id.is_some()) { crate::source_mcp::remember(&app, &id); }
         { let _guard = app.inner.codex.reviews.lock().map_err(|e|e.to_string())?;
           let mut all = sessions(&app)?;
           if !all.iter().any(|s|s.id==id) { all.push(Session { project_id:project_id.clone(), id:id.clone(), title:prompt.chars().take(70).collect() }); save_json(&projects::data_dir(&app)?.join("sessions.json"), &all)?; }
@@ -829,10 +851,11 @@ pub(crate) async fn codex_send_for_chat(
             params["collaborationMode"] = json!({"mode":mode,"settings":{"model":effective_model,"reasoning_effort":params.get("effort"),"developer_instructions":null}});
         }
         let turn = c.call("turn/start", params).await?;
-        if let Some(id) = turn["turn"]["id"].as_str() { crate::proposals::set_turn(&app, &proposal.id, id)?; }
+        if let Some(turn_id) = turn["turn"]["id"].as_str() { crate::proposals::set_turn(&app, &proposal.id, turn_id)?; crate::source_mcp::bind_turn(&app, &project_id, &id, turn_id); }
         Ok(json!({"threadId":id,"turn":turn["turn"],"proposalId":proposal.id}))
     }.await;
     if let Err(ref error) = result {
+        crate::source_mcp::stop(&app, &proposal.id).await;
         if error.contains("timed out")
             || error.contains("disconnected")
             || error.contains("process exited")
@@ -885,11 +908,11 @@ pub(crate) async fn codex_control(
         Ok(result)
     } else {
         crate::proposals::cancel_thread(&app, &project_id, &thread_id)?;
-        c.call(
-            "turn/interrupt",
-            json!({"threadId":thread_id,"turnId":turn_id}),
-        )
-        .await
+        let (_, interrupted) = tokio::join!(
+            crate::source_mcp::stop_thread(&app, &project_id, &thread_id, &turn_id),
+            c.call("turn/interrupt", json!({"threadId":thread_id,"turnId":turn_id})),
+        );
+        interrupted
     }
 }
 pub(crate) async fn codex_respond(
@@ -897,6 +920,9 @@ pub(crate) async fn codex_respond(
     id: Value,
     result: Value,
 ) -> Result<(), String> {
+    if let Some(remote_id) = id.as_str().filter(|id| id.starts_with("prism-remote-")) {
+        return crate::source_mcp::respond(&app, remote_id, result);
+    }
     let c = connection(&app).await?;
     let request = c
         .requests

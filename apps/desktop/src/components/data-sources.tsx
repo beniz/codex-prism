@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { DatabaseIcon, RefreshCwIcon } from "lucide-react";
+import { DatabaseIcon, RefreshCwIcon, ServerIcon } from "lucide-react";
 import { getProjectSettings, getSourceStatus, openSourceSettings, type DataSource, type SourceStatus } from "@/lib/data-sources";
 export function DataSources({ projectId }: { projectId: string }) {
   const [sources, setSources] = useState<DataSource[]>([]);
@@ -35,9 +35,9 @@ export function DataSources({ projectId }: { projectId: string }) {
     <div className="space-y-0.5 px-1 pb-1.5">
     {sources.map(source => {
       const status = statuses.find(s => s.id === source.id);
-      const explanation = error ?? (status ? status.reachable ? "Directory is reachable" : status.error : "Checking directory…");
+      const explanation = error ?? (status ? status.reachable ? source.connectionId ? "Remote server and directory are reachable" : "Directory is reachable" : status.error : "Checking directory…");
       return <button key={source.id} className="flex w-full items-center gap-2 rounded p-1 text-left hover:bg-sidebar-accent" onClick={() => openSourceSettings(projectId)} title={`${source.path}\n${explanation}`} aria-label={`${source.name}: ${explanation}`}>
-        <span className={`size-1.5 shrink-0 rounded-full ${error || status && !status.reachable ? "bg-red-500" : status?.reachable ? "bg-green-500" : "bg-muted-foreground"}`} /><span className="truncate">{source.name}</span>
+        <span className={`size-1.5 shrink-0 rounded-full ${error || status && !status.reachable ? "bg-red-500" : status?.reachable ? "bg-green-500" : "bg-muted-foreground"}`} />{source.connectionId && <ServerIcon className="size-3 shrink-0 text-muted-foreground" aria-label="SSH source" />}<span className="truncate">{source.name}</span>
       </button>;
     })}
     {!sources.length && <button className="p-1" onClick={() => openSourceSettings(projectId)}>Add data source</button>}

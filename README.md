@@ -225,6 +225,46 @@ See [CONTRIBUTING.md](./CONTRIBUTING.md) for development guidelines and verifica
 
 This project is a fork of [ClaudePrism](https://github.com/delibae/claude-prism) by delibae, adapted to use Codex as its AI backend. ClaudePrism started from [Open Prism](https://github.com/assistant-ui/open-prism) by [assistant-ui](https://github.com/assistant-ui).
 
+### SSH data sources
+
+In **Project settings → Data sources**, choose **Add SSH connection**, enter an
+SSH host alias (or `user@host`), and add one or more absolute remote directories.
+Use **Test connection**, then **Save**. The sidebar shows each source's
+availability; refresh checks it again. Changes apply to every chat from its next
+turn, including existing conversations.
+
+Prism uses the machine's SSH client, configuration, keys and agent. Establish
+SSH trust/authentication beforehand. Remote hosts currently need Linux or macOS
+and an **already running, authenticated Codex app-server**. Prism never installs,
+starts or upgrades that server. If needed, connect the host through **ChatGPT
+Settings → Connections** first. Prism does not read ChatGPT's private connection
+registry; enter the SSH alias in Prism as well.
+
+The default transport attaches through `codex app-server proxy`. Under
+**Connection options**, provide an absolute remote Codex executable path if it
+is absent from the noninteractive SSH PATH, and optionally a control-socket path.
+Alternatively, select an existing WebSocket listener's remote loopback port;
+Prism tunnels it through SSH. An optional remote token-file path is supported;
+the token stays in memory and is never saved in project settings.
+
+All project chats receive remote research and import tools. Research runs in a
+dedicated remote thread and scratch directory; document editing, compilation,
+Git history and Keep remain local. The remote agent is instructed not to modify
+sources. **This is instruction-based protection, not guaranteed filesystem
+read-only access.** Review remote command approval requests accordingly.
+
+Imports require Python 3 remotely, are limited to 8 MiB per file, reject
+traversal/symlink escapes and local overwrites, and write only into the owning
+chat's proposal. Import needed scratch artifacts during the same turn; scratch
+cleanup is best-effort when that turn ends. Work is limited to two simultaneous
+remote jobs and 15 minutes per research request. Stopping a chat targets only its
+remote work. If a connection is lost or Prism is forcibly terminated, remote
+interruption/cleanup cannot be guaranteed; Prism never shuts down the shared
+server or cancels other clients' sessions.
+
+Developer validation and opt-in live tests are documented in
+[SSH data-source testing](docs/ssh-data-sources.md).
+
 ### Shared project instructions
 
 Click the project title to open **Project settings**, then edit the shared project prompt to save standing context for all
