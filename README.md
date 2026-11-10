@@ -1,322 +1,162 @@
-<p align="center">
-  <img src="./apps/desktop/src-tauri/icons/icon.png" width="120" height="120" alt="codex-prism logo" />
-</p>
+<h1 align="center">
+  <img src="./apps/desktop/src-tauri/icons/icon.png" width="48" height="48" align="absmiddle" alt="codex-prism logo" />
+  codex-prism
+</h1>
 
-<h1 align="center">codex-prism</h1>
+<p align="center"><strong>Write papers, slides, and reports with parallel Codex chats, LaTeX, and PDF review.</strong></p>
 
-<p align="center">Scientific writing with Codex, LaTeX, and PDF preview in one workspace.</p>
+Work on several parts of a document at once, review the results, and keep the changes you want. codex-prism brings your local files, AI conversations, compiled PDF, and Git history into one desktop workspace.
 
-codex-prism is a local, single-user desktop application powered by your installed Codex CLI. Write and revise papers with an AI assistant, edit LaTeX when you need to, and review the compiled document alongside your conversation.
-
-![codex-prism workspace with project files, LaTeX source, Codex chat, and a compiled PDF preview](docs/images/codex-prism-workspace.png)
-
-[Quickstart](#quickstart) · [Features](#features) · [Build from source](#build-from-source) · [Releases](https://github.com/beniz/codex-prism/releases)
+[Download](https://github.com/beniz/codex-prism/releases/latest) · [Quickstart](#quickstart) · [Features](#features) · [Technical reference](README_AGENTS.md)
 
 ## Quickstart
 
-The release workflow builds packages for **Ubuntu 26.04 LTS x86_64**, **Windows 10/11 x64**, and **macOS Apple Silicon**. Download published packages from [GitHub Releases](https://github.com/beniz/codex-prism/releases).
+**[Download the latest release](https://github.com/beniz/codex-prism/releases/latest)** and choose your platform:
 
-**Windows 10/11 x64:** Download the `-setup.exe` installer from the
-[GitHub Releases](https://github.com/beniz/codex-prism/releases),
-run it, and follow the setup wizard. Setup installs missing Codex, LaTeX (MiKTeX)
-and WebView2 dependencies automatically, reusing existing installations. It also
-offers Ghostscript for optimized PDF export; complete its setup wizard to enable
-that feature. Then open codex-prism and use **Connection → Sign in** to start
-working. You do not need to build the app or install Node.js or Rust.
+| Platform | Download | Install |
+| --- | --- | --- |
+| Linux x86_64 | `.deb` or `.AppImage` | Ubuntu 26.04 LTS packages; commands below. Older distributions are not guaranteed to work. |
+| macOS Apple Silicon | `.dmg` | Open it and drag codex-prism into Applications. |
+| Windows 10/11 x64 | `-setup.exe` | Run the installer, then launch from the Start menu. |
 
-**macOS Apple Silicon:** Install the `.dmg`, then install/authenticate Codex and install MacTeX separately. Builds are ad-hoc signed and not notarized. Windows installers are unsigned.
+Packaged builds need no Node.js or Rust development toolchain. Windows installers are unsigned; macOS builds are ad-hoc signed, not notarized. On macOS, approve a blocked first launch through **System Settings → Privacy & Security → Open Anyway**.
 
-### 1. Install the application
+### Linux
 
-The following installation commands are for Ubuntu. Windows users can run the
-installer above and continue to **3. Open a project and start writing** after
-signing in.
-
-Download the `.deb` or `.AppImage` from [the releases page](https://github.com/beniz/codex-prism/releases). For version 1.4.0, install the Debian package from your download directory:
+From your download folder, replace `VERSION` with the downloaded filename's version:
 
 ```sh
-sudo apt install ./codex-prism-1.4.0-linux-x86_64.deb
+sudo apt install ./codex-prism-VERSION-linux-x86_64.deb
+sudo apt install texlive-latex-extra texlive-publishers texlive-fonts-recommended \
+  texlive-xetex texlive-luatex texlive-bibtex-extra biber
 ```
 
-Or run the AppImage:
+If Codex is not already installed, use the [official CLI installer](https://developers.openai.com/codex/cli):
 
 ```sh
-chmod +x codex-prism-1.4.0-linux-x86_64.AppImage
-./codex-prism-1.4.0-linux-x86_64.AppImage
+curl -fsSL https://chatgpt.com/codex/install.sh | sh
 ```
 
-Launch the installed Debian package from your applications menu. Packaged builds do not require the application's Node.js or Rust build toolchain. Updates are installed manually; download checksums are included in each release.
+Prefer a portable package? See [AppImage instructions](README_AGENTS.md#linux-installation).
 
-### 2. Set up Codex and LaTeX
+### macOS
 
-Install the Codex CLI separately and authenticate with `codex login`, or use **Connection → Sign in** in the app. The app uses the installed CLI's account and configuration. If Codex is not found on PATH, set its full executable path in **Connection** and restart the app.
-
-Install system TeX Live to compile documents:
+If Codex and TeX are missing, install them with [Homebrew](https://brew.sh/) using the [Codex](https://developers.openai.com/codex/cli) and [MacTeX](https://formulae.brew.sh/cask/mactex-no-gui) packages:
 
 ```sh
-sudo apt install texlive-latex-extra texlive-publishers texlive-fonts-recommended texlive-xetex texlive-luatex texlive-bibtex-extra biber
+brew install --cask codex mactex-no-gui
 ```
 
-Python environments and external scientific skills are optional and can be configured later in settings.
+Reopen your terminal and relaunch codex-prism after installation. Existing Codex and TeX installations can be reused.
 
-### 3. Open a project and start writing
+### Windows
 
-Open an existing LaTeX project or create one from a template. Ask Codex to help draft or revise your document, and review each chat’s proposal with **Keep** or **Discard changes**. Chats can work concurrently in isolated copies. Follow-up prompts refine that chat’s pending proposal; Keep merges it into the latest main document and reports any conflicts.
+The installer reuses existing tools and installs missing Codex, MiKTeX, and WebView2. Missing prerequisites require internet access and Windows App Installer (`winget`). Existing tools are not upgraded. [Windows setup details](docs/releases/windows.md)
 
-In **All Projects**, use **New folder** in the sidebar to organize projects into virtual folders. The selector on each project card changes its folder without moving files on disk. Folder assignments are saved locally; removing a folder returns its projects to **Unfiled**. The project library has no ten-project limit.
+### Start writing
 
-Use **Recompile** to build the PDF, or enable **Auto** for automatic recompilation. Existing PDFs load immediately when available. Toggle **Code** beside **Layout** to hide the LaTeX source while keeping the chat and PDF visible.
+1. Open codex-prism and select **Connection → Sign in**.
+2. Open a LaTeX project, or create one from a template.
+3. Ask for an edit, inspect the PDF, then choose **Keep** or **Discard changes**.
 
-Use **Export PDF** to choose the original PDF or an optimized ebook copy. Ebook export requires [Ghostscript](https://ghostscript.com/) (`gs`) and can reduce image detail for screen reading. The working PDF stays unchanged; if optimization does not reduce the size, the original is exported instead.
+Python environments and scientific skills are optional. You can configure them later.
 
 ## Features
 
-- **Codex assistant** — chat alongside the document, attach project files, select models and reasoning effort, approve tool requests, and resume conversations.
-- **LaTeX editor** — CodeMirror with syntax highlighting, search, multi-file projects and auto-save. Hide the source panel while keeping the chat and PDF visible.
-- **PDF preview** — MuPDF rendering with SyncTeX navigation, zoom and text selection. Existing PDFs load at startup before a new compilation is needed.
-- **Local compilation** — your installed TeX tools (TeX Live, or MiKTeX on Windows) run pdfLaTeX by default; `% !TEX program = xelatex` or `lualatex` selects another engine. Auto-recompile is optional.
-- **History and proposed changes** — ordinary document Git commits, a compact history list and restoration, plus Keep/Undo review of assistant edits.
-- **Python environment** — optional [uv](https://docs.astral.sh/uv/) installation and explicit project environment setup in settings. Opening a project does not create or modify its environment.
-- **Scientific writing instructions** — project `AGENTS.md` guidance, including TikZ for technical drawings, and optional skills from [K-Dense Scientific Skills](https://github.com/K-Dense-AI/claude-scientific-skills).
-- **Templates and project wizard** — start papers, theses, presentations and other LaTeX documents, including private local templates.
-- **Desktop tools** — external editor integration and light/dark themes.
+| What makes it useful | What you can do |
+| --- | --- |
+| **Parallel chats for one document** | Draft the introduction, refine figures, and revise conclusions at the same time. Each chat has its own proposal and PDF preview. |
+| **Automatic merging on Keep** | Merge a chat's changes into the latest main document. Earlier accepted work is preserved; conflicting edits are reported for repair. |
+| **Git-collaborative writing** | Keep creates an ordinary Git commit with a shortened prompt title and a summary of accepted changes. Optionally include full prompts; inspect or restore earlier versions in History. |
+| **Private templates** | Reuse your conference papers, slide decks, theses, and technical reports—with bibliography, styles, logos, figures, and writing instructions. |
+| **Per-document data sources** | Share files, local directories, and remote directories across the project's chats. Delegate research to existing Codex servers on other machines through SSH, without mounting remote filesystems. |
+| **Shared project instructions** | Set the document's purpose, audience, and standing guidance once. Every chat receives them on its next turn. |
 
-## LaTeX compilation
+This README describes the current `main` branch. See the [release notes](https://github.com/beniz/codex-prism/releases/latest) for packaged versions and the [changelog](CHANGELOG.md) for recent changes.
 
-The default engine is **pdfLaTeX**. For XeLaTeX or LuaLaTeX, add one of these comments within the main document's first 20 lines:
+## See the workflow
 
-```tex
-% !TEX program = xelatex
-```
+![Workspace with project files, LaTeX source, Codex chat, and PDF preview](docs/images/codex-prism-workspace.png)
 
-```tex
-% !TEX program = lualatex
-```
+*Workspace overview from an earlier version; controls and shortcuts have evolved.*
 
-Individual documents may require additional fonts, publisher classes or language packages. The app uses your installed TeX tools. On Windows, setup enables automatic missing-package downloads only for a newly installed MiKTeX; existing distribution settings are preserved. Existing PDFs can be viewed without a compiler installed.
+**You choose when work joins the document.** Keep accepts one chat's whole proposal. Pending chats retain their own versions; chats without pending work show the latest main PDF. A follow-up refines its existing proposal. Manual LaTeX editing unlocks when running work and pending proposals are resolved.
 
-Bibliography processing uses the control files generated by the first LaTeX pass to select Biber or BibTeX, including when bibliography packages are loaded through a local style or class.
-
-## Private templates
-
-Put each private template in its own folder under `~/.codexprism/templates`, for example:
+Try separate chats with focused requests:
 
 ```text
-~/.codexprism/templates/lab-paper/
-  paper.tex
-  references.bib
-  local.sty
-  assets/logo.pdf
-  AGENTS.md
-  template.json
+Chat A: Shorten the introduction.
+Preserve the research question and citations.
+
+Chat B: Improve the results figure captions.
+Keep the reported values unchanged.
+
+Chat C: Draft a limitations slide using @attachments:/paper.pdf.
+Cite the source pages.
 ```
 
-Only the LaTeX document is required. Optional `template.json` metadata controls the gallery entry:
+For the third example, add the paper in project settings first, then type `@` and press Tab to choose its registered reference.
 
-```json
-{
-  "name": "Lab Paper",
-  "description": "Our complete manuscript starter",
-  "category": "academic",
-  "tags": ["lab", "manuscript"],
-  "mainFile": "paper.tex"
-}
-```
+## Everyday tools
 
-Every metadata field is optional. Categories are `academic`, `professional`, `creative`, or `starter` (the default). Without `mainFile`, the app selects the unique `.tex` file containing an uncommented `\documentclass`, or the only `.tex` file. Nested paths such as `document/paper.tex` are supported. Ambiguous or invalid folders show an issue in the gallery while valid templates remain available.
+- **LaTeX and PDF together:** syntax highlighting, search, auto-save, multi-file projects, zoom, text selection, and source/PDF navigation. Hide the code when you want to focus on writing.
+- **Local compilation:** TeX Live or MiKTeX, with pdfLaTeX, XeLaTeX, LuaLaTeX, BibTeX, and Biber. Optional Auto recompilation and conservative incremental builds.
+- **Plan, then edit:** native Codex Plan mode, per-project model/effort preferences, tool approvals, and conversations retained across restarts.
+- **PDF export:** original quality, high quality (300 dpi), or compact (150 dpi). Optimized export uses Ghostscript and leaves the working PDF unchanged.
+- **Optional research tools:** project Python environments through [uv](https://docs.astral.sh/uv/), writing guidance, and [scientific skills](https://github.com/K-Dense-AI/claude-scientific-skills).
+- **Desktop conveniences:** project folders, external editor integration, and light/dark themes.
 
-Open the template gallery and select **My Templates**. **Refresh** rescans the library after you edit or add folders. Private templates also appear in the main gallery, search, and category counts. No import step is needed.
+| To… | Do this |
+| --- | --- |
+| Set shared instructions or rename a project | Click the project title. |
+| Add research material | Project settings → Data sources → Add files / Add directory / Add SSH connection. |
+| Reference a registered source | Type `@`, then Tab; use arrows and Tab/Enter to choose, Escape to close. |
+| Reuse your own starter | Put it in `~/.codexprism/templates/`, then open **My Templates → Refresh**. [Template guide](README_AGENTS.md#private-templates) |
+| Navigate the document | Click an outline heading, double-click a LaTeX line, or select PDF text and choose **Navigate to source**. |
+| Hide the LaTeX panel | Toggle **Code** beside **Layout**. |
+| Plan before editing | Press Shift+Tab in an idle chat composer. |
+| Reuse a prompt | Press Up in an empty composer; Down returns through history. |
+| Save a manual recovery point | History → Save checkpoint. |
 
-Visible templates get PDF previews using system TeX Live. Builds run one at a time in isolated copies, time out after 60 seconds, and cache PDFs in the application's data directory using the template contents and compiler version. Previews do not change the library or send an AI request. A failed preview offers **Retry** and still allows project creation.
+## Your files and privacy
 
-Creating a project copies the complete starter body, bibliography, classes, styles, instructions, and assets, including PDF figures. It excludes `template.json`, Git and application history, dependency environments, and LaTeX intermediate files. Symlinks are rejected. The destination must be outside the library and must not already exist. An existing `AGENTS.md` is preserved; otherwise the app adds its default instructions. The chosen main document opens immediately. An optional creation prompt asks Codex to adapt the existing starter content.
+Projects, document compilation, and Git history stay local. Codex sends prompts and the content it uses to its configured AI provider. Its installed CLI manages the account and credentials.
 
-## Data and privacy
+Git commit titles can contain shortened prompts. **Include prompt in commits** adds full user prompts and is off by default. Review history before sharing it; codex-prism never pushes automatically.
 
-Documents and compilation stay on your machine. AI requests send prompts and the content used by Codex to its configured provider for inference. Credentials are managed by the installed Codex CLI; signing out affects that shared login.
+Remote data sources need an already running, authenticated Codex server. Remote agents are instructed to leave sources unchanged; this is **instruction-based protection**, not a filesystem read-only guarantee. [SSH setup and limits](README_AGENTS.md#ssh-data-sources)
 
-Existing project instructions, skills, Python environments and history are preserved. Document history uses the document’s normal `.git` repository (or its existing parent repository/worktree). Private `.codexprism/history` and legacy `.claudeprism/history.git` repositories migrate automatically when no normal repository exists; otherwise they remain preserved as separate archives. New project instructions use `AGENTS.md`, and scientific skills use `.agents/skills`.
+codex-prism is a single-user desktop editor. “Git-collaborative” refers to working with agents through reviewable commits; it does not provide simultaneous editing by multiple people.
 
-History records explicit saves, checkpoints before agent turns, and accepted agent edits. **Keep** records the selected file; **Keep all** records one commit for the batch, including acceptance from visual review. Autosave and compilation do not create commits. History’s **Save checkpoint** and **Restore** actions provide manual recovery points; restoring preserves later commits and recompiles the document.
+## Troubleshooting
 
-**Include prompt in commits** is a per-document option in History, off by default. It applies to future turns and includes only user prompts, not attachments or tool output. Included prompts travel with remote pushes. Configure remotes and push with your usual Git tools from the document directory; codex-prism does not push automatically.
+| Problem | First step |
+| --- | --- |
+| Codex is not found | Set its full executable path in **Connection**, then restart the app. |
+| The PDF will not compile | Check the error for missing TeX packages, fonts, or a required engine. [Compilation guide](README_AGENTS.md#latex-compilation) |
+| Keep reports a conflict | Use **Fix with agent**, review the repaired proposal, then Keep again. Main stays unchanged until a clean acceptance. |
+| A remote source is unavailable | Check SSH access and the existing server, then **Test connection**. [Remote setup](README_AGENTS.md#ssh-data-sources) |
+| You want to update the app | Download and install the latest package; updates are manual. Release assets include checksums. |
 
-Externally staged changes, detached HEAD and ongoing merges/rebases pause automatic history recording without blocking document edits or acceptance. History displays the reason and offers Retry using captured content. Application state and generated outputs are excluded from new history commits; already tracked files remain tracked.
-
-History also includes local images referenced by literal `\includegraphics` paths, including PDF figures excluded by `*.pdf` ignore rules. It supports `\graphicspath`, omitted image extensions, and included `.tex` sources. Accepting agent changes includes existing untracked figures referenced by the accepted source. Compiled document PDFs stay excluded. Missing, external, or symlinked figures produce a history error; copy them into the project and correct their references before creating a new checkpoint. Filenames computed by TeX macros are not resolved automatically.
-
-
-The application is currently local and single-user. Browser hosting and project collaboration are not included yet.
+For help, [open an issue](https://github.com/beniz/codex-prism/issues) with your OS, app version, and relevant error message.
 
 ## Build from source
 
-For development or running directly from a repository checkout on Ubuntu 26.04 LTS x86_64, follow these steps. Codex and TeX Live are set up as described in the [quickstart](#quickstart).
-
-1. Install Node.js 22+, Corepack, Git, and the Linux Tauri development libraries (Ubuntu/Debian):
-   ```sh
-   sudo apt install build-essential pkg-config libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libssl-dev
-   ```
-2. Install Rust with rustup. This checkout pins Rust 1.88.0.
-3. Clone the repository and start the app:
-   ```sh
-   git clone https://github.com/beniz/codex-prism.git
-   cd codex-prism
-   corepack pnpm install --frozen-lockfile
-   corepack pnpm dev:desktop
-   ```
-
-The default launcher disables automatic native restarts and frontend hot reloads. To apply application code changes, close the app, stop the launcher with Ctrl+C if needed, and run `corepack pnpm dev:desktop` again. Editing your LaTeX documents and compiling PDFs still works normally.
-
-For a short Linux command available from any directory, install a symlink from this checkout:
+After installing the [development prerequisites](README_AGENTS.md#build-from-source):
 
 ```sh
-mkdir -p ~/.local/bin
-ln -s "$PWD/scripts/codex-prism" ~/.local/bin/codex-prism
+git clone https://github.com/beniz/codex-prism.git
+cd codex-prism
+corepack pnpm install --frozen-lockfile
+corepack pnpm dev:desktop
 ```
 
-With `~/.local/bin` on your PATH, run `codex-prism`. Each launch uses the current checkout, rebuilding the native app as needed and serving the current frontend. Keep the terminal open while using the app. Use `codex-prism --watch` to enable automatic reloads. If you move the checkout, update the symlink.
-
-To opt into automatic reloads and native rebuilds during development, use `corepack pnpm dev:desktop:watch`.
-
-To build an installable desktop package: `corepack pnpm build:desktop`.
-
-If you also install a packaged release, the `~/.local/bin/codex-prism` launcher may take precedence over the packaged command. It continues to run the repository checkout.
-
-### Verification
-
-```sh
-corepack pnpm --filter @codex-prism/desktop test
-corepack pnpm --filter @codex-prism/desktop build
-cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml --lib
-node scripts/verify-codex.mjs
-```
-
-The last command checks the installed server's initialization, account status and model catalogue without sending an inference prompt or printing credentials. Add `--exercise` to run one small inference turn in a disposable temporary directory and verify file editing and session resume. Integration was checked against Codex 0.160.1; an incompatible app-server protocol reports an error rather than falling back to another provider.
-
-For a hands-on acceptance check, open a disposable LaTeX project, ask Codex to edit a paragraph, verify streaming and model selection, then Keep one file and Undo another. Test Stop, an approval request, reopening a chat and restarting with a pending review. Check compilation/PDF navigation and externally edit a file before Save/Undo to verify conflict protection.
-
-### Architecture and change review
-
-- `crates/prism-core` contains the headless Rust backend: projects/files, compilation, history, agent supervision/review, Python environments and scientific skills. The desktop crate supplies thin Tauri commands, event delivery and native integration.
-- The Rust backend supervises one `codex app-server --listen stdio://` process. The webview receives conversation events and approval requests; credentials remain in Codex's normal credential store.
-- Projects have persistent UUIDs. File operations carry `{projectId, path}` with paths relative to the project directory. The desktop adapter resolves host paths for native pickers and assets. Rename preserves the project ID; a backend relocate operation is also available for a later project-management UI.
-- The agent saves dirty buffers before starting, runs with `workspace-write` and `on-request` approvals, and allows one active turn per chat. Unrelated CLI sessions are not imported into its chat list.
-- Manual file editing is locked while agents run or proposals await review. Chats edit isolated copies concurrently; follow-up prompts refine their own pending proposal. Keep merges the selected chat’s proposal into the latest main document, preserving accepted changes from other chats or reporting a conflict without modifying main. Discard affects only that proposal. Text saves likewise refuse to overwrite an external edit.
-- Review baselines and session mappings persist in the application's data directory, separately from project source. Restart recovers interrupted reviews. Prompts are never automatically resubmitted after a disconnect. Generated build files, hidden/environment directories and symlinks are excluded from snapshots; changes outside that scope cannot be undone by project review.
-- LaTeX/PDF and history features remain; Python and external scientific skills are optional. Existing private Git history migrates to a normal document repository with commits, labels and remotes preserved. New project instructions use `AGENTS.md`; scientific skills use `.agents/skills`.
-- Hosts construct a shared `prism_core::Backend` with explicit application-data, home and temporary paths, an `EventSink`, and optionally a native directory-permission hook. Construction recovers interrupted reviews; `shutdown().await` rejects new work, stops the agent and background installers, drains admitted work, and retains persisted projects/builds. The headless default never opens native permission dialogs.
-- `apps/desktop/src/lib/backend` is the frontend transport boundary and `desktop-host.ts` owns desktop window/dialog/open-link APIs. The implementation remains Tauri-only at this stage; a hosted transport, browser import/export, authentication and remote isolation remain future work.
-
-### Creating releases
-
-GitHub Actions builds Linux x86_64, Windows x64, and macOS Apple Silicon packages and stages them together in a [draft GitHub release](https://github.com/beniz/codex-prism/releases). Linux packages target Ubuntu 26.04 LTS. Releases include checksums and source provenance and are published after verification.
-
-See [the release guide](docs/releases/README.md) for version preparation, tagging, builds, and publication.
-
-## Contributing
-
-See [CONTRIBUTING.md](./CONTRIBUTING.md) for development guidelines and verification commands.
+The default launcher disables automatic reloads; relaunch to apply code changes. See [CONTRIBUTING.md](CONTRIBUTING.md) to contribute, or [README_AGENTS.md](README_AGENTS.md) for detailed setup, architecture, tests, and releases. Coding agents should start with [AGENTS.md](AGENTS.md).
 
 ## License
 
-[MIT](./LICENSE)
+[MIT](LICENSE)
 
 ## Acknowledgments
 
-This project is a fork of [ClaudePrism](https://github.com/delibae/claude-prism) by delibae, adapted to use Codex as its AI backend. ClaudePrism started from [Open Prism](https://github.com/assistant-ui/open-prism) by [assistant-ui](https://github.com/assistant-ui).
-
-### Project data sources
-
-Project creation and **Project settings → Data sources** offer **Add files**,
-**Add directory**, and **Add SSH connection**. Sources are optional and are saved
-even when you create a project without an initial writing prompt. Every chat
-receives the current source manifest on its next turn.
-
-Files are copied when you save: documents go into `attachments/`, and images use
-an existing image folder or `prism-uploads/`. Selecting an existing project file
-registers it without copying it again. Originals are not synchronized. Local
-and SSH directories remain external. Agents consult sources on demand; adding a
-source does not automatically insert content or citations into your document.
-
-The sidebar groups file sources into **Files · N** with an availability indicator;
-click it to manage individual files in settings. Removing a registration keeps
-the project file. Delete files separately through the Files navigator. Adding
-files is disabled while running work or pending proposals lock the document.
-
-Existing files under `attachments/` are registered once, without following
-symlinks. Removed registrations are not rediscovered. Older images elsewhere can
-be registered explicitly. File-source paths stay project-relative and each chat
-reads its own proposal copy.
-
-### Referencing data sources in chat
-
-Type `@` in the composer and press **Tab** to list registered source IDs, or
-start typing an ID to filter suggestions. Select a source, then browse its
-folders with Tab or Enter—for example `@attachments:/paper.pdf` or
-`@research-data:/reports/results.csv`. Paths with spaces are quoted automatically.
-Up/Down selects a suggestion; Escape closes the picker. Enter accepts a visible
-suggestion instead of sending the message.
-
-Completion includes only registered sources. Copied files are grouped by folder
-(`attachments`, `figures`, or `project` for root-level files). Directory sources
-have stable IDs shown in project settings; duplicate names receive suffixes.
-Removing a source retires its ID so old references cannot silently point elsewhere.
-Local and SSH directories are browsed on demand without indexing or model calls.
-Use **Refresh / retry** for changed contents or an unavailable source.
-
-References also work when typed manually and when steering a running chat. They
-resolve against that chat's source configuration and proposal workspace. Invalid
-references keep the draft intact. Selecting a reference does not import files;
-SSH access still uses the existing research/import tools.
-
-### SSH data sources
-
-In **Project settings → Data sources**, choose **Add SSH connection**, enter an
-SSH host alias (or `user@host`), and add one or more absolute remote directories.
-Use **Test connection**, then **Save**. The sidebar shows each source's
-availability; refresh checks it again. Changes apply to every chat from its next
-turn, including existing conversations.
-
-Prism uses the machine's SSH client, configuration, keys and agent. Establish
-SSH trust/authentication beforehand. Remote hosts currently need Linux or macOS
-and an **already running, authenticated Codex app-server**. Prism never installs,
-starts or upgrades that server. If needed, connect the host through **ChatGPT
-Settings → Connections** first. Prism does not read ChatGPT's private connection
-registry; enter the SSH alias in Prism as well.
-
-The default transport attaches through `codex app-server proxy`. Under
-**Connection options**, provide an absolute remote Codex executable path if it
-is absent from the noninteractive SSH PATH, and optionally a control-socket path.
-Alternatively, select an existing WebSocket listener's remote loopback port;
-Prism tunnels it through SSH. An optional remote token-file path is supported;
-the token stays in memory and is never saved in project settings.
-
-All project chats receive remote research and import tools. Research runs in a
-dedicated remote thread and scratch directory; document editing, compilation,
-Git history and Keep remain local. The remote agent is instructed not to modify
-sources. **This is instruction-based protection, not guaranteed filesystem
-read-only access.** Review remote command approval requests accordingly.
-
-Imports require Python 3 remotely, are limited to 8 MiB per file, reject
-traversal/symlink escapes and local overwrites, and write only into the owning
-chat's proposal. Import needed scratch artifacts during the same turn; scratch
-cleanup is best-effort when that turn ends. Work is limited to two simultaneous
-remote jobs and 15 minutes per research request. Stopping a chat targets only its
-remote work. If a connection is lost or Prism is forcibly terminated, remote
-interruption/cleanup cannot be guaranteed; Prism never shuts down the shared
-server or cancels other clients' sessions.
-
-Developer validation and opt-in live tests are documented in
-[SSH data-source testing](docs/ssh-data-sources.md).
-
-### Shared project instructions
-
-Click the project title to open **Project settings**, then edit the shared project prompt to save standing context for all
-chats in a project. Instructions are stored locally in Prism and supplied on each
-new turn, including resumed chats. Changes do not interrupt running turns.
-Reference files must already be available in the project; instructions do not
-upload files or change `AGENTS.md`. Save an empty value to clear them.
-
-Double-click LaTeX text to navigate to its position in the current PDF, without
-changing editor focus or word selection. This uses the existing compiled PDF;
-changed or ambiguous source may require recompilation before navigation works.
+Forked from [ClaudePrism](https://github.com/delibae/claude-prism) by delibae, adapted to use Codex. ClaudePrism started from [Open Prism](https://github.com/assistant-ui/open-prism) by [assistant-ui](https://assistant-ui.com/).
