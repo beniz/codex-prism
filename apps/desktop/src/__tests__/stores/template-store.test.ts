@@ -106,6 +106,22 @@ describe("useTemplateStore", () => {
     });
   });
 
+  it("searches case-insensitively with all words and handles empty/no matches", () => {
+    const store = useTemplateStore.getState();
+    store.setSearchQuery("RESEARCH paper");
+    expect(useTemplateStore.getState().filteredTemplates.map(t => t.id)).toContain("paper-standard");
+    store.setSearchQuery("xyznonexistent123");
+    expect(useTemplateStore.getState().filteredTemplates).toEqual([]);
+    store.setSearchQuery("   ");
+    expect(useTemplateStore.getState().filteredTemplates).toHaveLength(getAllTemplates().length);
+    for (const category of ["academic", "professional", "creative", "starter"] as const) {
+      store.setSelectedCategory(category);
+      const selected = useTemplateStore.getState().filteredTemplates;
+      expect(selected.length).toBeGreaterThan(0);
+      expect(selected.every(t => t.category === category)).toBe(true);
+    }
+  });
+
   describe("setSelectedCategory", () => {
     it("filters by category", () => {
       useTemplateStore.getState().setSelectedCategory("academic");

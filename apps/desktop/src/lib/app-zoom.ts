@@ -6,7 +6,6 @@ export const LOCAL_ZOOM_SHORTCUTS_ATTR = "data-local-zoom-shortcuts";
 export const DEFAULT_APP_ZOOM = 1;
 export const MIN_APP_ZOOM = 0.5;
 export const MAX_APP_ZOOM = 3;
-export const APP_ZOOM_STEP = 0.1;
 
 let nativeWheelZoomGuardInstalled = false;
 

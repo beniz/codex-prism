@@ -1,8 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
-  searchTemplates,
   getTemplateById,
-  getTemplatesByCategory,
   getTemplateSkeleton,
   getAllTemplates,
 } from "@/lib/template-registry";
@@ -24,29 +22,6 @@ describe("template-registry", () => {
     });
   });
 
-  describe("searchTemplates", () => {
-    it("returns all templates for empty query", () => {
-      expect(searchTemplates("")).toHaveLength(getAllTemplates().length);
-      expect(searchTemplates("  ")).toHaveLength(getAllTemplates().length);
-    });
-
-    it("filters by keyword (case insensitive)", () => {
-      const results = searchTemplates("PAPER");
-      expect(results.length).toBeGreaterThan(0);
-      // All results should mention paper in name, description, tags, etc.
-    });
-
-    it("supports multi-word search", () => {
-      const results = searchTemplates("research paper");
-      expect(results.length).toBeGreaterThan(0);
-    });
-
-    it("returns empty for nonsense query", () => {
-      const results = searchTemplates("xyznonexistent123");
-      expect(results).toHaveLength(0);
-    });
-  });
-
   describe("getTemplateById", () => {
     it("returns a template for a known id", () => {
       const t = getTemplateById("paper-standard");
@@ -56,25 +31,6 @@ describe("template-registry", () => {
 
     it("returns undefined for unknown id", () => {
       expect(getTemplateById("nonexistent-id")).toBeUndefined();
-    });
-  });
-
-  describe("getTemplatesByCategory", () => {
-    it("returns only templates of the given category", () => {
-      const academic = getTemplatesByCategory("academic");
-      expect(academic.length).toBeGreaterThan(0);
-      expect(academic.every((t) => t.category === "academic")).toBe(true);
-    });
-
-    it("returns templates for each category", () => {
-      for (const cat of [
-        "academic",
-        "professional",
-        "creative",
-        "starter",
-      ] as const) {
-        expect(getTemplatesByCategory(cat).length).toBeGreaterThan(0);
-      }
     });
   });
 

@@ -103,17 +103,3 @@ export async function synctexEdit(
     return null;
   }
 }
-
-export type TexEngine = "pdflatex" | "xelatex" | "lualatex";
-
-/** Keep aligned with native detection: first directive in the first 20 lines. */
-export function detectTexEngine(content: string): TexEngine {
-  for (const line of content.split("\n").slice(0, 20)) {
-    const match = line.match(/^\s*%\s*!TEX\s*program\s*=\s*(.*?)\s*$/);
-    const engine = match?.[1].toLowerCase();
-    if (engine === "pdflatex" || engine === "latex") return "pdflatex";
-    if (engine === "xelatex" || engine === "lualatex") return engine;
-    if (match) return "pdflatex";
-  }
-  return "pdflatex";
-}
