@@ -1,5 +1,5 @@
 import { backend, invoke } from "@/lib/backend";
-import { getMupdfClient } from "@/lib/mupdf/mupdf-client";
+import { renderPdfThumbnail } from "@/lib/mupdf/pdf-thumbnail";
 
 export type ProjectPreviewData = { createdAt: number | null } & (
   | { kind: "pdf"; url: string }
@@ -21,23 +21,14 @@ async function thumbnail(projectId: string, path: string, revision: string) {
     const cached = thumbnails.get(key);
     if (cached) return cached;
     const { bytes } = await backend.files.read({ projectId, path });
-    const client = getMupdfClient();
-    const doc = await client.openDocument(new Uint8Array(bytes).buffer);
-    try {
-      const png = await client.renderThumbnail(doc, 0, 420);
-      const url = URL.createObjectURL(
-        new Blob([new Uint8Array(png)], { type: "image/png" }),
-      );
-      thumbnails.set(key, url);
-      while (thumbnails.size > 80) {
-        const oldest = thumbnails.keys().next().value!;
-        URL.revokeObjectURL(thumbnails.get(oldest)!);
-        thumbnails.delete(oldest);
-      }
-      return url;
-    } finally {
-      await client.closeDocument(doc).catch(() => {});
+    const url = await renderPdfThumbnail(new Uint8Array(bytes).buffer, 420);
+    thumbnails.set(key, url);
+    while (thumbnails.size > 80) {
+      const oldest = thumbnails.keys().next().value!;
+      URL.revokeObjectURL(thumbnails.get(oldest)!);
+      thumbnails.delete(oldest);
     }
+    return url;
   });
   queue = task.catch(() => {});
   return task;
