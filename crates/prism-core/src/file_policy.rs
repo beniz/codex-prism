@@ -80,6 +80,14 @@ impl Policy {
     }
 }
 
+/// Explicit file sources may be PDFs, logs or other raw data. Only reject
+/// metadata/environment components; snapshot and navigator suffix rules do not
+/// apply. Callers separately validate that the path stays inside the project.
+pub(crate) fn data_source_reserved_path(path: &str) -> bool {
+    path.split('/')
+        .any(|part| application(part) || environment(part) || environment_file(part))
+}
+
 /// Preserve the hard exclusions used when reading tracked history and replaying
 /// durable patches. `.venv` and `env` were not hard exclusions in older history:
 /// exclude new files there, but do not silently drop existing tracked inputs.

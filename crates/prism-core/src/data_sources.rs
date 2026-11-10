@@ -52,31 +52,14 @@ pub(crate) struct Settings {
     pub connections: Vec<crate::remote_sources::SshConnection>,
 }
 fn validate_file_path(path: &str) -> Result<(), String> {
-    if path.is_empty()
-        || path.split('/').any(|part| {
-            [
-                ".git",
-                ".prism",
-                ".codexprism",
-                ".claudeprism",
-                ".venv",
-                "venv",
-                "env",
-                "node_modules",
-                "target",
-                "__pycache__",
-            ]
-            .contains(&part)
-                || part == ".env"
-                || part.starts_with(".env.")
-        })
-    {
+    if path.is_empty() || crate::file_policy::data_source_reserved_path(path) {
         return Err(
             "Choose a document file outside metadata, build and environment directories".into(),
         );
     }
     Ok(())
 }
+
 pub(crate) fn settings(
     app: &Backend,
     id: &str,
@@ -413,6 +396,79 @@ pub(crate) async fn status(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn file_sources_exclude_reserved_components_but_allow_raw_data() {
+        for component in [
+            ".git",
+            ".prism",
+            ".codexprism",
+            ".claudeprism",
+            ".venv",
+            "venv",
+            "env",
+            "node_modules",
+            "target",
+            "__pycache__",
+            ".env",
+            ".env.local",
+        ] {
+            for path in [
+                component.to_owned(),
+                format!("attachments/{component}/report.pdf"),
+                format!("attachments/{component}"),
+            ] {
+                assert!(validate_file_path(&path).is_err(), "{path}");
+            }
+        }
+        assert!(validate_file_path("").is_err());
+        for path in [
+            "attachments/paper.pdf",
+            "attachments/run.log",
+            "attachments/slides.nav",
+            "attachments/module.so",
+            "attachments/data.csv",
+            ".agents/skills/guide.md",
+            "attachments/environment.txt",
+            "attachments/.env-example",
+            "attachments/refs.bib",
+        ] {
+            assert!(validate_file_path(path).is_ok(), "{path}");
+        }
+    }
+
+    #[test]
+    fn imports_reject_reserved_destinations_without_creating_files() {
+        let (temp, app) = crate::test_backend();
+        let root = temp.path().join("document");
+        fs::create_dir(&root).unwrap();
+        let project = projects::project_register(app.clone(), root.to_string_lossy().into()).unwrap();
+        let input = temp.path().join("input.pdf");
+        fs::write(&input, "reference").unwrap();
+        let initial = settings(&app, &project.id, None).unwrap();
+        for destination in [
+            "attachments/.git/report.pdf",
+            "attachments/.venv/report.pdf",
+            "attachments/.env.local/report.pdf",
+            r"attachments\target\report.pdf",
+        ] {
+            let mut draft = initial.clone();
+            draft.pending_imports.push(FileImport {
+                path: input.to_string_lossy().into(),
+                destination: destination.into(),
+            });
+            assert!(
+                settings(&app, &project.id, Some(draft)).is_err(),
+                "{destination}"
+            );
+            assert!(!root.join("attachments").exists());
+            assert_eq!(
+                settings(&app, &project.id, None).unwrap().revision,
+                initial.revision
+            );
+        }
+        assert_eq!(fs::read_to_string(input).unwrap(), "reference");
+    }
+
     #[tokio::test]
     async fn settings_preserve_sources_and_reject_stale_updates() {
         let temp = tempfile::tempdir().unwrap();
