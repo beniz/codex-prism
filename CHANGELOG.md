@@ -5,6 +5,8 @@ and detailed release notes are in [docs/releases](docs/releases/README.md).
 
 ## Unreleased
 
+- Move Capture & Ask to Ctrl+Shift+X (Cmd+Shift+X on macOS), restoring the standard cut shortcut in the chat composer and other text fields.
+
 - Add `@source-id:/path` completion in chat for registered files and local/SSH directories, with on-demand browsing, stable source IDs, quoted paths, and reference validation for prompts and steering.
 
 - Unify copied reference files, local directories and SSH directories as project data sources, available during creation and in project settings. Existing attachments are registered once; file sources share a single sidebar availability row.

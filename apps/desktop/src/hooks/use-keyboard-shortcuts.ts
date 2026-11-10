@@ -34,12 +34,14 @@ export function useKeyboardShortcuts() {
         invoke("create_new_window").catch(console.error);
       }
 
-      // Cmd+X (macOS) / Ctrl+X (others): Capture & Ask
+      // Leave Cmd/Ctrl+X available for the native Cut action.
+      // Cmd+Shift+X (macOS) / Ctrl+Shift+X (others): Capture & Ask
       if (
         (e.metaKey || e.ctrlKey) &&
         e.key.toLowerCase() === "x" &&
-        !e.shiftKey &&
-        !e.altKey
+        e.shiftKey &&
+        !e.altKey &&
+        !e.isComposing
       ) {
         e.preventDefault();
         window.dispatchEvent(new CustomEvent("toggle-capture-mode"));
