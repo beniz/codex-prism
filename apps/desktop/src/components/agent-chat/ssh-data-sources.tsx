@@ -45,6 +45,7 @@ export function SshDataSources({ projectId, settings, setSettings, disabled, onA
           </div>
         </details>
         {sources.map(source => <div key={source.id} className="space-y-1 border-t pt-2">
+          {settings.completionAliases?.[source.id] && <p className="text-xs text-muted-foreground">Completion: @{settings.completionAliases[source.id]}:/</p>}
           <label className="block text-xs">Remote source name<input aria-label="Remote source name" className="mt-1 w-full rounded border bg-background p-1 text-sm" value={source.name} onChange={e => setSettings(old => ({ ...old, sources: old.sources.map(s => s.id === source.id ? { ...s, name: e.target.value } : s) }))} /></label>
           <label className="block text-xs">Remote directory<input aria-label="Remote directory" className="mt-1 w-full rounded border bg-background p-1 text-sm" placeholder="/absolute/path/to/data" value={source.path} onChange={e => setSettings(old => ({ ...old, sources: old.sources.map(s => s.id === source.id ? { ...s, path: e.target.value } : s) }))} /></label>
           <Button variant="ghost" onClick={() => setSettings(old => ({ ...old, sources: old.sources.filter(s => s.id !== source.id) }))}>Remove directory</Button>

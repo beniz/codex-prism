@@ -794,6 +794,7 @@ pub(crate) async fn codex_send_for_chat(
         chat_id.clone(),
     )?;
     crate::proposals::set_planning(&app, &mut proposal, mode == "plan")?;
+    crate::proposals::set_source_context(&app, &mut proposal, json!(source_settings))?;
     let workspace = crate::proposals::root(&app, &proposal)?;
     for source in source_settings.sources.iter().filter(|s| s.kind == "file") {
         let error = projects::resolve(&workspace, &source.path).and_then(|p| std::fs::File::open(p).map(|_| ()).map_err(|e| e.to_string())).err();
@@ -804,6 +805,8 @@ pub(crate) async fn codex_send_for_chat(
     let _ = main_document;
     let _ = app.emit_review(json!({"projectId":project_id}));
     let result: Result<Value, String> = async {
+        let title = prompt.chars().take(70).collect::<String>();
+        let prompt = crate::source_completion::augment(&source_settings, &workspace, &prompt)?;
         let mut config = json!({"cwd":workspace,"approvalPolicy":"on-request","approvalsReviewer":"user","sandbox":"workspace-write","config":{"sandbox_workspace_write.network_access":false,"sandbox_workspace_write.writable_roots":[],"sandbox_workspace_write.exclude_tmpdir_env_var":false,"sandbox_workspace_write.exclude_slash_tmp":false},"developerInstructions":concat!("You are the scientific writing assistant in codex-prism. This is an isolated proposal workspace. It may have been refreshed from the latest main document since your previous turn: inspect current files before editing. Keep project edits in this workspace. Use the configured temporary directory for scratch files. Commands requiring unrestricted execution may request user approval. Project changes require user acceptance.\n\n",include_str!("writing-guidance.txt"))});
         let base = config["developerInstructions"].as_str().unwrap_or_default();
         config["developerInstructions"] = json!(format!("{base}\n\nProject instructions (current standing defaults; explicit user requests may override these; replaces any previous project instructions):\n{}", if instructions.trim().is_empty() { "No project instructions configured." } else { &instructions }));
@@ -838,7 +841,7 @@ pub(crate) async fn codex_send_for_chat(
         if !source_settings.sources.is_empty() { crate::source_mcp::remember(&app, &id); }
         { let _guard = app.inner.codex.reviews.lock().map_err(|e|e.to_string())?;
           let mut all = sessions(&app)?;
-          if !all.iter().any(|s|s.id==id) { all.push(Session { project_id:project_id.clone(), id:id.clone(), title:prompt.chars().take(70).collect() }); save_json(&projects::data_dir(&app)?.join("sessions.json"), &all)?; }
+          if !all.iter().any(|s|s.id==id) { all.push(Session { project_id:project_id.clone(), id:id.clone(), title }); save_json(&projects::data_dir(&app)?.join("sessions.json"), &all)?; }
         }
         let _ = app.emit_agent(json!({"method":"prism/session","params":{"projectId":project_id,"threadId":id,"chatId":chat_id,"proposalId":proposal.id}}));
         let mut input = vec![json!({"type":"text","text":prompt})];
@@ -895,7 +898,10 @@ pub(crate) async fn codex_control(
                 .filter(|r| !r.history_prompts.is_empty())
                 .map(|r| r.history_id)
         };
-        let result = c.call("turn/steer",json!({"threadId":thread_id,"expectedTurnId":turn_id,"input":[{"type":"text","text":text}]})).await?;
+        let proposal = crate::proposals::all(&app, &project_id)?.into_iter().find(|p| p.thread_id.as_deref()==Some(&thread_id) && p.turn_id.as_deref()==Some(&turn_id)).ok_or("Turn no longer active")?;
+        let settings = if proposal.source_context.is_null() { crate::data_sources::settings(&app,&project_id,None)? } else { serde_json::from_value(proposal.source_context.clone()).map_err(|e|e.to_string())? };
+        let expanded = crate::source_completion::augment(&settings,&crate::proposals::root(&app,&proposal)?,&text)?;
+        let result = c.call("turn/steer",json!({"threadId":thread_id,"expectedTurnId":turn_id,"input":[{"type":"text","text":expanded}]})).await?;
         crate::proposals::steer(&app, &project_id, &thread_id, &text)?;
         if let Some(history_id) = history_id {
             let _files = app.inner.projects.0.lock().map_err(|e| e.to_string())?;

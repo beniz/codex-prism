@@ -41,6 +41,8 @@ impl Drop for ImportRollback {
 pub(crate) struct Settings {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub pending_imports: Vec<FileImport>,
+    #[serde(default)]
+    pub completion_aliases: BTreeMap<String, String>,
     pub revision: u64,
     #[serde(default)]
     pub file_sources_migrated: bool,
@@ -162,6 +164,12 @@ pub(crate) fn settings(
         )?;
         current.file_sources_migrated = true;
         current.revision += 1;
+        all.insert(id.into(), current.clone());
+        projects::save_json(&path, &all)?;
+    }
+    let old_aliases = current.completion_aliases.clone();
+    crate::source_completion::assign_aliases(&mut current);
+    if current.completion_aliases != old_aliases {
         all.insert(id.into(), current.clone());
         projects::save_json(&path, &all)?;
     }
@@ -342,6 +350,8 @@ pub(crate) fn settings(
             source.path = resolved.to_string_lossy().to_string();
             source.name = source.name.trim().to_owned();
         }
+        next.completion_aliases = current.completion_aliases.clone();
+        crate::source_completion::assign_aliases(&mut next);
         next.file_sources_migrated = true;
         next.revision += 1;
         all.insert(id.into(), next.clone());

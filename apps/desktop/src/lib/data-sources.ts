@@ -1,6 +1,6 @@
 import { invoke } from "@/lib/backend";
 export interface DataSource { id: string; name: string; path: string; kind?: "file" | "directory" | "remoteDirectory"; connectionId?: string }
-export interface ProjectSettings { revision: number; fileSourcesMigrated?: boolean; instructions: string; sources: DataSource[]; connections?: SshConnection[]; pendingImports?: { path: string; destination: string }[] }
+export interface ProjectSettings { revision: number; fileSourcesMigrated?: boolean; completionAliases?: Record<string, string>; instructions: string; sources: DataSource[]; connections?: SshConnection[]; pendingImports?: { path: string; destination: string }[] }
 export interface SourceStatus { id: string; reachable: boolean; error: string | null }
 export const getProjectSettings = (projectId: string) => invoke<ProjectSettings>("project_service", { projectId, operation: "settings_get", args: {} });
 export const saveProjectSettings = (projectId: string, args: ProjectSettings) => invoke<ProjectSettings>("project_service", { projectId, operation: "settings_set", args });

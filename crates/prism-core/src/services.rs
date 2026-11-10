@@ -7,6 +7,12 @@ pub(crate) async fn project_service(
     operation: String,
     args: Value,
 ) -> Result<Value, String> {
+    if ["source_catalogue", "source_browse", "source_reference_check"].contains(&operation.as_str()) {
+        return tokio::time::timeout(
+            std::time::Duration::from_secs(25),
+            crate::source_completion::service(&app, &project_id, &operation, args),
+        ).await.map_err(|_| "Source lookup timed out; retry".to_owned())?;
+    }
     if operation == "settings_get" || operation == "settings_set" {
         let update = if operation == "settings_set" { Some(serde_json::from_value(args).map_err(|e| e.to_string())?) } else { None };
         return tokio::task::spawn_blocking(move || crate::data_sources::settings(&app, &project_id, update).map(|s| json!(s))).await.map_err(|e| e.to_string())?;

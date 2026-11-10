@@ -248,6 +248,27 @@ symlinks. Removed registrations are not rediscovered. Older images elsewhere can
 be registered explicitly. File-source paths stay project-relative and each chat
 reads its own proposal copy.
 
+### Referencing data sources in chat
+
+Type `@` in the composer and press **Tab** to list registered source IDs, or
+start typing an ID to filter suggestions. Select a source, then browse its
+folders with Tab or Enter—for example `@attachments:/paper.pdf` or
+`@research-data:/reports/results.csv`. Paths with spaces are quoted automatically.
+Up/Down selects a suggestion; Escape closes the picker. Enter accepts a visible
+suggestion instead of sending the message.
+
+Completion includes only registered sources. Copied files are grouped by folder
+(`attachments`, `figures`, or `project` for root-level files). Directory sources
+have stable IDs shown in project settings; duplicate names receive suffixes.
+Removing a source retires its ID so old references cannot silently point elsewhere.
+Local and SSH directories are browsed on demand without indexing or model calls.
+Use **Refresh / retry** for changed contents or an unavailable source.
+
+References also work when typed manually and when steering a running chat. They
+resolve against that chat's source configuration and proposal workspace. Invalid
+references keep the draft intact. Selecting a reference does not import files;
+SSH access still uses the existing research/import tools.
+
 ### SSH data sources
 
 In **Project settings → Data sources**, choose **Add SSH connection**, enter an

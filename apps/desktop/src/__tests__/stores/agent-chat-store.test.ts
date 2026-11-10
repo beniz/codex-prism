@@ -3,9 +3,10 @@ import { beforeEach, describe, it, expect, vi } from "vitest";
 import { useAgentChatStore } from "@/stores/agent-chat-store";
 import { useDocumentStore } from "@/stores/document-store";
 import { useSettingsStore } from "@/stores/settings-store";
-import { backend, proposals } from "@/lib/backend";
+import { backend, proposals, invoke } from "@/lib/backend";
 import { compileLatex, loadExistingPdf, resolveCompileTarget } from "@/lib/latex-compiler";
 vi.mock("@/lib/backend", () => ({
+  invoke: vi.fn(async () => ({ valid: true })),
   proposals: { list: vi.fn(async () => []), operate: vi.fn() },
   backend: {
     projects: { register: vi.fn(async () => ({ id: "p1", root: "/paper" })) },
@@ -767,5 +768,45 @@ describe("project model preferences", () => {
     expect(readChatTabs("/legacy")?.selectedModel).toBeUndefined();
     localStorage.setItem("prism-chat-tabs-v1:/legacy", JSON.stringify({ ...saved, selectedModel: 42, effortLevel: null }));
     expect(readChatTabs("/legacy")).toMatchObject({ tabs: saved.tabs, selectedModel: undefined, effortLevel: undefined });
+  });
+});
+
+describe("data-source prompt references", () => {
+  const prompt = "Read @attachments:/paper.pdf";
+  function draft(running = false) {
+    useAgentChatStore.setState(s => ({ tabs: s.tabs.map(t => ({ ...t, draft: prompt, isStreaming: running, sessionId: running ? "thread1" : null, turnId: running ? "turn1" : null })) }));
+  }
+  it("retains an invalid prompt and never starts or steers a turn", async () => {
+    for (const running of [false, true]) {
+      draft(running);
+      vi.mocked(invoke).mockRejectedValueOnce(new Error("File is not registered"));
+      await useAgentChatStore.getState().sendPrompt(prompt);
+      expect(useAgentChatStore.getState().tabs[0].draft).toBe(prompt);
+      expect(useAgentChatStore.getState().error).toContain("not registered");
+    }
+    expect(backend.agent.send).not.toHaveBeenCalled();
+    expect(backend.agent.control).not.toHaveBeenCalled();
+  });
+  it("preserves the original prompt for sending and history, clearing it only after acceptance", async () => {
+    draft();
+    await useAgentChatStore.getState().sendPrompt(prompt);
+    expect(invoke).toHaveBeenCalledWith("project_service", { projectId: "p1", operation: "source_reference_check", args: { chatId: "tab1", prompt } });
+    expect(vi.mocked(backend.agent.send).mock.calls[0][2]).toBe(prompt);
+    expect(vi.mocked(backend.agent.send).mock.calls[0][7]).toBe(prompt);
+    expect(useAgentChatStore.getState().tabs[0].draft).toBe("");
+    draft(true);
+    await useAgentChatStore.getState().sendPrompt(prompt);
+    expect(backend.agent.control).toHaveBeenCalledWith("p1", "thread1", "turn1", prompt);
+    expect(useAgentChatStore.getState().tabs[0].draft).toBe("");
+  });
+  it("does not send to a different chat after an asynchronous check", async () => {
+    draft();
+    vi.mocked(invoke).mockImplementationOnce(async () => {
+      useAgentChatStore.setState({ activeTabId: "other" });
+      return { valid: true } as any;
+    });
+    await useAgentChatStore.getState().sendPrompt(prompt);
+    expect(backend.agent.send).not.toHaveBeenCalled();
+    expect(useAgentChatStore.getState().tabs[0].draft).toBe(prompt);
   });
 });

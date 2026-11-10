@@ -71,6 +71,8 @@ pub(crate) struct Proposal {
     #[serde(default)]
     pub planning: bool,
     #[serde(default)]
+    pub source_context: Value,
+    #[serde(default)]
     planning_conflicts: Vec<String>,
     pub id: String,
     pub project_id: String,
@@ -166,6 +168,7 @@ fn create(
 ) -> Result<Proposal, String> {
     let p = Proposal {
         planning: false,
+        source_context: Value::Null,
         planning_conflicts: vec![],
         id: uuid::Uuid::new_v4().to_string(),
         project_id: project.into(),
@@ -275,6 +278,10 @@ pub(crate) fn begin_for_chat(
     p.conflicts.clear();
     save(app, &p)?;
     Ok(p)
+}
+pub(crate) fn set_source_context(app: &Backend, p: &mut Proposal, context: Value) -> Result<(), String> {
+    p.source_context = context;
+    save(app, p)
 }
 pub(crate) fn set_planning(app: &Backend, p: &mut Proposal, planning: bool) -> Result<(), String> {
     p.planning = planning;

@@ -5,6 +5,8 @@ and detailed release notes are in [docs/releases](docs/releases/README.md).
 
 ## Unreleased
 
+- Add `@source-id:/path` completion in chat for registered files and local/SSH directories, with on-demand browsing, stable source IDs, quoted paths, and reference validation for prompts and steering.
+
 - Unify copied reference files, local directories and SSH directories as project data sources, available during creation and in project settings. Existing attachments are registered once; file sources share a single sidebar availability row.
 
 - Add per-project SSH data sources backed by existing remote Codex servers, with connection tests, availability indicators, remote research/computation, and bounded imports into the owning chat’s proposal. Remote source protection is instruction-based.

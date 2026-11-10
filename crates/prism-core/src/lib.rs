@@ -3,6 +3,7 @@
 mod api;
 mod codex;
 mod data_sources;
+mod source_completion;
 mod remote_sources;
 pub mod source_mcp;
 pub mod discovery;
