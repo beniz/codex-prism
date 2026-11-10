@@ -1,12 +1,5 @@
-import { backend } from "@/lib/backend";
 import { DataSourceEditor } from "@/components/data-source-editor";
-import { getProjectSettings, saveSourcesWithFiles, type ProjectSettings } from "@/lib/data-sources";
-import { useState, useCallback, useEffect, useRef } from "react";
-import { open } from "@/lib/backend/desktop-host";
-import { mkdir, writeTextFile } from "@tauri-apps/plugin-fs";
-import { getCurrentWebview } from "@/lib/backend/desktop-host";
-import { homeDir } from "@tauri-apps/api/path";
-import { toast } from "sonner";
+import { useState, useEffect, useRef } from "react";
 import {
   ArrowLeftIcon,
   FolderOpenIcon,
@@ -18,17 +11,9 @@ import {
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
-import { useProjectStore } from "@/stores/project-store";
-import { useDocumentStore } from "@/stores/document-store";
-import { useAgentChatStore } from "@/stores/agent-chat-store";
-import { exists, join } from "@/lib/tauri/fs";
-import {
-  getTemplateById,
-  getTemplateSkeleton,
-  BIB_TEMPLATE,
-} from "@/lib/template-registry";
+import { getTemplateById } from "@/lib/template-registry";
+import { useProjectCreation } from "@/hooks/use-project-creation";
 import { TemplateGallery } from "@/components/template-gallery";
-import { DEFAULT_AGENTS_MD } from "@/lib/default-agents-md";
 
 import { getProjectNameError, normalizeProjectName } from "@/lib/project-name";
 
@@ -74,179 +59,18 @@ export function ProjectWizard({ mode, onBack }: ProjectWizardProps) {
 // ─── Scratch mode form (no template preview) ───
 
 function ScratchForm({ onBack }: { onBack: () => void }) {
-  const [purpose, setPurpose] = useState("");
-  const [attachments, setAttachments] = useState<string[]>([]);
-  const [sourceSettings, setSourceSettings] = useState<ProjectSettings>({ revision: 0, instructions: "", sources: [], connections: [] });
-  const createdPath = useRef<string | null>(null);
-  const [projectFolder, setProjectFolder] = useState<string | null>(null);
-  const [projectName, setProjectName] = useState("");
-  const [projectNameError, setProjectNameError] = useState("");
-  const [isCreating, setIsCreating] = useState(false);
-  const [isDragOver, setIsDragOver] = useState(false);
+  const template = { ...getTemplateById("blank")!, source: "builtin" as const };
+  const { purpose, setPurpose, attachments, setAttachments, sourceSettings, setSourceSettings,
+    projectFolder, projectName, setProjectName, projectNameError, setProjectNameError,
+    isCreating, isDragOver, handleChooseFolder, handleCreate } = useProjectCreation(template);
   const [locationOpen, setLocationOpen] = useState(false);
-
   const projectNameRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-
-  const addRecentProject = useProjectStore((s) => s.addRecentProject);
-  const lastProjectFolder = useProjectStore((s) => s.lastProjectFolder);
-  const setLastProjectFolder = useProjectStore((s) => s.setLastProjectFolder);
-  const openProject = useDocumentStore((s) => s.openProject);
-
-  const template = getTemplateById("blank")!;
 
   useEffect(() => {
     const timer = setTimeout(() => projectNameRef.current?.focus(), 100);
     return () => clearTimeout(timer);
   }, []);
-
-  useEffect(() => {
-    if (projectFolder) return;
-    if (lastProjectFolder) {
-      setProjectFolder(lastProjectFolder);
-    } else {
-      homeDir()
-        .then((home) => join(home, "Documents", "codex-prism"))
-        .then(async (dir) => {
-          await mkdir(dir, { recursive: true }).catch(() => {});
-          setProjectFolder(dir);
-        })
-        .catch((err) =>
-          console.warn("Failed to resolve default project folder:", err),
-        );
-    }
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const handleChooseFolder = useCallback(async () => {
-    const selected = await open({
-      directory: true,
-      multiple: false,
-      title: "Choose Location for New Project",
-    });
-    if (selected) {
-      setProjectFolder(selected);
-      setLastProjectFolder(selected);
-    }
-  }, [setLastProjectFolder]);
-
-
-  // Drag-drop
-  useEffect(() => {
-    let unlisten: (() => void) | undefined;
-    let cancelled = false;
-
-    getCurrentWebview()
-      .onDragDropEvent((event) => {
-        if (cancelled || isCreating) return;
-        const { type } = event.payload;
-        if (type === "enter") {
-          setIsDragOver(true);
-        } else if (type === "drop") {
-          setIsDragOver(false);
-          const paths = (event.payload as { paths: string[] }).paths;
-          if (paths?.length > 0) {
-            setAttachments((prev) => [
-              ...prev,
-              ...paths.filter((p) => !prev.includes(p)),
-            ]);
-          }
-        } else if (type === "leave") {
-          setIsDragOver(false);
-        }
-      })
-      .then((fn) => {
-        if (cancelled) fn();
-        else unlisten = fn;
-      })
-      .catch(() => {});
-
-    return () => {
-      cancelled = true;
-      unlisten?.();
-    };
-  }, [isCreating]);
-
-  const handleCreate = async () => {
-    const name = normalizeProjectName(projectName);
-    const nameError = getProjectNameError(projectName);
-    if (!template || !projectFolder || nameError) {
-      setProjectNameError(nameError ?? "");
-      return;
-    }
-    setIsCreating(true);
-
-    try {
-      const projectPath = await join(projectFolder, name);
-      if (await exists(projectPath) && createdPath.current !== projectPath) {
-        setProjectNameError("A folder with this name already exists here");
-        return;
-      }
-      await mkdir(projectPath, { recursive: true });
-
-      // Create AGENTS.md for Codex context
-      const agentsMdPath = await join(projectPath, "AGENTS.md");
-      const agentsMdExists = await exists(agentsMdPath);
-      if (!agentsMdExists) {
-        await writeTextFile(agentsMdPath, DEFAULT_AGENTS_MD);
-      }
-
-      const mainTexPath = await join(projectPath, template.mainFileName);
-      const mainExists = await exists(mainTexPath);
-      if (!mainExists) {
-        await writeTextFile(mainTexPath, getTemplateSkeleton(template));
-      }
-
-      if (template.hasBibliography) {
-        const bibPath = await join(projectPath, "references.bib");
-        const bibExists = await exists(bibPath);
-        if (!bibExists) {
-          await writeTextFile(bibPath, BIB_TEMPLATE);
-        }
-      }
-
-      createdPath.current = projectPath;
-      const registered = await backend.projects.register(projectPath);
-      const current = await getProjectSettings(registered.id);
-      const savedSources = await saveSourcesWithFiles(registered.id, projectPath, { ...current, sources: [...current.sources, ...sourceSettings.sources.filter(s => !current.sources.some(c => c.id === s.id))], connections: sourceSettings.connections ?? [] }, attachments);
-      setSourceSettings(savedSources);
-      setAttachments([]);
-
-      if (purpose.trim()) {
-
-
-        const prompt = [
-          `## New ${template.name} Project`,
-          "",
-          `**Template:** \`${template.documentClass}\`  `,
-          `**File:** \`${template.mainFileName}\``,
-          "",
-          `> The file currently contains only the LaTeX preamble (packages, styling, custom commands) with an empty document body.`,
-          "",
-          `### What I want to create`,
-          "",
-          purpose.trim(),
-
-          `### Instructions`,
-          "",
-          `Please generate the full document content based on my description. Keep the existing preamble and fill in the document body (between \`\\begin{document}\` and \`\\end{document}\`) with appropriate title, author, sections, and content. Make it a complete, well-structured **${template.name.toLowerCase()}** ready for me to refine.`,
-        ].join("\n");
-
-        useAgentChatStore.getState().newSession();
-        useAgentChatStore.getState().setPendingInitialPrompt(prompt);
-      }
-
-      setLastProjectFolder(projectFolder);
-      addRecentProject(projectPath);
-      await openProject(projectPath);
-    } catch (err) {
-      console.error("Failed to create project:", err);
-      toast.error("Failed to create project", {
-        description: err instanceof Error ? err.message : String(err),
-      });
-    } finally {
-      setIsCreating(false);
-    }
-  };
 
   const canCreate = Boolean(
     template && projectFolder && !getProjectNameError(projectName),

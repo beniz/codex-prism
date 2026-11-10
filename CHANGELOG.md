@@ -5,6 +5,8 @@ and detailed release notes are in [docs/releases](docs/releases/README.md).
 
 ## Unreleased
 
+- Share project creation across blank, built-in, and private templates; retries preserve existing source and avoid duplicate file imports and chats after a failed open.
+
 ## 1.7.0
 
 - Unify copied reference files, local directories and SSH directories as project data sources, available during creation and in project settings. Existing attachments are registered once; file sources share a single sidebar availability row.

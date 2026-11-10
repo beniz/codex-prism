@@ -1,12 +1,6 @@
+import { useProjectCreation } from "@/hooks/use-project-creation";
 import { DataSourceEditor } from "@/components/data-source-editor";
-import { getProjectSettings, saveSourcesWithFiles, type ProjectSettings } from "@/lib/data-sources";
-import { DEFAULT_AGENTS_MD } from "@/lib/default-agents-md";
 import { useState, useCallback, useEffect, useRef } from "react";
-import { open } from "@/lib/backend/desktop-host";
-import { mkdir, writeTextFile } from "@tauri-apps/plugin-fs";
-import { getCurrentWebview } from "@/lib/backend/desktop-host";
-import { homeDir } from "@tauri-apps/api/path";
-import { toast } from "sonner";
 import {
   ChevronLeftIcon,
   ChevronRightIcon,
@@ -29,15 +23,8 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { useTemplateStore } from "@/stores/template-store";
-import { useProjectStore } from "@/stores/project-store";
-import { useDocumentStore } from "@/stores/document-store";
-import { useAgentChatStore } from "@/stores/agent-chat-store";
-import { backend } from "@/lib/backend";
-import { templateInitialInstructions } from "@/lib/template-catalog";
-import { getTemplateSkeleton, BIB_TEMPLATE } from "@/lib/template-registry";
 import { getTemplatePdfBuffer } from "@/lib/template-preview-cache";
 import { getMupdfClient } from "@/lib/mupdf/mupdf-client";
-import { exists, join } from "@/lib/tauri/fs";
 import type { PageSize } from "@/lib/mupdf/types";
 import { createLogger } from "@/lib/debug/logger";
 
@@ -76,24 +63,12 @@ export function TemplatePreview() {
   const loadGenRef = useRef(0);
 
   // ── Creation form state ──
-  const [purpose, setPurpose] = useState("");
-  const [attachments, setAttachments] = useState<string[]>([]);
-  const [sourceSettings, setSourceSettings] = useState<ProjectSettings>({ revision: 0, instructions: "", sources: [], connections: [] });
-  const createdPath = useRef<string | null>(null);
-  const [projectFolder, setProjectFolder] = useState<string | null>(null);
-  const [projectName, setProjectName] = useState("");
-  const [projectNameError, setProjectNameError] = useState("");
-  const [isCreating, setIsCreating] = useState(false);
-  const [isDragOver, setIsDragOver] = useState(false);
+  const { purpose, setPurpose, attachments, setAttachments, sourceSettings, setSourceSettings,
+    projectFolder, projectName, setProjectName, projectNameError, setProjectNameError,
+    isCreating, isDragOver, handleChooseFolder, handleCreate, resetCreation } = useProjectCreation(template, modalStep === "details");
   const [locationOpen, setLocationOpen] = useState(false);
   const projectNameRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-
-  // ── Store access ──
-  const addRecentProject = useProjectStore((s) => s.addRecentProject);
-  const lastProjectFolder = useProjectStore((s) => s.lastProjectFolder);
-  const setLastProjectFolder = useProjectStore((s) => s.setLastProjectFolder);
-  const openProject = useDocumentStore((s) => s.openProject);
 
   // ── Dialog open/close ──
   const handleOpenChange = useCallback(
@@ -120,33 +95,10 @@ export function TemplatePreview() {
   useEffect(() => {
     if (previewTemplateId) {
       setModalStep("preview");
-      setPurpose("");
-      setAttachments([]);
-      setSourceSettings({ revision: 0, instructions: "", sources: [], connections: [] });
-      createdPath.current = null;
-      setProjectName("");
-      setProjectNameError("");
+      resetCreation();
       setLocationOpen(false);
     }
-  }, [previewTemplateId]);
-
-  // Default project folder
-  useEffect(() => {
-    if (projectFolder) return;
-    if (lastProjectFolder) {
-      setProjectFolder(lastProjectFolder);
-    } else {
-      homeDir()
-        .then((home) => join(home, "Documents", "codex-prism"))
-        .then(async (dir) => {
-          await mkdir(dir, { recursive: true }).catch(() => {});
-          setProjectFolder(dir);
-        })
-        .catch((err) =>
-          console.warn("Failed to resolve default project folder:", err),
-        );
-    }
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [previewTemplateId, resetCreation]);
 
   // Auto-focus textarea in details step
   useEffect(() => {
@@ -309,147 +261,6 @@ export function TemplatePreview() {
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [previewTemplateId, modalStep, goToPrevPage, goToNextPage]);
-
-  // ── Drag-drop for file data sources ──
-  useEffect(() => {
-    if (modalStep !== "details") return;
-    let unlisten: (() => void) | undefined;
-    let cancelled = false;
-
-    getCurrentWebview()
-      .onDragDropEvent((event) => {
-        if (cancelled || isCreating) return;
-        const { type } = event.payload;
-        if (type === "enter") {
-          setIsDragOver(true);
-        } else if (type === "drop") {
-          setIsDragOver(false);
-          const paths = (event.payload as { paths: string[] }).paths;
-          if (paths?.length > 0) {
-            setAttachments((prev) => [
-              ...prev,
-              ...paths.filter((p) => !prev.includes(p)),
-            ]);
-          }
-        } else if (type === "leave") {
-          setIsDragOver(false);
-        }
-      })
-      .then((fn) => {
-        if (cancelled) fn();
-        else unlisten = fn;
-      })
-      .catch(() => {});
-
-    return () => {
-      cancelled = true;
-      unlisten?.();
-    };
-  }, [modalStep, isCreating]);
-
-  // ── File handlers ──
-
-  const handleChooseFolder = useCallback(async () => {
-    const selected = await open({
-      directory: true,
-      multiple: false,
-      title: "Choose Location for New Project",
-    });
-    if (selected) {
-      setProjectFolder(selected);
-      setLastProjectFolder(selected);
-    }
-  }, [setLastProjectFolder]);
-
-  // ── Create project ──
-  const handleCreate = async () => {
-    const name = normalizeProjectName(projectName);
-    const nameError = getProjectNameError(projectName);
-    if (!template || !projectFolder || nameError) {
-      setProjectNameError(nameError ?? "");
-      return;
-    }
-    setIsCreating(true);
-
-    try {
-      const projectPath = await join(projectFolder, name);
-      if (await exists(projectPath) && createdPath.current !== projectPath) {
-        setProjectNameError("A folder with this name already exists here");
-        return;
-      }
-      if (createdPath.current !== projectPath) {
-      if (template.source === "private") {
-        await backend.templates.createProject(
-          template.id,
-          template.revision,
-          projectPath,
-        );
-      } else {
-        await mkdir(projectPath, { recursive: true });
-        await writeTextFile(
-          await join(projectPath, template.mainFileName),
-          getTemplateSkeleton(template),
-        );
-        if (template.hasBibliography) {
-          await writeTextFile(
-            await join(projectPath, "references.bib"),
-            BIB_TEMPLATE,
-          );
-        }
-      }
-      createdPath.current = projectPath;
-      }
-      const agentsPath = await join(projectPath, "AGENTS.md");
-      if (!(await exists(agentsPath)))
-        await writeTextFile(agentsPath, DEFAULT_AGENTS_MD);
-
-      createdPath.current = projectPath;
-      const registered = await backend.projects.register(projectPath);
-      const current = await getProjectSettings(registered.id);
-      const savedSources = await saveSourcesWithFiles(registered.id, projectPath, { ...current, sources: [...current.sources, ...sourceSettings.sources.filter(s => !current.sources.some(c => c.id === s.id))], connections: sourceSettings.connections ?? [] }, attachments);
-      setSourceSettings(savedSources);
-      setAttachments([]);
-
-      if (purpose.trim()) {
-
-        const guidance = templateInitialInstructions(template);
-
-        const prompt = [
-          `## New ${template.name} Project`,
-          "",
-          `**Template:** \`${template.documentClass}\`  `,
-          `**File:** \`${template.mainFileName}\``,
-          "",
-          guidance.context,
-          "",
-          `### What I want to create`,
-          "",
-          purpose.trim(),
-
-          `### Instructions`,
-          "",
-          guidance.instructions,
-        ].join("\n");
-
-        useAgentChatStore.getState().newSession();
-        useAgentChatStore.getState().setPendingInitialPrompt(prompt);
-      }
-
-      setLastProjectFolder(projectFolder);
-      addRecentProject(projectPath);
-      await openProject(projectPath, template.mainFileName);
-
-      // Close modal on success
-      closePreview();
-    } catch (err) {
-      console.error("Failed to create project:", err);
-      toast.error("Failed to create project", {
-        description: err instanceof Error ? err.message : String(err),
-      });
-    } finally {
-      setIsCreating(false);
-    }
-  };
 
   const canCreate = Boolean(
     template && projectFolder && !getProjectNameError(projectName),
@@ -709,7 +520,7 @@ export function TemplatePreview() {
                 className="w-full gap-2 rounded-xl font-semibold shadow-sm transition-all hover:shadow-md active:scale-[0.99]"
                 size="lg"
                 disabled={!canCreate || isCreating}
-                onClick={handleCreate}
+                onClick={async () => { if (await handleCreate()) closePreview(); }}
               >
                 {isCreating ? (
                   <>
