@@ -60,7 +60,7 @@ Manual macOS artifacts are named `codex-prism-macos-arm64`; Windows artifacts ar
 
 ## Local Linux packaging
 
-Build on Ubuntu 26.04 x86_64. Install the dependencies listed in the root README plus `patchelf`, `librsvg2-bin`, `file`, `curl`, `wget`, `xdg-utils`, `libpng-dev`, `zlib1g-dev`, and `squashfs-tools`. Install Node 22 with Corepack and Rust 1.88.0.
+Build on Ubuntu 26.04 x86_64. Install the [development dependencies](../../README_AGENTS.md#build-from-source) plus `patchelf`, `librsvg2-bin`, `file`, `curl`, `wget`, `xdg-utils`, `libpng-dev`, `zlib1g-dev`, and `squashfs-tools`. Install Node 22 with Corepack and Rust 1.88.0.
 
 ```sh
 corepack pnpm install --frozen-lockfile

@@ -5,6 +5,8 @@ and detailed release notes are in [docs/releases](docs/releases/README.md).
 
 ## Unreleased
 
+- Simplify the README's platform quickstart and highlight parallel writing, Git history, private templates, and data sources; move detailed setup and operational documentation into `README_AGENTS.md`.
+
 - Return chats with completed, unchanged turns to the latest main-document PDF instead of retaining an empty proposal with an older preview. Recover existing empty proposals on restart while preserving pending edits and repairs.
 
 - Move Capture & Ask to Ctrl+Shift+X (Cmd+Shift+X on macOS), restoring the standard cut shortcut in the chat composer and other text fields.

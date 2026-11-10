@@ -22,7 +22,7 @@ shared writing guidance lives in `crates/prism-core/src/writing-guidance.txt`.
 
 Run from the repository root unless noted. Use Node 22+, the pinned pnpm version
 from `package.json`, and the Rust toolchain in `rust-toolchain.toml`. Linux desktop
-builds require Tauri/WebKit/GTK libraries listed in the README.
+builds require the [Tauri/WebKit/GTK libraries in README_AGENTS.md](README_AGENTS.md#build-from-source).
 
 ```sh
 corepack pnpm install --frozen-lockfile
@@ -81,6 +81,9 @@ In this checkout, the GitHub remote is named `github`.
 - Verify platform jobs, package checks, notes, asset set, checksums, and source provenance before publishing. Do not move a published tag or overwrite published assets.
 - Commit, push, merge, and release within the user's requested scope. A request to commit alone does not imply pushing or publishing.
 
-See `README.md`, `CONTRIBUTING.md`, and `docs/releases/windows.md` for setup and
-platform details. Historical release notes describe behavior at that release;
+See `README.md` for the user guide and [README_AGENTS.md](README_AGENTS.md) for
+detailed setup, workflows, architecture, and verification. This `AGENTS.md`
+remains the repository's working instructions. `CONTRIBUTING.md` and
+`docs/releases/windows.md` cover contributions and platform details.
+Historical release notes describe behavior at that release;
 current code and the invariants above govern new changes.
