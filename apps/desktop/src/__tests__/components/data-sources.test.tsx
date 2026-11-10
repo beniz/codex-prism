@@ -22,3 +22,23 @@ it("shows both reachable and unavailable sources with explanations and settings 
     expect(openSourceSettings).toHaveBeenCalledWith("p");
   } finally { await act(async () => root.unmount()); host.remove(); }
 });
+
+it("groups file sources into one row and reports partial availability", async () => {
+  const { getProjectSettings, getSourceStatus } = await import("@/lib/data-sources");
+  vi.mocked(getProjectSettings).mockResolvedValueOnce({ revision: 1, instructions: "", sources: [
+    { id: "a", name: "Paper", kind: "file", path: "attachments/paper.pdf" },
+    { id: "b", name: "Missing paper", kind: "file", path: "attachments/missing.pdf" },
+  ] });
+  vi.mocked(getSourceStatus).mockResolvedValueOnce([{ id: "a", reachable: true, error: null }, { id: "b", reachable: false, error: "Missing" }]);
+  const host = document.createElement("div"); document.body.append(host);
+  const root = createRoot(host);
+  try {
+    await act(async () => root.render(<DataSources projectId="files" />));
+    const row = [...host.querySelectorAll("button")].find(b => b.textContent === "Files · 2")!;
+    expect(row.title).toBe("1 of 2 files available");
+    expect(row.querySelector("span")!.className).toContain("bg-amber-500");
+    expect(host.textContent).not.toContain("Missing paper");
+    await act(async () => row.click());
+    expect(openSourceSettings).toHaveBeenCalledWith("files");
+  } finally { await act(async () => root.unmount()); host.remove(); }
+});

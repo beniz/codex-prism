@@ -33,7 +33,15 @@ export function DataSources({ projectId }: { projectId: string }) {
       </button>
     </div>
     <div className="space-y-0.5 px-1 pb-1.5">
-    {sources.map(source => {
+    {sources.some(s => s.kind === "file") && (() => {
+      const files = sources.filter(s => s.kind === "file");
+      const checks = files.map(f => statuses.find(s => s.id === f.id));
+      const ready = checks.filter(s => s?.reachable).length;
+      const checked = checks.every(Boolean);
+      const color = error ? "bg-red-500" : !checked ? "bg-muted-foreground" : ready === files.length ? "bg-green-500" : ready ? "bg-amber-500" : "bg-red-500";
+      return <button className="flex w-full items-center gap-2 rounded p-1 text-left hover:bg-sidebar-accent" onClick={() => openSourceSettings(projectId)} title={error ?? (checked ? `${ready} of ${files.length} files available` : "Checking files…")}><span className={`size-1.5 shrink-0 rounded-full ${color}`} />Files · {files.length}</button>;
+    })()}
+    {sources.filter(source => source.kind !== "file").map(source => {
       const status = statuses.find(s => s.id === source.id);
       const explanation = error ?? (status ? status.reachable ? source.connectionId ? "Remote server and directory are reachable" : "Directory is reachable" : status.error : "Checking directory…");
       return <button key={source.id} className="flex w-full items-center gap-2 rounded p-1 text-left hover:bg-sidebar-accent" onClick={() => openSourceSettings(projectId)} title={`${source.path}\n${explanation}`} aria-label={`${source.name}: ${explanation}`}>

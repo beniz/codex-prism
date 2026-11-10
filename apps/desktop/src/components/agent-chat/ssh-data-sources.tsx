@@ -1,9 +1,9 @@
-import { useState, type Dispatch, type SetStateAction } from "react";
+import { useState, type ReactNode, type Dispatch, type SetStateAction } from "react";
 import { Button } from "@/components/ui/button";
 import { testRemoteSource, type ProjectSettings, type SshConnection } from "@/lib/data-sources";
 
-export function SshDataSources({ projectId, settings, setSettings, disabled, onAddDirectory }: {
-  projectId: string; settings: ProjectSettings; setSettings: Dispatch<SetStateAction<ProjectSettings>>; disabled: boolean; onAddDirectory?: () => void;
+export function SshDataSources({ projectId, settings, setSettings, disabled, onAddDirectory, fileAction }: {
+  projectId: string; settings: ProjectSettings; setSettings: Dispatch<SetStateAction<ProjectSettings>>; disabled: boolean; onAddDirectory?: () => void; fileAction?: ReactNode;
 }) {
   const [tests, setTests] = useState<Record<string, { fingerprint: string; message: string }>>({});
   const [testing, setTesting] = useState<string | null>(null);
@@ -20,6 +20,7 @@ export function SshDataSources({ projectId, settings, setSettings, disabled, onA
   }
   return <div className="space-y-3">
     <div className="flex flex-wrap items-center gap-2">
+    {fileAction}
     {onAddDirectory && <Button variant="outline" disabled={disabled} onClick={onAddDirectory}>Add directory</Button>}
     <Button variant="outline" disabled={disabled} onClick={() => setSettings(old => ({ ...old, connections: [...old.connections ?? [], { id: crypto.randomUUID(), name: "Remote research", host: "", executable: "", socket: "", port: null, tokenFile: "" }] }))}>Add SSH connection</Button>
     </div>

@@ -1027,6 +1027,7 @@ mod tests {
             name: "Temporary fixture".into(),
             path: source_path.clone(),
             connection_id: Some(profile.id.clone()),
+            kind: "remoteDirectory".into(),
         };
         let (_cancel, receiver) = watch::channel(false);
         let scope = Scope {

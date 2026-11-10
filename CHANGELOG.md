@@ -5,6 +5,8 @@ and detailed release notes are in [docs/releases](docs/releases/README.md).
 
 ## Unreleased
 
+- Unify copied reference files, local directories and SSH directories as project data sources, available during creation and in project settings. Existing attachments are registered once; file sources share a single sidebar availability row.
+
 - Add per-project SSH data sources backed by existing remote Codex servers, with connection tests, availability indicators, remote research/computation, and bounded imports into the owning chat’s proposal. Remote source protection is instruction-based.
 
 - Configure local read-only data-source directories in project settings, view their availability in the sidebar, and share their paths with all project chats from the next turn.

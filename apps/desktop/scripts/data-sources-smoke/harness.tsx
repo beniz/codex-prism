@@ -1,18 +1,28 @@
+import { useState } from "react";
+import { DataSourceEditor } from "../../src/components/data-source-editor";
+import { saveSourcesWithFiles } from "../../src/lib/data-sources";
 import { createRoot } from "react-dom/client";
 import "../../src/styles/globals.css";
 import type { ProjectSettings } from "../../src/lib/data-sources";
 let settings: ProjectSettings = { revision: 0, instructions: "", sources: [] };
 (window as any).__TAURI_INTERNALS__ = { invoke: async (command: string, args: any) => {
+  if (command === "plugin:dialog|open") return args.options?.directory ? ["/local/research"] : ["/external/paper.txt"];
   if (command !== "project_service") return [];
   if (args.operation === "settings_get") return structuredClone(settings);
-  if (args.operation === "settings_set") { settings = { ...args.args, revision: settings.revision + 1 }; return structuredClone(settings); }
+  if (args.operation === "settings_set") { settings = { ...args.args, sources: [...args.args.sources, ...(args.args.pendingImports ?? []).map((f: any) => ({ id: crypto.randomUUID(), name: "paper.txt", kind: "file", path: f.destination }))], pendingImports: [], revision: settings.revision + 1 }; return structuredClone(settings); }
   if (args.operation === "source_test") return { reachable: true };
   if (args.operation === "sources_status") return settings.sources.map(s => ({ id: s.id, reachable: true, error: null }));
   throw new Error(`Unexpected operation ${args.operation}`);
 } };
 const { ProjectInstructions } = await import("../../src/components/agent-chat/project-instructions");
 const { DataSources } = await import("../../src/components/data-sources");
-createRoot(document.getElementById("root")!).render(<main className="w-80"><ProjectInstructions projectId="fixture" projectName="Research" /><DataSources projectId="fixture" /></main>);
+function Harness() {
+  const [created, setCreated] = useState(false);
+  const [draft, setDraft] = useState<ProjectSettings>({ revision: 0, instructions: "", sources: [] });
+  const [files, setFiles] = useState<string[]>([]);
+  return created ? <main className="w-80"><ProjectInstructions projectId="fixture" projectName="Research" /><DataSources projectId="fixture" /></main> : <main><DataSourceEditor settings={draft} setSettings={setDraft} files={files} setFiles={setFiles} /><button onClick={() => void saveSourcesWithFiles("fixture", "/project", draft, files).then(() => setCreated(true))}>Create project</button></main>;
+}
+createRoot(document.getElementById("root")!).render(<Harness />);
 const pause = () => new Promise(resolve => setTimeout(resolve, 100));
 async function waitFor(test: () => boolean) { for (let n = 0; n < 100; n++) { if (test()) return; await pause(); } throw new Error("UI condition timed out"); }
 async function click(label: string) { await waitFor(() => { try { return !button(label).disabled; } catch { return false; } }); button(label).click(); await pause(); }
@@ -24,7 +34,9 @@ async function edit(label: string, value: string) {
   input.dispatchEvent(new Event("input", { bubbles: true })); await pause();
 }
 (window as any).runSmoke = async () => {
-  await pause(); document.querySelector<HTMLButtonElement>('[aria-label="Project settings"]')!.click(); await pause();
+  await pause(); await click("Add files"); await click("Add directory"); await click("Create project");
+  await waitFor(() => document.body.innerText.includes("Files · 1"));
+  document.querySelector<HTMLButtonElement>('[aria-label="Project settings"]')!.click(); await pause();
   await click("Add SSH connection");
   await edit("SSH host", "fixture-host");
   await click("Add remote directory"); await edit("Remote directory", "/research/data");
@@ -36,6 +48,6 @@ async function edit(label: string, value: string) {
   source.click(); await pause();
   if (document.querySelector<HTMLInputElement>('[aria-label="SSH host"]')?.value !== "fixture-host") throw new Error("Connection was not retained");
   await click("Remove connection"); await click("Save");
-  if (settings.sources.length || settings.connections?.length) throw new Error("Connection removal left stale sources");
-  return { ok: true, checks: ["project settings", "SSH connection and directory", "test feedback", "sidebar availability", "reopen", "remove"] };
+  if (settings.sources.length !== 2 || settings.connections?.length) throw new Error("Connection removal left stale sources");
+  return { ok: true, checks: ["creation editor", "file import", "grouped file availability", "project settings", "SSH connection and directory", "test feedback", "sidebar availability", "reopen", "remove"] };
 };

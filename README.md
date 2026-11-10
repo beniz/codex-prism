@@ -225,6 +225,29 @@ See [CONTRIBUTING.md](./CONTRIBUTING.md) for development guidelines and verifica
 
 This project is a fork of [ClaudePrism](https://github.com/delibae/claude-prism) by delibae, adapted to use Codex as its AI backend. ClaudePrism started from [Open Prism](https://github.com/assistant-ui/open-prism) by [assistant-ui](https://github.com/assistant-ui).
 
+### Project data sources
+
+Project creation and **Project settings → Data sources** offer **Add files**,
+**Add directory**, and **Add SSH connection**. Sources are optional and are saved
+even when you create a project without an initial writing prompt. Every chat
+receives the current source manifest on its next turn.
+
+Files are copied when you save: documents go into `attachments/`, and images use
+an existing image folder or `prism-uploads/`. Selecting an existing project file
+registers it without copying it again. Originals are not synchronized. Local
+and SSH directories remain external. Agents consult sources on demand; adding a
+source does not automatically insert content or citations into your document.
+
+The sidebar groups file sources into **Files · N** with an availability indicator;
+click it to manage individual files in settings. Removing a registration keeps
+the project file. Delete files separately through the Files navigator. Adding
+files is disabled while running work or pending proposals lock the document.
+
+Existing files under `attachments/` are registered once, without following
+symlinks. Removed registrations are not rediscovered. Older images elsewhere can
+be registered explicitly. File-source paths stay project-relative and each chat
+reads its own proposal copy.
+
 ### SSH data sources
 
 In **Project settings → Data sources**, choose **Add SSH connection**, enter an

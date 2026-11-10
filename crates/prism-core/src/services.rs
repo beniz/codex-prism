@@ -9,14 +9,23 @@ pub(crate) async fn project_service(
 ) -> Result<Value, String> {
     if operation == "settings_get" || operation == "settings_set" {
         let update = if operation == "settings_set" { Some(serde_json::from_value(args).map_err(|e| e.to_string())?) } else { None };
-        return Ok(json!(crate::data_sources::settings(&app, &project_id, update)?));
+        return tokio::task::spawn_blocking(move || crate::data_sources::settings(&app, &project_id, update).map(|s| json!(s))).await.map_err(|e| e.to_string())?;
     }
     if operation == "sources_status" {
-        let settings = crate::data_sources::settings(&app, &project_id, None)?;
+        let mut settings = crate::data_sources::settings(&app, &project_id, None)?;
+        let root = projects::get(&app, &project_id)?.root;
+        for source in &mut settings.sources { if source.kind == "file" { source.path = projects::resolve(&root, &source.path)?.to_string_lossy().into(); } }
         return Ok(json!(crate::data_sources::status(settings.sources, &settings.connections).await));
     }
+    if operation == "source_probe" {
+        let path = args["path"].as_str().ok_or("Missing directory path")?;
+        if !std::path::Path::new(path).is_absolute() { return Err("Directory path must be absolute".into()); }
+        let result = crate::data_sources::status(vec![crate::data_sources::Source { id:uuid::Uuid::new_v4().to_string(), name:"Draft directory".into(), path:path.into(), kind:"directory".into(), connection_id:None }], &[]).await;
+        if result[0]["reachable"] != true { return Err(result[0]["error"].as_str().unwrap_or("Directory unavailable").into()); }
+        return Ok(json!({"reachable":true}));
+    }
     if operation == "source_test" {
-        projects::get(&app, &project_id)?;
+        if !project_id.is_empty() { projects::get(&app, &project_id)?; }
         let connection = serde_json::from_value(args["connection"].clone()).map_err(|e| e.to_string())?;
         let path = args["path"].as_str().ok_or("Missing remote path")?;
         if !crate::remote_sources::unix_path(path) { return Err("Remote path must be absolute".into()); }

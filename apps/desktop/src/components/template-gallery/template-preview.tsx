@@ -1,3 +1,5 @@
+import { DataSourceEditor } from "@/components/data-source-editor";
+import { getProjectSettings, saveSourcesWithFiles, type ProjectSettings } from "@/lib/data-sources";
 import { DEFAULT_AGENTS_MD } from "@/lib/default-agents-md";
 import { useState, useCallback, useEffect, useRef } from "react";
 import { open } from "@/lib/backend/desktop-host";
@@ -12,11 +14,7 @@ import {
   LoaderIcon,
   ArrowLeftIcon,
   FolderOpenIcon,
-  PaperclipIcon,
-  XIcon,
-  UploadIcon,
   ChevronDownIcon,
-  FileTextIcon,
   MapPinIcon,
   Loader2Icon,
 } from "lucide-react";
@@ -42,10 +40,7 @@ import { getMupdfClient } from "@/lib/mupdf/mupdf-client";
 import { exists, join } from "@/lib/tauri/fs";
 import type { PageSize } from "@/lib/mupdf/types";
 import { createLogger } from "@/lib/debug/logger";
-import {
-  buildReferenceFilesSection,
-  importReferenceFiles,
-} from "@/lib/project-attachments";
+
 import { getProjectNameError, normalizeProjectName } from "@/lib/project-name";
 
 const log = createLogger("template-preview");
@@ -83,12 +78,13 @@ export function TemplatePreview() {
   // ── Creation form state ──
   const [purpose, setPurpose] = useState("");
   const [attachments, setAttachments] = useState<string[]>([]);
+  const [sourceSettings, setSourceSettings] = useState<ProjectSettings>({ revision: 0, instructions: "", sources: [], connections: [] });
+  const createdPath = useRef<string | null>(null);
   const [projectFolder, setProjectFolder] = useState<string | null>(null);
   const [projectName, setProjectName] = useState("");
   const [projectNameError, setProjectNameError] = useState("");
   const [isCreating, setIsCreating] = useState(false);
   const [isDragOver, setIsDragOver] = useState(false);
-  const [refFilesOpen, setRefFilesOpen] = useState(false);
   const [locationOpen, setLocationOpen] = useState(false);
   const projectNameRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -126,9 +122,10 @@ export function TemplatePreview() {
       setModalStep("preview");
       setPurpose("");
       setAttachments([]);
+      setSourceSettings({ revision: 0, instructions: "", sources: [], connections: [] });
+      createdPath.current = null;
       setProjectName("");
       setProjectNameError("");
-      setRefFilesOpen(false);
       setLocationOpen(false);
     }
   }, [previewTemplateId]);
@@ -313,7 +310,7 @@ export function TemplatePreview() {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [previewTemplateId, modalStep, goToPrevPage, goToNextPage]);
 
-  // ── Drag-drop for reference files ──
+  // ── Drag-drop for file data sources ──
   useEffect(() => {
     if (modalStep !== "details") return;
     let unlisten: (() => void) | undefined;
@@ -321,11 +318,10 @@ export function TemplatePreview() {
 
     getCurrentWebview()
       .onDragDropEvent((event) => {
-        if (cancelled) return;
+        if (cancelled || isCreating) return;
         const { type } = event.payload;
         if (type === "enter") {
           setIsDragOver(true);
-          setRefFilesOpen(true);
         } else if (type === "drop") {
           setIsDragOver(false);
           const paths = (event.payload as { paths: string[] }).paths;
@@ -349,26 +345,9 @@ export function TemplatePreview() {
       cancelled = true;
       unlisten?.();
     };
-  }, [modalStep]);
+  }, [modalStep, isCreating]);
 
   // ── File handlers ──
-  const handleAddAttachments = useCallback(async () => {
-    const selected = await open({
-      multiple: true,
-      title: "Add Reference Files",
-    });
-    if (selected) {
-      const paths = Array.isArray(selected) ? selected : [selected];
-      setAttachments((prev) => [
-        ...prev,
-        ...paths.filter((p) => !prev.includes(p)),
-      ]);
-    }
-  }, []);
-
-  const handleRemoveAttachment = (path: string) => {
-    setAttachments((prev) => prev.filter((p) => p !== path));
-  };
 
   const handleChooseFolder = useCallback(async () => {
     const selected = await open({
@@ -394,10 +373,11 @@ export function TemplatePreview() {
 
     try {
       const projectPath = await join(projectFolder, name);
-      if (await exists(projectPath)) {
+      if (await exists(projectPath) && createdPath.current !== projectPath) {
         setProjectNameError("A folder with this name already exists here");
         return;
       }
+      if (createdPath.current !== projectPath) {
       if (template.source === "private") {
         await backend.templates.createProject(
           template.id,
@@ -417,17 +397,21 @@ export function TemplatePreview() {
           );
         }
       }
+      createdPath.current = projectPath;
+      }
       const agentsPath = await join(projectPath, "AGENTS.md");
       if (!(await exists(agentsPath)))
         await writeTextFile(agentsPath, DEFAULT_AGENTS_MD);
 
-      const referenceFiles =
-        attachments.length > 0
-          ? await importReferenceFiles(projectPath, attachments)
-          : [];
+      createdPath.current = projectPath;
+      const registered = await backend.projects.register(projectPath);
+      const current = await getProjectSettings(registered.id);
+      const savedSources = await saveSourcesWithFiles(registered.id, projectPath, { ...current, sources: [...current.sources, ...sourceSettings.sources.filter(s => !current.sources.some(c => c.id === s.id))], connections: sourceSettings.connections ?? [] }, attachments);
+      setSourceSettings(savedSources);
+      setAttachments([]);
 
       if (purpose.trim()) {
-        const attachmentSection = buildReferenceFilesSection(referenceFiles);
+
         const guidance = templateInitialInstructions(template);
 
         const prompt = [
@@ -441,7 +425,7 @@ export function TemplatePreview() {
           `### What I want to create`,
           "",
           purpose.trim(),
-          attachmentSection,
+
           `### Instructions`,
           "",
           guidance.instructions,
@@ -664,88 +648,13 @@ export function TemplatePreview() {
 
                 {/* Collapsible sections */}
                 <div className="divide-y divide-border/40 overflow-hidden rounded-xl border border-border/60 bg-card/30">
-                  {/* Reference files */}
-                  <div>
-                    <button
-                      onClick={() => setRefFilesOpen(!refFilesOpen)}
-                      className="flex w-full items-center gap-3 px-4 py-2.5 text-left transition-colors hover:bg-muted/30"
-                    >
-                      <div className="flex size-6 shrink-0 items-center justify-center rounded-md bg-muted/50">
-                        <FileTextIcon className="size-3 text-muted-foreground" />
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <span className="font-medium text-sm">
-                          Reference files
-                        </span>
-                        {attachments.length > 0 && (
-                          <span className="ml-2 inline-flex items-center justify-center rounded-full bg-primary/15 px-1.5 py-0.5 font-semibold text-[10px] text-primary leading-none">
-                            {attachments.length}
-                          </span>
-                        )}
-                      </div>
-                      <ChevronDownIcon
-                        className={`size-4 text-muted-foreground/60 transition-transform duration-200 ${refFilesOpen ? "rotate-180" : ""}`}
-                      />
-                    </button>
-                    {refFilesOpen && (
-                      <div className="space-y-2.5 px-4 pb-3">
-                        {attachments.length > 0 && (
-                          <div className="flex flex-wrap gap-1.5">
-                            {attachments.map((path) => (
-                              <div
-                                key={path}
-                                className="flex items-center gap-1.5 rounded-lg border border-border/50 bg-muted/40 py-1 pr-1.5 pl-2.5 text-xs transition-colors hover:bg-muted/60"
-                              >
-                                <PaperclipIcon className="size-3 shrink-0 text-muted-foreground/70" />
-                                <span className="max-w-30 truncate text-foreground/80">
-                                  {path.split(/[/\\]/).pop()}
-                                </span>
-                                <button
-                                  onClick={() => handleRemoveAttachment(path)}
-                                  className="flex size-4 shrink-0 items-center justify-center rounded-md text-muted-foreground/50 transition-colors hover:bg-destructive/10 hover:text-destructive"
-                                >
-                                  <XIcon className="size-3" />
-                                </button>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                        <div
-                          className={`flex flex-col items-center gap-1.5 rounded-lg border border-dashed p-3 transition-all ${
-                            isDragOver
-                              ? "border-primary bg-primary/5"
-                              : "border-border/60 hover:border-border hover:bg-muted/20"
-                          }`}
-                        >
-                          {isDragOver ? (
-                            <>
-                              <UploadIcon className="size-4 text-primary" />
-                              <span className="font-medium text-primary text-xs">
-                                Drop to add
-                              </span>
-                            </>
-                          ) : (
-                            <>
-                              <UploadIcon className="size-4 text-muted-foreground/40" />
-                              <div className="text-center">
-                                <span className="text-muted-foreground/70 text-xs">
-                                  Drag & drop or{" "}
-                                </span>
-                                <button
-                                  onClick={handleAddAttachments}
-                                  className="font-medium text-foreground/70 text-xs underline decoration-border underline-offset-2 transition-colors hover:text-foreground"
-                                >
-                                  browse files
-                                </button>
-                              </div>
-                            </>
-                          )}
-                        </div>
-                      </div>
-                    )}
-                  </div>
+            <section className="space-y-2 p-4" aria-label="Data sources">
+              <h3 className="text-sm font-medium">Data sources</h3>
+              <DataSourceEditor settings={sourceSettings} setSettings={setSourceSettings} files={attachments} setFiles={setAttachments} disabled={isCreating} />
+              {isDragOver && <p className="text-xs">Drop files to add data sources</p>}
+            </section>
 
-                  {/* Project location */}
+            {/* Project location */}
                   <div>
                     <button
                       onClick={() => setLocationOpen(!locationOpen)}

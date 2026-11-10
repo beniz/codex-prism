@@ -1,3 +1,4 @@
+import { saveSourcesWithFiles } from "@/lib/data-sources";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
@@ -20,6 +21,7 @@ vi.mock("@/lib/template-preview-cache", () => ({
   isThumbnailFailed: () => true,
   generateThumbnail: vi.fn(async () => null),
 }));
+vi.mock("@/lib/data-sources", () => ({ getProjectSettings: vi.fn(async () => ({ revision: 1, instructions: "", sources: [] })), saveSourcesWithFiles: vi.fn(async (_id, _root, settings) => settings) }));
 vi.mock("@/lib/mupdf/mupdf-client", () => ({ getMupdfClient: vi.fn() }));
 
 const library: TemplateLibrary = {
@@ -45,6 +47,7 @@ beforeEach(() => {
   (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
   vi.restoreAllMocks();
   vi.clearAllMocks();
+  vi.spyOn(backend.projects, "register").mockResolvedValue({ id: "new-project", root: "/work/new-paper", name: "New paper" } as any);
   useTemplateStore.getState().reset();
   useProjectStore.setState({ lastProjectFolder: "/work" });
   vi.mocked(getTemplatePdfBuffer).mockRejectedValue(
@@ -137,13 +140,22 @@ it.each([
     if (!customInstructions)
       fill(document.querySelector("textarea")!, "Write about proteins");
   });
+  if (customInstructions) {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.mocked(saveSourcesWithFiles).mockRejectedValueOnce(new Error("Source unavailable"));
+    await act(async () => button("Create Project").click());
+    expect(open).not.toHaveBeenCalled();
+    expect(session).not.toHaveBeenCalled();
+  }
   await act(async () =>
     button(
       customInstructions ? "Create Project" : "Create & Generate with AI",
     ).click(),
   );
+  expect(create).toHaveBeenCalledTimes(1);
   expect(create).toHaveBeenCalledWith(item.id, "one", "/work/new-paper");
   expect(mkdir).not.toHaveBeenCalled();
+  expect(saveSourcesWithFiles).toHaveBeenCalledWith("new-project", "/work/new-paper", expect.objectContaining({ revision: 1 }), []);
   expect(open).toHaveBeenCalledWith("/work/new-paper", "document/paper.tex");
   if (customInstructions) {
     expect(writeTextFile).not.toHaveBeenCalled();
