@@ -312,7 +312,13 @@ pub(crate) fn finish(app: &Backend, id: &str, interrupted: bool) -> Result<(), S
     };
     p.generation += 1;
     review_storage::save(&snapshot_path(app, &p)?, &r)?;
-    p.state = if p.planning && r.before == r.after && p.parent.is_none() {
+    // A successful question-only turn has nothing to review. Keeping its old
+    // workspace pending would pin this chat's PDF to an obsolete main revision.
+    // Compare cumulative changes, so follow-ups still retain earlier edits.
+    p.state = if r.before == r.after
+        && p.parent.is_none()
+        && (p.planning || (!interrupted && !p.cancel_requested))
+    {
         "discarded"
     } else if p.planning && previous_after == r.after && !p.planning_conflicts.is_empty() {
         p.conflicts = p.planning_conflicts.clone();
@@ -324,6 +330,7 @@ pub(crate) fn finish(app: &Backend, id: &str, interrupted: bool) -> Result<(), S
     }
     .into();
     save(app, &p)?;
+    cleanup_resolved(app, &p);
     app.emit_review(json!({"projectId":p.project_id}))
 }
 pub(crate) fn finish_thread(
@@ -747,7 +754,24 @@ fn recover_inner(app: &Backend, finish_runs: bool) {
                 }
             }
         } else if finish_runs {
-            let _ = finish(app, &p.id, true);
+            if p.state == "ready" && p.parent.is_none() {
+                // Upgrade older versions that left completed, unchanged turns
+                // pending. Keep repairs and any unrecorded workspace edits.
+                let _ = (|| -> Result<(), String> {
+                    let r = snapshot(app, &p)?;
+                    if r.before == r.after
+                        && projects::isolated_snapshot(&root(app, &p)?)? == r.after
+                    {
+                        let mut p = p.clone();
+                        p.state = "discarded".into();
+                        save(app, &p)?;
+                        cleanup_resolved(app, &p);
+                    }
+                    Ok(())
+                })();
+            } else {
+                let _ = finish(app, &p.id, true);
+            }
         }
     }
 }
@@ -820,6 +844,61 @@ mod tests {
         assert!(locked(&app, &project.id).unwrap());
         assert_eq!(snapshot(&app, &p).unwrap().before, snapshot(&app, &edited).unwrap().before);
         assert_eq!(fs::read(root(&app, &p).unwrap().join("main.tex")).unwrap(), b"pending");
+    }
+    #[test]
+    fn unchanged_chat_returns_to_main_after_another_chat_is_kept() {
+        let (_d, app, main) = fixture();
+        let question = begin(&app, &main.id, Some("question"), None).unwrap();
+        let edited = edit(&app, &main.id, "editing", "main.tex", b"accepted changes");
+        op(&app, &edited, "apply");
+        finish(&app, &question.id, false).unwrap();
+        assert_eq!(load(&app, &question.id).unwrap().state, "discarded");
+        assert!(op(&app, &question, "list").as_array().unwrap().is_empty());
+        assert!(!locked(&app, &main.id).unwrap());
+        assert_eq!(fs::read(main.root.join("main.tex")).unwrap(), b"accepted changes");
+        let next = begin(&app, &main.id, Some("question"), None).unwrap();
+        assert_ne!(next.id, question.id);
+        assert_eq!(fs::read(root(&app, &next).unwrap().join("main.tex")).unwrap(), b"accepted changes");
+    }
+    #[test]
+    fn unchanged_followup_keeps_cumulative_edits_and_empty_repairs() {
+        let (_d, app, main) = fixture();
+        let edited = edit(&app, &main.id, "editing", "main.tex", b"pending changes");
+        let followup = begin(&app, &main.id, Some("editing"), None).unwrap();
+        finish(&app, &followup.id, false).unwrap();
+        assert_eq!(load(&app, &followup.id).unwrap().state, "ready");
+        assert_eq!(snapshot(&app, &followup).unwrap().before, snapshot(&app, &edited).unwrap().before);
+        assert_eq!(fs::read(root(&app, &followup).unwrap().join("main.tex")).unwrap(), b"pending changes");
+        let files = projects::isolated_snapshot(&main.root).unwrap();
+        let repair = create(&app, &main.id, Some("repair".into()), files.clone(), files, Some(edited.id)).unwrap();
+        let resumed = begin(&app, &main.id, Some("repair"), None).unwrap();
+        assert_eq!(resumed.id, repair.id);
+        let repair = resumed;
+        finish(&app, &repair.id, false).unwrap();
+        recover(&app);
+        assert_eq!(load(&app, &repair.id).unwrap().state, "ready");
+    }
+    #[test]
+    fn restart_resolves_legacy_empty_proposals_without_losing_uncaptured_edits() {
+        let (_d, app, main) = fixture();
+        let mut empty = begin(&app, &main.id, Some("empty"), None).unwrap();
+        // Reproduce the old successful zero-change turn state.
+        empty.state = "ready".into();
+        save(&app, &empty).unwrap();
+        let mut changed = begin(&app, &main.id, Some("changed"), None).unwrap();
+        changed.state = "ready".into();
+        save(&app, &changed).unwrap();
+        fs::write(root(&app, &changed).unwrap().join("main.tex"), b"uncaptured").unwrap();
+        let interrupted = begin(&app, &main.id, Some("interrupted"), None).unwrap();
+        let accepted = edit(&app, &main.id, "accepted", "main.tex", b"latest main");
+        op(&app, &accepted, "apply");
+        recover(&app);
+        recover(&app); // Recovery is idempotent.
+        assert_eq!(load(&app, &empty.id).unwrap().state, "discarded");
+        assert_eq!(load(&app, &changed.id).unwrap().state, "ready");
+        assert_eq!(fs::read(root(&app, &changed).unwrap().join("main.tex")).unwrap(), b"uncaptured");
+        assert_eq!(load(&app, &interrupted.id).unwrap().state, "interrupted");
+        assert_eq!(fs::read(main.root.join("main.tex")).unwrap(), b"latest main");
     }
     fn edit(app: &Backend, project: &str, thread: &str, file: &str, content: &[u8]) -> Proposal {
         let mut p = begin(app, project, Some(thread), None).unwrap();
