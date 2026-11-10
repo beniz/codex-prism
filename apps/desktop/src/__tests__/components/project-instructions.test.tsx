@@ -2,11 +2,12 @@ import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { expect, it, vi } from "vitest";
 import { ProjectInstructions } from "@/components/agent-chat/project-instructions";
-import { backend } from "@/lib/backend";
-vi.mock("@/lib/backend", () => ({ backend: { projects: {
-  getInstructions: vi.fn(async () => "Use the paper"),
-  setInstructions: vi.fn(async (_id: string, text: string) => text),
-} } }));
+import { saveProjectSettings } from "@/lib/data-sources";
+vi.mock("@/lib/data-sources", () => ({
+  getProjectSettings: vi.fn(async () => ({ revision: 0, instructions: "Use the paper", sources: [] })),
+  saveProjectSettings: vi.fn(async (_id: string, settings: unknown) => settings),
+}));
+vi.mock("@/lib/backend/desktop-host", () => ({ open: vi.fn(async () => null) }));
 it("loads project instructions and saves them through project metadata", async () => {
   (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
   const host = document.createElement("div"); document.body.append(host);
@@ -18,7 +19,7 @@ it("loads project instructions and saves them through project metadata", async (
     expect(document.querySelector('textarea')!.value).toBe("Use the paper");
     const save = [...document.querySelectorAll('button')].find(b => b.textContent === 'Save')!;
     await act(async () => save.click());
-    expect(backend.projects.setInstructions).toHaveBeenCalledWith("project-a", "Use the paper");
+    expect(saveProjectSettings).toHaveBeenCalledWith("project-a", { revision: 0, instructions: "Use the paper", sources: [] });
   } finally { await act(async () => root.unmount()); host.remove(); }
 });
 
@@ -44,4 +45,19 @@ it("opens settings from the title and renames through the existing project actio
     expect(input.disabled).toBe(true);
     expect(document.querySelector('textarea')!.disabled).toBe(false);
   } finally { await act(async () => root.unmount()); host.remove(); useAgentChatStore.setState({ locked: previous }); }
+});
+
+it("adds a directory to the shared project settings", async () => {
+  const { open } = await import("@/lib/backend/desktop-host");
+  vi.mocked(open).mockResolvedValueOnce("/research/source material");
+  const host = document.createElement("div"); document.body.append(host);
+  const root = createRoot(host);
+  try {
+    await act(async () => root.render(<ProjectInstructions projectId="sources-project" />));
+    await act(async () => host.querySelector('button')!.click());
+    await act(async () => [...document.querySelectorAll('button')].find(b => b.textContent === 'Add directory')!.click());
+    expect(document.body.textContent).toContain("/research/source material");
+    await act(async () => [...document.querySelectorAll('button')].find(b => b.textContent === 'Save')!.click());
+    expect(saveProjectSettings).toHaveBeenCalledWith("sources-project", expect.objectContaining({ sources: [expect.objectContaining({ path: "/research/source material", name: "source material" })] }));
+  } finally { await act(async () => root.unmount()); host.remove(); }
 });

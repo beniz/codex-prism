@@ -475,6 +475,7 @@ fn run_bibliography_pass(
     Ok(())
 }
 
+#[cfg(test)]
 fn compile_with_texlive(
     work_dir: &Path,
     main_file: &str,
@@ -1051,6 +1052,7 @@ fn find_pdf_revision(
     Ok(None)
 }
 
+#[cfg(test)]
 pub(crate) async fn compile_latex(
     state: &LatexCompilerState,
     project_dir: String,

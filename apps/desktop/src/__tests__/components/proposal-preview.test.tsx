@@ -12,6 +12,7 @@ import { proposals, type Proposal } from "@/lib/backend";
 const { documentState, chatState } = vi.hoisted(() => ({
   documentState: {
     projectId: "project",
+    mainPdfByte: 9,
     files: [{ id: "main", relativePath: "main.tex", content: "unchanged" }],
   },
   chatState: {
@@ -67,7 +68,7 @@ function Viewer() {
   current = useChatPdf("main.tex");
   return (
     <div>
-      {current.label}:{current.artifact?.bytes[0] ?? 9}:{current.error}
+      {current.label}:{current.artifact?.bytes[0] ?? documentState.mainPdfByte}:{current.error}
     </div>
   );
 }
@@ -79,6 +80,7 @@ beforeEach(() => {
   vi.resetAllMocks();
   clearChatPdfCache();
   documentState.projectId = "project";
+  documentState.mainPdfByte = 9;
   documentState.files[0].content = "unchanged";
   chatState.activeTabId = "a";
   chatState.proposals = [{ ...proposal }];
@@ -148,6 +150,36 @@ it("returns to main after resolution without changing another chat's cache", asy
   chatState.proposals = [];
   await render();
   expect(host.textContent).toBe("Main document:9:");
+});
+it("shows the latest main PDF in both chats after their proposals resolve", async () => {
+  chatState.proposals.push({ ...proposal, id: "b", threadId: "thread-b" });
+  vi.mocked(proposals.operate)
+    .mockResolvedValueOnce(build(1))
+    .mockResolvedValueOnce(build(2));
+  await render();
+  expect(host.textContent).toBe("A:1:");
+  chatState.activeTabId = "b";
+  await render();
+  expect(host.textContent).toBe("B:2:");
+
+  // Keep A; B must retain its pending proposal until it too is resolved.
+  chatState.proposals = [chatState.proposals[1]];
+  documentState.mainPdfByte = 3;
+  await render();
+  expect(host.textContent).toBe("B:2:");
+  chatState.activeTabId = "a";
+  await render();
+  expect(host.textContent).toBe("Main document:3:");
+
+  chatState.proposals = [];
+  documentState.mainPdfByte = 4;
+  for (const chat of ["b", "a", "b"]) {
+    chatState.activeTabId = chat;
+    await render();
+    expect(host.textContent).toBe("Main document:4:");
+    expect(current.artifact).toBeUndefined();
+  }
+  expect(proposals.operate).toHaveBeenCalledTimes(2);
 });
 it("does not reuse output across projects", async () => {
   vi.mocked(proposals.operate).mockResolvedValue(build(1));

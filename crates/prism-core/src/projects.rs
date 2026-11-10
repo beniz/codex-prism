@@ -493,19 +493,12 @@ pub(crate) fn project_rename(
 
 // Application metadata, deliberately outside document snapshots and history.
 pub(crate) fn instructions(app: &crate::Backend, id: &str, update: Option<&str>) -> Result<String, String> {
-    let _guard = app.inner.projects.0.lock().map_err(|e| e.to_string())?;
-    get(app, id)?;
-    let path = data_dir(app)?.join("project-instructions.json");
-    let mut all: BTreeMap<String, String> = match fs::read(&path) {
-        Ok(bytes) => serde_json::from_slice(&bytes).map_err(|e| format!("Cannot read project instructions: {e}"))?,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => BTreeMap::new(),
-        Err(e) => return Err(e.to_string()),
-    };
+    let mut settings = crate::data_sources::settings(app, id, None)?;
     if let Some(text) = update {
-        all.insert(id.to_owned(), text.to_owned());
-        save_json(&path, &all)?;
+        settings.instructions = text.into();
+        settings = crate::data_sources::settings(app, id, Some(settings))?;
     }
-    Ok(all.get(id).cloned().unwrap_or_default())
+    Ok(settings.instructions)
 }
 
 #[cfg(test)]

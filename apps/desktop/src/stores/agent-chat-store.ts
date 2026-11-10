@@ -1,3 +1,4 @@
+import { sourcePromptText, sourceRequest } from "@/lib/source-completion";
 import { readChatTabs, writeChatTabs } from "@/lib/chat-tabs";
 import { toast } from "sonner";
 import { coalescedRefresh } from "@/lib/coalesced-refresh";
@@ -455,6 +456,19 @@ export const useAgentChatStore = create<ChatState>((set, get) => ({
     const state = get();
     const t = state.tabs.find((t) => t.id === state.activeTabId);
     if (!t) return;
+    if (state.projectId && /(^|[\s(])@[A-Za-z0-9_-]+:/.test(prompt)) {
+      try { await sourceRequest(state.projectId, t.id, "source_reference_check", { prompt }); }
+      catch (e) {
+        if (get().projectId === state.projectId && get().activeTabId === t.id) set({ error: String(e) });
+        return;
+      }
+      if (get().projectId !== state.projectId || get().activeTabId !== t.id) return;
+      const current = get().tabs.find(x => x.id === t.id);
+      if (!current || current.turnId !== t.turnId || current.isStreaming !== t.isStreaming || current.sessionId !== t.sessionId) {
+        set({ error: "This chat changed while checking references. Send the prompt again." });
+        return;
+      }
+    }
     if (t.isStreaming) {
       if (state.projectId && t.sessionId && t.turnId)
         try {
@@ -466,6 +480,7 @@ export const useAgentChatStore = create<ChatState>((set, get) => ({
               ? `[${context.label}; project file: ${context.filePath}]\n${context.selectedText}\n\n${prompt}`
               : prompt,
           );
+          set(s => ({ tabs: s.tabs.map(x => x.id === t.id && x.draft === prompt ? { ...x, draft: "" } : x) }));
         } catch (e) {
           set({ error: String(e) });
         }
@@ -562,7 +577,7 @@ export const useAgentChatStore = create<ChatState>((set, get) => ({
       set((s) => ({
         tabs: s.tabs.map((x) =>
           x.id === t.id
-            ? { ...x, sessionId: result.threadId, turnId: result.turn.id }
+            ? { ...x, sessionId: result.threadId, turnId: result.turn.id, draft: x.draft === prompt ? "" : x.draft }
             : x,
         ),
       }));
@@ -762,6 +777,9 @@ export const useAgentChatStore = create<ChatState>((set, get) => ({
   },
 }));
 function toItem(item: any): ChatItem {
+  const text = item.text ?? item.aggregatedOutput ?? item.command ??
+    item.content?.map((x: any) => x.text ?? "").join("\n") ??
+    JSON.stringify(item.changes ?? item.summary ?? item, null, 2);
   return {
     id: item.id,
     type: item.type === "plan" ? "proposedPlan" : item.type,
@@ -770,12 +788,7 @@ function toItem(item: any): ChatItem {
     ...(!["agentMessage", "userMessage", "reasoning"].includes(item.type)
       ? { activity: item }
       : {}),
-    text:
-      item.text ??
-      item.aggregatedOutput ??
-      item.command ??
-      item.content?.map((x: any) => x.text ?? "").join("\n") ??
-      JSON.stringify(item.changes ?? item.summary ?? item, null, 2),
+    text: item.type === "userMessage" ? sourcePromptText(text) : text,
   };
 }
 let subscription: Promise<void> | null = null;

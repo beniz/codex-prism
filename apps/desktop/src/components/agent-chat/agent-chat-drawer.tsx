@@ -1,3 +1,4 @@
+import { SourceCompletion } from "./source-completion";
 import { listContinuation } from "@/lib/composer-lists";
 import { ChatHistory } from "./chat-history";
 import { useEffect, useRef, useState } from "react";
@@ -178,7 +179,7 @@ export function AgentChatDrawer({
     if (!canSend) return;
     const prompt = t.draft;
     promptHistory.current = null;
-    setDraft("");
+    if (!/(^|[\s(])@[A-Za-z0-9_-]+:/.test(prompt)) setDraft("");
     followMessages.current = true;
     void s.sendPrompt(prompt);
   };
@@ -571,6 +572,7 @@ export function AgentChatDrawer({
                   ))}
                 </div>
               )}
+              <SourceCompletion projectId={s.projectId} chatId={t.id} draft={t.draft} input={input} change={setDraft} />
               <textarea
                 ref={input}
                 rows={2}

@@ -1,3 +1,6 @@
+import { backend } from "@/lib/backend";
+import { DataSourceEditor } from "@/components/data-source-editor";
+import { getProjectSettings, saveSourcesWithFiles, type ProjectSettings } from "@/lib/data-sources";
 import { useState, useCallback, useEffect, useRef } from "react";
 import { open } from "@/lib/backend/desktop-host";
 import { mkdir, writeTextFile } from "@tauri-apps/plugin-fs";
@@ -7,12 +10,8 @@ import { toast } from "sonner";
 import {
   ArrowLeftIcon,
   FolderOpenIcon,
-  PaperclipIcon,
-  XIcon,
   SparklesIcon,
-  UploadIcon,
   ChevronDownIcon,
-  FileTextIcon,
   MapPinIcon,
   Loader2Icon,
 } from "lucide-react";
@@ -30,10 +29,7 @@ import {
 } from "@/lib/template-registry";
 import { TemplateGallery } from "@/components/template-gallery";
 import { DEFAULT_AGENTS_MD } from "@/lib/default-agents-md";
-import {
-  buildReferenceFilesSection,
-  importReferenceFiles,
-} from "@/lib/project-attachments";
+
 import { getProjectNameError, normalizeProjectName } from "@/lib/project-name";
 
 // ─── Helpers ───
@@ -80,12 +76,13 @@ export function ProjectWizard({ mode, onBack }: ProjectWizardProps) {
 function ScratchForm({ onBack }: { onBack: () => void }) {
   const [purpose, setPurpose] = useState("");
   const [attachments, setAttachments] = useState<string[]>([]);
+  const [sourceSettings, setSourceSettings] = useState<ProjectSettings>({ revision: 0, instructions: "", sources: [], connections: [] });
+  const createdPath = useRef<string | null>(null);
   const [projectFolder, setProjectFolder] = useState<string | null>(null);
   const [projectName, setProjectName] = useState("");
   const [projectNameError, setProjectNameError] = useState("");
   const [isCreating, setIsCreating] = useState(false);
   const [isDragOver, setIsDragOver] = useState(false);
-  const [refFilesOpen, setRefFilesOpen] = useState(false);
   const [locationOpen, setLocationOpen] = useState(false);
 
   const projectNameRef = useRef<HTMLInputElement>(null);
@@ -132,23 +129,6 @@ function ScratchForm({ onBack }: { onBack: () => void }) {
     }
   }, [setLastProjectFolder]);
 
-  const handleAddAttachments = useCallback(async () => {
-    const selected = await open({
-      multiple: true,
-      title: "Add Reference Files",
-    });
-    if (selected) {
-      const paths = Array.isArray(selected) ? selected : [selected];
-      setAttachments((prev) => [
-        ...prev,
-        ...paths.filter((p) => !prev.includes(p)),
-      ]);
-    }
-  }, []);
-
-  const handleRemoveAttachment = (path: string) => {
-    setAttachments((prev) => prev.filter((p) => p !== path));
-  };
 
   // Drag-drop
   useEffect(() => {
@@ -157,11 +137,10 @@ function ScratchForm({ onBack }: { onBack: () => void }) {
 
     getCurrentWebview()
       .onDragDropEvent((event) => {
-        if (cancelled) return;
+        if (cancelled || isCreating) return;
         const { type } = event.payload;
         if (type === "enter") {
           setIsDragOver(true);
-          setRefFilesOpen(true);
         } else if (type === "drop") {
           setIsDragOver(false);
           const paths = (event.payload as { paths: string[] }).paths;
@@ -185,7 +164,7 @@ function ScratchForm({ onBack }: { onBack: () => void }) {
       cancelled = true;
       unlisten?.();
     };
-  }, []);
+  }, [isCreating]);
 
   const handleCreate = async () => {
     const name = normalizeProjectName(projectName);
@@ -198,7 +177,7 @@ function ScratchForm({ onBack }: { onBack: () => void }) {
 
     try {
       const projectPath = await join(projectFolder, name);
-      if (await exists(projectPath)) {
+      if (await exists(projectPath) && createdPath.current !== projectPath) {
         setProjectNameError("A folder with this name already exists here");
         return;
       }
@@ -225,13 +204,15 @@ function ScratchForm({ onBack }: { onBack: () => void }) {
         }
       }
 
-      const referenceFiles =
-        attachments.length > 0
-          ? await importReferenceFiles(projectPath, attachments)
-          : [];
+      createdPath.current = projectPath;
+      const registered = await backend.projects.register(projectPath);
+      const current = await getProjectSettings(registered.id);
+      const savedSources = await saveSourcesWithFiles(registered.id, projectPath, { ...current, sources: [...current.sources, ...sourceSettings.sources.filter(s => !current.sources.some(c => c.id === s.id))], connections: sourceSettings.connections ?? [] }, attachments);
+      setSourceSettings(savedSources);
+      setAttachments([]);
 
       if (purpose.trim()) {
-        const attachmentSection = buildReferenceFilesSection(referenceFiles);
+
 
         const prompt = [
           `## New ${template.name} Project`,
@@ -244,7 +225,7 @@ function ScratchForm({ onBack }: { onBack: () => void }) {
           `### What I want to create`,
           "",
           purpose.trim(),
-          attachmentSection,
+
           `### Instructions`,
           "",
           `Please generate the full document content based on my description. Keep the existing preamble and fill in the document body (between \`\\begin{document}\` and \`\\end{document}\`) with appropriate title, author, sections, and content. Make it a complete, well-structured **${template.name.toLowerCase()}** ready for me to refine.`,
@@ -338,87 +319,11 @@ function ScratchForm({ onBack }: { onBack: () => void }) {
 
           {/* Collapsible sections */}
           <div className="divide-y divide-border/40 overflow-hidden rounded-xl border border-border/60 bg-card/30">
-            {/* Reference files */}
-            <div>
-              <button
-                onClick={() => setRefFilesOpen(!refFilesOpen)}
-                className="flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-muted/30"
-              >
-                <div className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-muted/50">
-                  <FileTextIcon className="size-3.5 text-muted-foreground" />
-                </div>
-                <div className="min-w-0 flex-1">
-                  <span className="font-medium text-sm">Reference files</span>
-                  {attachments.length > 0 && (
-                    <span className="ml-2 inline-flex items-center justify-center rounded-full bg-primary/15 px-1.5 py-0.5 font-semibold text-[10px] text-primary leading-none">
-                      {attachments.length}
-                    </span>
-                  )}
-                </div>
-                <ChevronDownIcon
-                  className={`size-4 text-muted-foreground/60 transition-transform duration-200 ${refFilesOpen ? "rotate-180" : ""}`}
-                />
-              </button>
-              {refFilesOpen && (
-                <div className="space-y-3 px-4 pb-4">
-                  {attachments.length > 0 && (
-                    <div className="flex flex-wrap gap-1.5">
-                      {attachments.map((path) => (
-                        <div
-                          key={path}
-                          className="flex items-center gap-1.5 rounded-lg border border-border/50 bg-muted/40 py-1 pr-1.5 pl-2.5 text-xs transition-colors hover:bg-muted/60"
-                        >
-                          <PaperclipIcon className="size-3 shrink-0 text-muted-foreground/70" />
-                          <span className="max-w-[140px] truncate text-foreground/80">
-                            {path.split(/[/\\]/).pop()}
-                          </span>
-                          <button
-                            onClick={() => handleRemoveAttachment(path)}
-                            className="flex size-4 shrink-0 items-center justify-center rounded-md text-muted-foreground/50 transition-colors hover:bg-destructive/10 hover:text-destructive"
-                          >
-                            <XIcon className="size-3" />
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                  <div
-                    className={`flex flex-col items-center gap-2 rounded-lg border border-dashed p-4 transition-all ${
-                      isDragOver
-                        ? "scale-[1.01] border-primary bg-primary/5"
-                        : "border-border/60 hover:border-border hover:bg-muted/20"
-                    }`}
-                  >
-                    {isDragOver ? (
-                      <>
-                        <UploadIcon className="size-5 text-primary" />
-                        <span className="font-medium text-primary text-xs">
-                          Drop to add
-                        </span>
-                      </>
-                    ) : (
-                      <>
-                        <UploadIcon className="size-5 text-muted-foreground/40" />
-                        <div className="text-center">
-                          <span className="text-muted-foreground/70 text-xs">
-                            Drag & drop or{" "}
-                          </span>
-                          <button
-                            onClick={handleAddAttachments}
-                            className="font-medium text-foreground/70 text-xs underline decoration-border underline-offset-2 transition-colors hover:text-foreground hover:decoration-foreground/50"
-                          >
-                            browse files
-                          </button>
-                        </div>
-                        <span className="text-[10px] text-muted-foreground/40">
-                          PDF, TEX, BIB, images, or data files
-                        </span>
-                      </>
-                    )}
-                  </div>
-                </div>
-              )}
-            </div>
+            <section className="space-y-2 p-4" aria-label="Data sources">
+              <h3 className="text-sm font-medium">Data sources</h3>
+              <DataSourceEditor settings={sourceSettings} setSettings={setSourceSettings} files={attachments} setFiles={setAttachments} disabled={isCreating} />
+              {isDragOver && <p className="text-xs">Drop files to add data sources</p>}
+            </section>
 
             {/* Project location */}
             <div>

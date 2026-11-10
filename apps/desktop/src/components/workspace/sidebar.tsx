@@ -1,3 +1,4 @@
+import { DataSources } from "@/components/data-sources";
 import { ProjectInstructions } from "@/components/agent-chat/project-instructions";
 import { useState, useCallback, useMemo, useRef, useEffect } from "react";
 import { getVersion } from "@tauri-apps/api/app";
@@ -1328,6 +1329,7 @@ export function Sidebar({
             </Panel>
           </PanelGroup>
 
+          {instructionsProjectId && <DataSources key={instructionsProjectId} projectId={instructionsProjectId} />}
           {/* Environment section — Python + Skills */}
           <EnvironmentSection projectPath={projectRoot} />
 

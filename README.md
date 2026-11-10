@@ -225,6 +225,90 @@ See [CONTRIBUTING.md](./CONTRIBUTING.md) for development guidelines and verifica
 
 This project is a fork of [ClaudePrism](https://github.com/delibae/claude-prism) by delibae, adapted to use Codex as its AI backend. ClaudePrism started from [Open Prism](https://github.com/assistant-ui/open-prism) by [assistant-ui](https://github.com/assistant-ui).
 
+### Project data sources
+
+Project creation and **Project settings → Data sources** offer **Add files**,
+**Add directory**, and **Add SSH connection**. Sources are optional and are saved
+even when you create a project without an initial writing prompt. Every chat
+receives the current source manifest on its next turn.
+
+Files are copied when you save: documents go into `attachments/`, and images use
+an existing image folder or `prism-uploads/`. Selecting an existing project file
+registers it without copying it again. Originals are not synchronized. Local
+and SSH directories remain external. Agents consult sources on demand; adding a
+source does not automatically insert content or citations into your document.
+
+The sidebar groups file sources into **Files · N** with an availability indicator;
+click it to manage individual files in settings. Removing a registration keeps
+the project file. Delete files separately through the Files navigator. Adding
+files is disabled while running work or pending proposals lock the document.
+
+Existing files under `attachments/` are registered once, without following
+symlinks. Removed registrations are not rediscovered. Older images elsewhere can
+be registered explicitly. File-source paths stay project-relative and each chat
+reads its own proposal copy.
+
+### Referencing data sources in chat
+
+Type `@` in the composer and press **Tab** to list registered source IDs, or
+start typing an ID to filter suggestions. Select a source, then browse its
+folders with Tab or Enter—for example `@attachments:/paper.pdf` or
+`@research-data:/reports/results.csv`. Paths with spaces are quoted automatically.
+Up/Down selects a suggestion; Escape closes the picker. Enter accepts a visible
+suggestion instead of sending the message.
+
+Completion includes only registered sources. Copied files are grouped by folder
+(`attachments`, `figures`, or `project` for root-level files). Directory sources
+have stable IDs shown in project settings; duplicate names receive suffixes.
+Removing a source retires its ID so old references cannot silently point elsewhere.
+Local and SSH directories are browsed on demand without indexing or model calls.
+Use **Refresh / retry** for changed contents or an unavailable source.
+
+References also work when typed manually and when steering a running chat. They
+resolve against that chat's source configuration and proposal workspace. Invalid
+references keep the draft intact. Selecting a reference does not import files;
+SSH access still uses the existing research/import tools.
+
+### SSH data sources
+
+In **Project settings → Data sources**, choose **Add SSH connection**, enter an
+SSH host alias (or `user@host`), and add one or more absolute remote directories.
+Use **Test connection**, then **Save**. The sidebar shows each source's
+availability; refresh checks it again. Changes apply to every chat from its next
+turn, including existing conversations.
+
+Prism uses the machine's SSH client, configuration, keys and agent. Establish
+SSH trust/authentication beforehand. Remote hosts currently need Linux or macOS
+and an **already running, authenticated Codex app-server**. Prism never installs,
+starts or upgrades that server. If needed, connect the host through **ChatGPT
+Settings → Connections** first. Prism does not read ChatGPT's private connection
+registry; enter the SSH alias in Prism as well.
+
+The default transport attaches through `codex app-server proxy`. Under
+**Connection options**, provide an absolute remote Codex executable path if it
+is absent from the noninteractive SSH PATH, and optionally a control-socket path.
+Alternatively, select an existing WebSocket listener's remote loopback port;
+Prism tunnels it through SSH. An optional remote token-file path is supported;
+the token stays in memory and is never saved in project settings.
+
+All project chats receive remote research and import tools. Research runs in a
+dedicated remote thread and scratch directory; document editing, compilation,
+Git history and Keep remain local. The remote agent is instructed not to modify
+sources. **This is instruction-based protection, not guaranteed filesystem
+read-only access.** Review remote command approval requests accordingly.
+
+Imports require Python 3 remotely, are limited to 8 MiB per file, reject
+traversal/symlink escapes and local overwrites, and write only into the owning
+chat's proposal. Import needed scratch artifacts during the same turn; scratch
+cleanup is best-effort when that turn ends. Work is limited to two simultaneous
+remote jobs and 15 minutes per research request. Stopping a chat targets only its
+remote work. If a connection is lost or Prism is forcibly terminated, remote
+interruption/cleanup cannot be guaranteed; Prism never shuts down the shared
+server or cancels other clients' sessions.
+
+Developer validation and opt-in live tests are documented in
+[SSH data-source testing](docs/ssh-data-sources.md).
+
 ### Shared project instructions
 
 Click the project title to open **Project settings**, then edit the shared project prompt to save standing context for all

@@ -5,6 +5,18 @@ and detailed release notes are in [docs/releases](docs/releases/README.md).
 
 ## Unreleased
 
+- Return chats with completed, unchanged turns to the latest main-document PDF instead of retaining an empty proposal with an older preview. Recover existing empty proposals on restart while preserving pending edits and repairs.
+
+- Move Capture & Ask to Ctrl+Shift+X (Cmd+Shift+X on macOS), restoring the standard cut shortcut in the chat composer and other text fields.
+
+- Add `@source-id:/path` completion in chat for registered files and local/SSH directories, with on-demand browsing, stable source IDs, quoted paths, and reference validation for prompts and steering.
+
+- Unify copied reference files, local directories and SSH directories as project data sources, available during creation and in project settings. Existing attachments are registered once; file sources share a single sidebar availability row.
+
+- Add per-project SSH data sources backed by existing remote Codex servers, with connection tests, availability indicators, remote research/computation, and bounded imports into the owning chat’s proposal. Remote source protection is instruction-based.
+
+- Configure local read-only data-source directories in project settings, view their availability in the sidebar, and share their paths with all project chats from the next turn.
+
 - Skip unchanged BibTeX/Biber processing during incremental compilation when generated controls, resolved databases/styles, tool identity, and bibliography output are verified. Unsupported Biber sources/configuration retain full processing.
 
 - Add a persisted Incremental compilation toggle next to Auto and Changes. Disabling it forces full main-document and proposal build requests while preserving Keep PDF reuse.
