@@ -5,6 +5,8 @@ and detailed release notes are in [docs/releases](docs/releases/README.md).
 
 ## Unreleased
 
+- Share file-exclusion classifications across workspaces, templates, history, and the file navigator; consistently omit Beamer auxiliary and compound build outputs while retaining PDF assets and tracked history inputs.
+
 - Share project creation across blank, built-in, and private templates; retries preserve existing source and avoid duplicate file imports and chats after a failed open.
 
 ## 1.7.0

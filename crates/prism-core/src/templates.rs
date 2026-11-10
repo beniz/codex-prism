@@ -1,4 +1,5 @@
 //! Local template discovery and snapshots. Library folders are never registered as projects.
+use crate::file_policy::Policy;
 use crate::{projects, Backend};
 use serde::{Deserialize, Serialize};
 use sha1::{Digest, Sha1};
@@ -70,46 +71,6 @@ fn relative(path: &str) -> Result<(), String> {
     }
     Ok(())
 }
-fn excluded_directory(name: &str) -> bool {
-    [
-        ".git",
-        ".codexprism",
-        ".claudeprism",
-        ".prism",
-        ".venv",
-        "venv",
-        "env",
-        "__pycache__",
-        "node_modules",
-        "target",
-    ]
-    .contains(&name)
-}
-fn intermediate(name: &str) -> bool {
-    let name = name.to_lowercase();
-    [
-        ".aux",
-        ".log",
-        ".out",
-        ".toc",
-        ".lof",
-        ".lot",
-        ".fls",
-        ".fdb_latexmk",
-        ".synctex",
-        ".synctex.gz",
-        ".blg",
-        ".bbl",
-        ".nav",
-        ".snm",
-        ".vrb",
-        ".run.xml",
-        ".bcf",
-        ".pyc",
-    ]
-    .iter()
-    .any(|suffix| name.ends_with(suffix))
-}
 fn walk(
     root: &Path,
     dir: &Path,
@@ -119,7 +80,7 @@ fn walk(
     for entry in fs::read_dir(dir).map_err(|e| e.to_string())? {
         let entry = entry.map_err(|e| e.to_string())?;
         let name = entry.file_name().to_string_lossy().into_owned();
-        if excluded_directory(&name) || intermediate(&name) {
+        if Policy::Template.excludes_reserved_entry(&name) {
             continue;
         }
         let path = entry.path();
@@ -504,6 +465,66 @@ mod tests {
             assert!(backend.template_list().unwrap().templates.is_empty());
         }
     }
+    #[test]
+    fn template_policy_keeps_pdf_assets_and_hidden_guidance_without_copying_outputs() {
+        let (dir, backend, source) = fixture();
+        fs::create_dir_all(source.join(".agents/skills")).unwrap();
+        fs::write(source.join(".agents/skills/guide.md"), "guidance").unwrap();
+        for name in [
+            "refs.bib",
+            "style.bst",
+            "figure.pdf",
+            "paper.pdf",
+            "native.so",
+        ] {
+            fs::write(source.join(name), "input").unwrap();
+        }
+        for name in [
+            "paper.NAV",
+            "paper.snm",
+            "paper.vrb",
+            "paper.SYNCTEX.GZ",
+            "paper.run.xml",
+        ] {
+            fs::write(source.join(name), "output").unwrap();
+        }
+        fs::create_dir(source.join(".venv")).unwrap();
+        fs::write(source.join(".venv/private.txt"), "environment").unwrap();
+        let template = backend.template_list().unwrap().templates.remove(0);
+        let destination = dir.path().join("filtered-copy");
+        backend
+            .template_create_project(
+                template.id,
+                template.revision,
+                destination.to_string_lossy().into(),
+            )
+            .unwrap();
+        for name in [
+            "refs.bib",
+            "style.bst",
+            "figure.pdf",
+            "paper.pdf",
+            "native.so",
+            ".agents/skills/guide.md",
+        ] {
+            assert!(destination.join(name).exists(), "{name}");
+        }
+        for name in [
+            "paper.NAV",
+            "paper.snm",
+            "paper.vrb",
+            "paper.SYNCTEX.GZ",
+            "paper.run.xml",
+            ".venv",
+        ] {
+            assert!(!destination.join(name).exists(), "{name}");
+            assert!(
+                source.join(name).exists(),
+                "template library was changed: {name}"
+            );
+        }
+    }
+
     #[test]
     fn project_copy_preserves_body_assets_and_instructions_and_rejects_stale_or_existing_destinations(
     ) {

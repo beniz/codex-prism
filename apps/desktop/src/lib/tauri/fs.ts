@@ -1,3 +1,4 @@
+import { isNavigatorArtifact } from "@/lib/file-policy";
 import { exists, readFile } from "@tauri-apps/plugin-fs";
 import { join } from "@tauri-apps/api/path";
 import { convertFileSrc } from "@/lib/backend";
@@ -46,42 +47,9 @@ const STYLE_EXTENSIONS = new Set([
   ".ins",
 ]);
 
-const IGNORED_EXTENSIONS = new Set([
-  // Ignore LaTeX build artifacts, but keep user-imported reference files visible.
-  ".aux",
-  ".log",
-  ".out",
-  ".toc",
-  ".lof",
-  ".lot",
-  ".fls",
-  ".fdb_latexmk",
-  ".synctex.gz",
-  ".synctex",
-  ".blg",
-  ".bbl",
-  ".nav",
-  ".snm",
-  ".vrb",
-  ".run.xml",
-  ".bcf",
-  // Compiled build artifacts (never user reference material)
-  ".pyc",
-  ".pyo",
-  ".pyd",
-  ".o",
-  ".obj",
-  ".so",
-  ".dylib",
-  ".dll",
-]);
-
 export function getProjectFileType(name: string): ProjectFileType | null {
   const lower = name.toLowerCase();
-  // Skip ignored file extensions (build artifacts, binary/non-text files)
-  for (const ext of IGNORED_EXTENSIONS) {
-    if (lower.endsWith(ext)) return null;
-  }
+  if (isNavigatorArtifact(name)) return null;
   if (lower.endsWith(".tex") || lower.endsWith(".ltx")) return "tex";
   if (lower.endsWith(".bib")) return "bib";
   if (lower.endsWith(".pdf")) return "pdf";

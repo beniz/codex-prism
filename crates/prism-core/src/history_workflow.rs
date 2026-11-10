@@ -93,52 +93,10 @@ pub(super) fn repo_path(repo: &Repository, root: &str, path: &str) -> Result<Pat
     Ok(prefix(repo, root)?.join(path))
 }
 fn internal(path: &str) -> bool {
-    Path::new(path).components().any(|c| {
-        matches!(
-            c.as_os_str().to_str(),
-            Some(
-                ".git"
-                    | ".codexprism"
-                    | ".claudeprism"
-                    | ".prism"
-                    | "node_modules"
-                    | "target"
-                    | "venv"
-                    | "__pycache__"
-            )
-        )
-    })
+    crate::file_policy::history_protected_path(path)
 }
 fn generated(path: &str) -> bool {
-    Path::new(path)
-        .file_name()
-        .and_then(|p| p.to_str())
-        .is_some_and(|n| n == ".env" || n.starts_with(".env."))
-        || internal(path)
-        || path.ends_with(".synctex.gz")
-        || path.ends_with(".run.xml")
-        || matches!(
-            Path::new(path).extension().and_then(|s| s.to_str()),
-            Some(
-                "pdf"
-                    | "aux"
-                    | "log"
-                    | "out"
-                    | "toc"
-                    | "lof"
-                    | "lot"
-                    | "fls"
-                    | "fdb_latexmk"
-                    | "synctex"
-                    | "bbl"
-                    | "blg"
-                    | "nav"
-                    | "snm"
-                    | "vrb"
-                    | "bcf"
-                    | "pyc"
-            )
-        )
+    crate::file_policy::Policy::History.excludes_path(path)
 }
 pub(crate) fn untracked_output(root: &str, name: &str) -> bool {
     if !generated(name) {
@@ -319,9 +277,9 @@ pub(crate) fn initialize(root: &str, baseline: Option<Inputs>) -> Result<(), Str
         } else {
             Repository::init(root).map_err(|e| e.to_string())?;
             let ignore = Path::new(root).join(".gitignore");
-            let defaults = "\n# codex-prism\n.codexprism/\n.claudeprism/\n.prism/\n*.pdf\n*.aux\n*.log\n*.out\n*.toc\n*.lof\n*.lot\n*.fls\n*.fdb_latexmk\n*.synctex*\n*.bbl\n*.blg\n*.bcf\n*.run.xml\n.env*\nnode_modules/\nvenv/\n__pycache__/\n";
+            let defaults = crate::file_policy::initial_gitignore();
             let mut contents = fs::read_to_string(&ignore).unwrap_or_default();
-            contents.push_str(defaults);
+            contents.push_str(&defaults);
             fs::write(ignore, contents).map_err(|e| e.to_string())?;
         }
     }
@@ -353,7 +311,7 @@ pub(crate) fn initialize(root: &str, baseline: Option<Inputs>) -> Result<(), Str
     } else {
         format!("{scope}/")
     };
-    for directory in [".codexprism", ".claudeprism", ".prism"] {
+    for directory in crate::file_policy::application_directories() {
         let rule = format!("/{scope}{directory}/");
         if !rules.lines().any(|line| line == rule) {
             rules.push_str(&format!("\n{rule}\n"));
@@ -944,6 +902,55 @@ mod tests {
             .content()
             .to_vec()
     }
+    #[test]
+    fn history_preserves_tracked_auxiliaries_but_excludes_new_outputs_and_environments() {
+        let d = tempfile::tempdir().unwrap();
+        let root = d.path().to_str().unwrap();
+        let repo = Repository::init(root).unwrap();
+        fs::write(d.path().join("main.tex"), "source").unwrap();
+        fs::write(d.path().join("tracked.nav"), "tracked starter").unwrap();
+        let mut index = repo.index().unwrap();
+        index.add_path(Path::new("main.tex")).unwrap();
+        index.add_path(Path::new("tracked.nav")).unwrap();
+        index.write().unwrap();
+        let tree = repo.find_tree(index.write_tree().unwrap()).unwrap();
+        let sig = git2::Signature::now("Test", "test@example.com").unwrap();
+        repo.commit(Some("HEAD"), &sig, &sig, "Existing files", &tree, &[])
+            .unwrap();
+        initialize(root, None).unwrap();
+        fs::write(d.path().join("tracked.nav"), "modified tracked starter").unwrap();
+        for name in [
+            "slides.nav",
+            "slides.snm",
+            "slides.vrb",
+            "main.AUX",
+            "main.SYNCTEX.GZ",
+            "main.run.xml",
+        ] {
+            fs::write(d.path().join(name), "generated").unwrap();
+        }
+        for folder in [".venv", "env", "target"] {
+            fs::create_dir(d.path().join(folder)).unwrap();
+            fs::write(d.path().join(folder).join("data.txt"), "environment").unwrap();
+        }
+        checkpoint(root, "Update tracked input", None).unwrap();
+        assert_eq!(contents(&repo, "tracked.nav"), b"modified tracked starter");
+        let tree = head(&repo).unwrap().tree().unwrap();
+        for name in [
+            "slides.nav",
+            "slides.snm",
+            "slides.vrb",
+            "main.AUX",
+            "main.SYNCTEX.GZ",
+            "main.run.xml",
+            ".venv/data.txt",
+            "env/data.txt",
+            "target/data.txt",
+        ] {
+            assert!(tree.get_path(Path::new(name)).is_err(), "{name}");
+        }
+    }
+
     #[test]
     fn referenced_figures_are_committed_but_output_pdf_is_not() {
         let d = fixture();
