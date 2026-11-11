@@ -107,6 +107,9 @@ export const Message = memo(function Message({ item: m }: { item: ChatItem }) {
       )}
       aria-label={m.type === "userMessage" ? "You" : "Codex"}
     >
+      {m.type === "userMessage" && m.status === "failed" && (
+        <p className="mb-1 text-xs text-muted-foreground">Submission failed</p>
+      )}
       <div className="break-words [&_p]:my-2 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0 [&_pre]:my-2 [&_pre]:overflow-auto [&_pre]:rounded-lg [&_pre]:bg-muted [&_pre]:p-3 [&_code]:font-mono [&_code]:text-xs [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_a]:underline [&_h1]:font-semibold [&_h2]:font-semibold [&_h3]:font-semibold">
         <ReactMarkdown
           components={{ a: ({ node: _node, ...props }) => <ChatLink {...props} /> }}

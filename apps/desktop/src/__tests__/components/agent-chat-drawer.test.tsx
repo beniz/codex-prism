@@ -61,8 +61,8 @@ it("continues a list with Shift+Enter and sends its Markdown unchanged with Ente
       key: "Enter", bubbles: true, cancelable: true,
     })); });
     expect(sendPrompt).toHaveBeenCalledWith("- First\n");
-    // The store owns clearing after acceptance; submitting alone must not lose
-    // the draft if validation, saving, or starting the agent subsequently fails.
+    // The store owns clearing and failure recovery; this mocked store does not
+    // mutate the draft itself.
     expect(field.value).toBe("- First\n");
   } finally {
     await act(async () => root.unmount());

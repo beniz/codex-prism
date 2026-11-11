@@ -43,6 +43,7 @@ export interface TabState {
   isStreaming: boolean;
   error: string | null;
   draft: string;
+  submittedDraft?: string;
 }
 interface ChatState {
   restoringChats: boolean;
@@ -446,165 +447,214 @@ export const useAgentChatStore = create<ChatState>((set, get) => ({
     }
   },
   sendPrompt: async (prompt, context) => {
-    if (get().restoringChats) return;
-    try {
-      await ensureAgentEvents();
-    } catch (e) {
-      set({ error: String(e) });
-      return;
-    }
     const state = get();
     const t = state.tabs.find((t) => t.id === state.activeTabId);
-    if (!t) return;
-    if (submissions.has(t.id)) return;
-    if (state.projectId && /(^|[\s(])@[A-Za-z0-9_-]+:/.test(prompt)) {
-      try { await sourceRequest(state.projectId, t.id, "source_reference_check", { prompt }); }
-      catch (e) {
-        if (get().projectId === state.projectId && get().activeTabId === t.id) set({ error: String(e) });
-        return;
-      }
-      if (get().projectId !== state.projectId || get().activeTabId !== t.id) return;
-      const current = get().tabs.find(x => x.id === t.id);
-      if (!current || current.turnId !== t.turnId || current.isStreaming !== t.isStreaming || current.sessionId !== t.sessionId) {
-        set({ error: "This chat changed while checking references. Send the prompt again." });
-        return;
-      }
-    }
-    if (t.isStreaming) {
-      if (state.projectId && t.sessionId && t.turnId)
-        try {
-          await backend.agent.control(
-            state.projectId,
-            t.sessionId,
-            t.turnId,
-            context
-              ? `[${context.label}; project file: ${context.filePath}]\n${context.selectedText}\n\n${prompt}`
-              : prompt,
-          );
-          set(s => ({ tabs: s.tabs.map(x => x.id === t.id && x.draft === prompt ? { ...x, draft: "" } : x) }));
-        } catch (e) {
-          set({ error: String(e) });
-        }
-      return;
-    }
-    if (state.review.active || state.review.changes.length) {
-      set({
-        error: "Resolve the legacy project review before starting a proposal.",
-      });
-      return;
-    }
-    const doc = useDocumentStore.getState();
-    if (!doc.projectRoot) {
-      set({ error: "Open a project first" });
-      return;
-    }
-    if (submissions.has(t.id)) return;
+    if (state.restoringChats || !t || submissions.has(t.id)) return;
+    const generation = projectGeneration;
+    const clearedDraft = t.draft === prompt && prompt.length > 0;
+    const messageId = `pending-user-${crypto.randomUUID()}`;
+    let accepted = false;
+    let settled = false;
+    let reserved = true;
     submissions.add(t.id);
+    const release = () => {
+      if (reserved) submissions.delete(t.id);
+      reserved = false;
+    };
+    const settleDraft = () => {
+      if (settled || !clearedDraft) return;
+      settled = true;
+      if (generation !== projectGeneration) return;
+      set(s => ({ tabs: s.tabs.map(x => {
+        if (x.id !== t.id) return x;
+        if (accepted) return { ...x, submittedDraft: undefined };
+        const messages = x.messages.map(m => m.id === messageId ? { ...m, status: "failed" } : m);
+        // A newer draft belongs to the user. Keep the failed prompt in history
+        // instead of overwriting it; Up can recall it once the composer is empty.
+        if (x.draft && !messages.some(m => m.id === messageId)) {
+          messages.push({ id: messageId, type: "userMessage", text: prompt, status: "failed" });
+        }
+        return { ...x, submittedDraft: undefined, draft: x.draft || prompt, messages };
+      }) }));
+    };
+    if (clearedDraft) {
+      set(s => ({ tabs: s.tabs.map(x => x.id === t.id ? { ...x, draft: "", submittedDraft: prompt } : x) }));
+    }
     try {
-      await doc.saveAllFiles();
-      if (useDocumentStore.getState().files.some((f) => f.isDirty))
-        throw new Error(
-          "Save failed. Resolve unsaved files before running Codex.",
+      try {
+        await ensureAgentEvents();
+      } catch (e) {
+        if (generation !== projectGeneration) return;
+        set(s => ({ error: s.activeTabId === t.id ? String(e) : s.error,
+          tabs: s.tabs.map(x => x.id === t.id ? { ...x, error: String(e) } : x) }));
+        return;
+      }
+      if (generation !== projectGeneration || get().activeTabId !== t.id) return;
+      if (state.projectId && /(^|[\s(])@[A-Za-z0-9_-]+:/.test(prompt)) {
+        try { await sourceRequest(state.projectId, t.id, "source_reference_check", { prompt }); }
+        catch (e) {
+          if (generation === projectGeneration) set(s => ({
+            error: s.activeTabId === t.id ? String(e) : s.error,
+            tabs: s.tabs.map(x => x.id === t.id ? { ...x, error: String(e) } : x),
+          }));
+          return;
+        }
+        if (generation !== projectGeneration || get().projectId !== state.projectId || get().activeTabId !== t.id) return;
+        const current = get().tabs.find(x => x.id === t.id);
+        if (!current || current.turnId !== t.turnId || current.isStreaming !== t.isStreaming || current.sessionId !== t.sessionId) {
+          set({ error: "This chat changed while checking references. Send the prompt again." });
+          return;
+        }
+      }
+      if (t.isStreaming) {
+        if (state.projectId && t.sessionId && t.turnId)
+          try {
+            await backend.agent.control(
+              state.projectId,
+              t.sessionId,
+              t.turnId,
+              context
+                ? `[${context.label}; project file: ${context.filePath}]\n${context.selectedText}\n\n${prompt}`
+                : prompt,
+            );
+            accepted = true;
+            settleDraft();
+          } catch (e) {
+            if (generation === projectGeneration) set(s => ({
+              error: s.activeTabId === t.id ? String(e) : s.error,
+              tabs: s.tabs.map(x => x.id === t.id ? { ...x, error: String(e) } : x),
+            }));
+          }
+        return;
+      }
+      if (state.review.active || state.review.changes.length) {
+        set({
+          error: "Resolve the legacy project review before starting a proposal.",
+        });
+        return;
+      }
+      const doc = useDocumentStore.getState();
+      if (!doc.projectRoot) {
+        set({ error: "Open a project first" });
+        return;
+      }
+      try {
+        await doc.saveAllFiles();
+        if (generation !== projectGeneration) return;
+        if (useDocumentStore.getState().files.some((f) => f.isDirty))
+          throw new Error(
+            "Save failed. Resolve unsaved files before running Codex.",
+          );
+        const project = await backend.projects.register(doc.projectRoot);
+        if (generation !== projectGeneration) return;
+        set({ projectId: project.id });
+        await get().refreshReview();
+        if (generation !== projectGeneration) return;
+        if (get().review.active)
+          throw new Error("This project has an active turn.");
+        const active = doc.files.find((f) => f.id === doc.activeFileId);
+        const attachments = [
+          ...state.pendingAttachments.filter(
+            (a) => !a.chatId || a.chatId === t.id,
+          ),
+          ...(context ? [context] : []),
+        ];
+        const text = [
+          active ? `[Open file: ${active.relativePath}]` : "",
+          ...attachments.map(
+            (a) => `[${a.label}; project file: ${a.filePath}]\n${a.selectedText}`,
+          ),
+          prompt,
+        ]
+          .filter(Boolean)
+          .join("\n\n");
+        set((s) => ({
+          locked: true,
+          isStreaming: s.activeTabId === t.id ? true : s.isStreaming,
+          error: null,
+          pendingAttachments: s.pendingAttachments.filter(
+            (a) => a.chatId && a.chatId !== t.id,
+          ),
+          tabs: s.tabs.map((x) =>
+            x.id === t.id
+              ? {
+                  ...x,
+                  isStreaming: true,
+                  error: null,
+                  title: x.sessionId ? x.title : prompt.slice(0, 70),
+                  messages: [
+                    ...x.messages,
+                    {
+                      id: messageId,
+                      type: "userMessage",
+                      text: prompt,
+                    },
+                  ],
+                  projectPath: doc.projectRoot,
+                }
+              : x,
+          ),
+        }));
+        const result = await backend.agent.send(
+          project.id,
+          t.sessionId,
+          text,
+          state.selectedModel,
+          state.effortLevel,
+          attachments.flatMap((a) => (a.imageDataUrl ? [a.imageDataUrl] : [])),
+          useSettingsStore.getState().visualChangeReports
+            ? doc.files.find(
+                (f) =>
+                  f.id ===
+                  (active?.type === "tex"
+                    ? resolveTexRoot(active.id, doc.files)
+                    : getCurrentPdfRootId()),
+              )?.relativePath
+            : undefined,
+          prompt,
+          t.id,
+          t.mode ?? "default",
         );
-      const project = await backend.projects.register(doc.projectRoot);
-      set({ projectId: project.id });
-      await get().refreshReview();
-      if (get().review.active)
-        throw new Error("This project has an active turn.");
-      const active = doc.files.find((f) => f.id === doc.activeFileId);
-      const attachments = [
-        ...state.pendingAttachments.filter(
-          (a) => !a.chatId || a.chatId === t.id,
-        ),
-        ...(context ? [context] : []),
-      ];
-      const text = [
-        active ? `[Open file: ${active.relativePath}]` : "",
-        ...attachments.map(
-          (a) => `[${a.label}; project file: ${a.filePath}]\n${a.selectedText}`,
-        ),
-        prompt,
-      ]
-        .filter(Boolean)
-        .join("\n\n");
-      set((s) => ({
-        locked: true,
-        isStreaming: true,
-        error: null,
-        pendingAttachments: s.pendingAttachments.filter(
-          (a) => a.chatId && a.chatId !== t.id,
-        ),
-        tabs: s.tabs.map((x) =>
-          x.id === t.id
-            ? {
-                ...x,
-                isStreaming: true,
-                error: null,
-                title: x.sessionId ? x.title : prompt.slice(0, 70),
-                messages: [
-                  ...x.messages,
-                  {
-                    id: `pending-user-${crypto.randomUUID()}`,
-                    type: "userMessage",
-                    text: prompt,
-                  },
-                ],
-                projectPath: doc.projectRoot,
-              }
-            : x,
-        ),
-      }));
-      const result = await backend.agent.send(
-        project.id,
-        t.sessionId,
-        text,
-        state.selectedModel,
-        state.effortLevel,
-        attachments.flatMap((a) => (a.imageDataUrl ? [a.imageDataUrl] : [])),
-        useSettingsStore.getState().visualChangeReports
-          ? doc.files.find(
-              (f) =>
-                f.id ===
-                (active?.type === "tex"
-                  ? resolveTexRoot(active.id, doc.files)
-                  : getCurrentPdfRootId()),
-            )?.relativePath
-          : undefined,
-        prompt,
-        t.id,
-        t.mode ?? "default",
-      );
-      set((s) => ({
-        tabs: s.tabs.map((x) =>
-          x.id === t.id
-            ? { ...x, sessionId: result.threadId, turnId: result.turn.id, draft: x.draft === prompt ? "" : x.draft }
-            : x,
-        ),
-      }));
-    } catch (e) {
-      set((s) => ({
-        isStreaming: s.activeTabId === t.id ? false : s.isStreaming,
-        error: s.activeTabId === t.id ? String(e) : s.error,
-        tabs: s.tabs.map((x) =>
-          x.id === t.id ? { ...x, isStreaming: false, error: String(e) } : x,
-        ),
-      }));
+        accepted = true;
+        settleDraft();
+        if (generation !== projectGeneration) return;
+        set((s) => ({
+          tabs: s.tabs.map((x) =>
+            x.id === t.id
+              ? { ...x, sessionId: result.threadId, turnId: result.turn.id }
+              : x,
+          ),
+        }));
+      } catch (e) {
+        settleDraft();
+        release();
+        if (generation !== projectGeneration) return;
+        set((s) => ({
+          isStreaming: s.activeTabId === t.id ? false : s.isStreaming,
+          error: s.activeTabId === t.id ? String(e) : s.error,
+          tabs: s.tabs.map((x) =>
+            x.id === t.id ? { ...x, isStreaming: false, error: String(e) } : x,
+          ),
+        }));
+        try {
+          await get().refreshReview();
+        } catch {}
+        return;
+      } finally {
+        release();
+      }
+      // Refresh after releasing the submission guard so steering stays available.
       try {
         await get().refreshReview();
-      } catch {}
-      return;
+      } catch (e) {
+        set((s) => ({
+          error: s.activeTabId === t.id ? String(e) : s.error,
+          tabs: s.tabs.map((x) => x.id === t.id ? { ...x, error: String(e) } : x),
+        }));
+      }
     } finally {
-      submissions.delete(t.id);
-    }
-    // Codex has accepted the prompt. Clear it and release the submission guard
-    // before refreshing review state so a slow refresh cannot block steering.
-    try {
-      await get().refreshReview();
-    } catch (e) {
-      set((s) => ({
-        error: s.activeTabId === t.id ? String(e) : s.error,
-        tabs: s.tabs.map((x) => x.id === t.id ? { ...x, error: String(e) } : x),
-      }));
+      settleDraft();
+      release();
     }
   },
   cancelExecution: async () => {
@@ -853,8 +903,8 @@ useAgentChatStore.subscribe((state) => {
       activeTabId: state.activeTabId,
       selectedModel: state.selectedModel,
       effortLevel: state.effortLevel,
-      tabs: state.tabs.map(({ id, title, sessionId, draft, mode }) => ({
-        id, title, sessionId, draft, mode,
+      tabs: state.tabs.map(({ id, title, sessionId, draft, submittedDraft, mode }) => ({
+        id, title, sessionId, draft: draft || submittedDraft || "", mode,
       })),
     });
   } catch {

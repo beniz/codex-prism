@@ -860,7 +860,7 @@ describe("composer clearing after submission", () => {
     }
     const sending = useAgentChatStore.getState().sendPrompt(prompt);
     await vi.waitFor(() => expect(running ? backend.agent.control : backend.agent.send).toHaveBeenCalledOnce());
-    expect(useAgentChatStore.getState().tabs[0].draft).toBe(prompt);
+    expect(useAgentChatStore.getState().tabs[0].draft).toBe("");
     setDraft("New unsent text");
     useAgentChatStore.setState(s => ({ tabs: [...s.tabs, { ...s.tabs[0], id: "tab2", draft: prompt }], activeTabId: "tab2" }));
     accept(result);
@@ -902,5 +902,84 @@ describe("composer clearing after submission", () => {
     accept(result);
     await sending;
     expect(useAgentChatStore.getState().tabs[0].draft).toBe("");
+  });
+});
+
+describe("immediate composer submission", () => {
+  const prompt = "Read @attachments:";
+  function setDraft(draft: string) {
+    useAgentChatStore.setState(s => ({ tabs: s.tabs.map(t => t.id === "tab1" ? { ...t, draft } : t) }));
+  }
+
+  it.each([false, true])("clears synchronously before reference validation and retains recovery text (steering=%s)", async (running) => {
+    setDraft(prompt);
+    if (running) useAgentChatStore.setState(s => ({ tabs: s.tabs.map(t => ({ ...t,
+      isStreaming: true, sessionId: "thread1", turnId: "turn1" })) }));
+    let validate!: (value: unknown) => void;
+    vi.mocked(invoke).mockReturnValueOnce(new Promise(resolve => { validate = resolve; }));
+    const sending = useAgentChatStore.getState().sendPrompt(prompt);
+    expect(useAgentChatStore.getState().tabs[0].draft).toBe("");
+    expect(readChatTabs("/paper")?.tabs[0].draft).toBe(prompt);
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
+    await useAgentChatStore.getState().sendPrompt(prompt);
+    expect(invoke).toHaveBeenCalledOnce();
+    expect(backend.agent.send).not.toHaveBeenCalled();
+    expect(backend.agent.control).not.toHaveBeenCalled();
+    validate({ valid: true });
+    await sending;
+    expect(useAgentChatStore.getState().tabs[0].draft).toBe("");
+    expect(useAgentChatStore.getState().tabs[0].submittedDraft).toBeUndefined();
+    expect(readChatTabs("/paper")?.tabs[0].draft).toBe("");
+  });
+
+  it("recovers rejected reference text without overwriting a new draft or another chat", async () => {
+    setDraft(prompt);
+    let reject!: (error: Error) => void;
+    vi.mocked(invoke).mockReturnValueOnce(new Promise((_resolve, fail) => { reject = fail; }));
+    const sending = useAgentChatStore.getState().sendPrompt(prompt);
+    expect(useAgentChatStore.getState().tabs[0].draft).toBe("");
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
+    setDraft("New draft");
+    useAgentChatStore.setState(s => ({ tabs: [...s.tabs, { ...s.tabs[0], id: "tab2", draft: "Other chat" }], activeTabId: "tab2", error: null }));
+    reject(new Error("Source unavailable"));
+    await sending;
+    const state = useAgentChatStore.getState();
+    expect(state.tabs.map(t => t.draft)).toEqual(["New draft", "Other chat"]);
+    expect(state.tabs[0].messages).toContainEqual(expect.objectContaining({ type: "userMessage", text: prompt, status: "failed" }));
+    expect(state.tabs[0].error).toContain("Source unavailable");
+    expect(state.error).toBeNull();
+    expect(backend.agent.send).not.toHaveBeenCalled();
+  });
+
+  it("does not clear a newly typed identical prompt when the first submission succeeds", async () => {
+    setDraft(prompt);
+    const result = { threadId: "thread1", turn: { id: "turn1" } };
+    let accept!: (value: typeof result) => void;
+    vi.mocked(backend.agent.send).mockReturnValueOnce(new Promise(resolve => { accept = resolve; }));
+    const sending = useAgentChatStore.getState().sendPrompt(prompt);
+    expect(useAgentChatStore.getState().tabs[0].draft).toBe("");
+    await vi.waitFor(() => expect(backend.agent.send).toHaveBeenCalledOnce());
+    setDraft(prompt);
+    accept(result);
+    await sending;
+    expect(useAgentChatStore.getState().tabs[0].draft).toBe(prompt);
+  });
+
+  it("restores a failed startup before waiting for review recovery", async () => {
+    setDraft("Revise the abstract");
+    let finish!: (value: { active: boolean; changes: [] }) => void;
+    vi.mocked(backend.review.get).mockResolvedValueOnce({ active: false, changes: [] })
+      .mockReturnValueOnce(new Promise(resolve => { finish = resolve; }));
+    vi.mocked(backend.agent.send).mockRejectedValueOnce(new Error("Startup failed"));
+    const sending = useAgentChatStore.getState().sendPrompt("Revise the abstract");
+    expect(useAgentChatStore.getState().tabs[0].draft).toBe("");
+    try {
+      await vi.waitFor(() => expect(backend.review.get).toHaveBeenCalledTimes(2));
+      expect(useAgentChatStore.getState().tabs[0].draft).toBe("Revise the abstract");
+      expect(useAgentChatStore.getState().tabs[0].submittedDraft).toBeUndefined();
+    } finally {
+      finish({ active: false, changes: [] });
+      await sending;
+    }
   });
 });
