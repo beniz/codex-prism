@@ -456,6 +456,7 @@ export const useAgentChatStore = create<ChatState>((set, get) => ({
     const state = get();
     const t = state.tabs.find((t) => t.id === state.activeTabId);
     if (!t) return;
+    if (submissions.has(t.id)) return;
     if (state.projectId && /(^|[\s(])@[A-Za-z0-9_-]+:/.test(prompt)) {
       try { await sourceRequest(state.projectId, t.id, "source_reference_check", { prompt }); }
       catch (e) {
@@ -573,7 +574,6 @@ export const useAgentChatStore = create<ChatState>((set, get) => ({
         t.id,
         t.mode ?? "default",
       );
-      await get().refreshReview();
       set((s) => ({
         tabs: s.tabs.map((x) =>
           x.id === t.id
@@ -592,8 +592,19 @@ export const useAgentChatStore = create<ChatState>((set, get) => ({
       try {
         await get().refreshReview();
       } catch {}
+      return;
     } finally {
       submissions.delete(t.id);
+    }
+    // Codex has accepted the prompt. Clear it and release the submission guard
+    // before refreshing review state so a slow refresh cannot block steering.
+    try {
+      await get().refreshReview();
+    } catch (e) {
+      set((s) => ({
+        error: s.activeTabId === t.id ? String(e) : s.error,
+        tabs: s.tabs.map((x) => x.id === t.id ? { ...x, error: String(e) } : x),
+      }));
     }
   },
   cancelExecution: async () => {

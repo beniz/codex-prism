@@ -61,7 +61,9 @@ it("continues a list with Shift+Enter and sends its Markdown unchanged with Ente
       key: "Enter", bubbles: true, cancelable: true,
     })); });
     expect(sendPrompt).toHaveBeenCalledWith("- First\n");
-    expect(field.value).toBe("");
+    // The store owns clearing after acceptance; submitting alone must not lose
+    // the draft if validation, saving, or starting the agent subsequently fails.
+    expect(field.value).toBe("- First\n");
   } finally {
     await act(async () => root.unmount());
     container.remove();

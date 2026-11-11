@@ -810,3 +810,97 @@ describe("data-source prompt references", () => {
     expect(useAgentChatStore.getState().tabs[0].draft).toBe(prompt);
   });
 });
+
+describe("composer clearing after submission", () => {
+  const prompt = "Read @attachments:/paper.pdf";
+  const setDraft = (draft: string) => useAgentChatStore.setState(s => ({
+    tabs: s.tabs.map(t => t.id === "tab1" ? { ...t, draft } : t),
+  }));
+
+  it.each(["Revise the introduction", prompt])("clears accepted %s before review refresh, even if it fails", async (text) => {
+    setDraft(text);
+    vi.mocked(backend.review.get)
+      .mockResolvedValueOnce({ active: false, changes: [] })
+      .mockImplementationOnce(async () => {
+        expect(useAgentChatStore.getState().tabs[0].draft).toBe("");
+        throw new Error("Review refresh failed");
+      });
+    await useAgentChatStore.getState().sendPrompt(text);
+    const state = useAgentChatStore.getState();
+    expect(state.tabs[0]).toMatchObject({ draft: "", isStreaming: true, turnId: "turn1" });
+    expect(state.isStreaming).toBe(true);
+    expect(state.error).toContain("Review refresh failed");
+  });
+
+  it.each([false, true])("retains text when submission fails (steering=%s)", async (running) => {
+    setDraft("Keep this draft");
+    if (running) {
+      useAgentChatStore.setState(s => ({ tabs: s.tabs.map(t => ({ ...t,
+        isStreaming: true, sessionId: "thread1", turnId: "turn1" })) }));
+      vi.mocked(backend.agent.control).mockRejectedValueOnce(new Error("Steering failed"));
+    } else {
+      vi.mocked(backend.agent.send).mockRejectedValueOnce(new Error("Startup failed"));
+    }
+    await useAgentChatStore.getState().sendPrompt("Keep this draft");
+    expect(useAgentChatStore.getState().tabs[0].draft).toBe("Keep this draft");
+    expect(useAgentChatStore.getState().error).toContain("failed");
+  });
+
+  it.each([false, true])("keeps newer drafts and other chats while awaiting acceptance (steering=%s)", async (running) => {
+    setDraft(prompt);
+    const result = { threadId: "thread1", turn: { id: "turn1" } };
+    let accept!: (value: typeof result) => void;
+    const pending = new Promise<typeof result>(resolve => { accept = resolve; });
+    if (running) {
+      useAgentChatStore.setState(s => ({ tabs: s.tabs.map(t => ({ ...t,
+        isStreaming: true, sessionId: "thread1", turnId: "turn1" })) }));
+      vi.mocked(backend.agent.control).mockReturnValueOnce(pending);
+    } else {
+      vi.mocked(backend.agent.send).mockReturnValueOnce(pending);
+    }
+    const sending = useAgentChatStore.getState().sendPrompt(prompt);
+    await vi.waitFor(() => expect(running ? backend.agent.control : backend.agent.send).toHaveBeenCalledOnce());
+    expect(useAgentChatStore.getState().tabs[0].draft).toBe(prompt);
+    setDraft("New unsent text");
+    useAgentChatStore.setState(s => ({ tabs: [...s.tabs, { ...s.tabs[0], id: "tab2", draft: prompt }], activeTabId: "tab2" }));
+    accept(result);
+    await sending;
+    expect(useAgentChatStore.getState().tabs.map(t => t.draft)).toEqual(["New unsent text", prompt]);
+  });
+
+  it("allows steering after acceptance while review refresh is still pending", async () => {
+    setDraft(prompt);
+    let refreshed!: (value: { active: boolean; changes: [] }) => void;
+    vi.mocked(backend.review.get)
+      .mockResolvedValueOnce({ active: false, changes: [] })
+      .mockReturnValueOnce(new Promise(resolve => { refreshed = resolve; }));
+    const sending = useAgentChatStore.getState().sendPrompt(prompt);
+    try {
+      await vi.waitFor(() => expect(backend.review.get).toHaveBeenCalledTimes(2));
+      expect(useAgentChatStore.getState().tabs[0].draft).toBe("");
+      setDraft("Also update the abstract");
+      await useAgentChatStore.getState().sendPrompt("Also update the abstract");
+      expect(backend.agent.control).toHaveBeenCalledWith("p1", "thread1", "turn1", "Also update the abstract");
+      expect(useAgentChatStore.getState().tabs[0].draft).toBe("");
+    } finally {
+      refreshed({ active: false, changes: [] });
+      await sending;
+    }
+  });
+
+  it("does not resubmit a visible draft while a follow-up turn is starting", async () => {
+    setDraft("Follow up");
+    useAgentChatStore.setState(s => ({ tabs: s.tabs.map(t => ({ ...t,
+      sessionId: "thread1", turnId: "previous-turn" })) }));
+    const result = { threadId: "thread1", turn: { id: "turn2" } };
+    let accept!: (value: typeof result) => void;
+    vi.mocked(backend.agent.send).mockReturnValueOnce(new Promise(resolve => { accept = resolve; }));
+    const sending = useAgentChatStore.getState().sendPrompt("Follow up");
+    await vi.waitFor(() => expect(backend.agent.send).toHaveBeenCalledOnce());
+    await useAgentChatStore.getState().sendPrompt("Follow up");
+    expect(backend.agent.control).not.toHaveBeenCalled();
+    accept(result);
+    await sending;
+    expect(useAgentChatStore.getState().tabs[0].draft).toBe("");
+  });
+});

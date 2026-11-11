@@ -179,7 +179,6 @@ export function AgentChatDrawer({
     if (!canSend) return;
     const prompt = t.draft;
     promptHistory.current = null;
-    if (!/(^|[\s(])@[A-Za-z0-9_-]+:/.test(prompt)) setDraft("");
     followMessages.current = true;
     void s.sendPrompt(prompt);
   };

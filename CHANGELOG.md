@@ -5,6 +5,8 @@ and detailed release notes are in [docs/releases](docs/releases/README.md).
 
 ## Unreleased
 
+- Clear the chat composer as soon as Codex accepts a prompt, including data-source references, without waiting for review refresh. Failed submissions and newer drafts retain their text.
+
 - Correct new-project writing instructions to describe ordinary Git history and acceptance through Keep. Existing project instructions are preserved.
 
 - Share file-exclusion classifications across workspaces, templates, history, and the file navigator; consistently omit Beamer auxiliary and compound build outputs while retaining PDF assets and tracked history inputs.
