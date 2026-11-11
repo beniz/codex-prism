@@ -1,5 +1,7 @@
 @import "tailwindcss";
 @import "tw-animate-css";
+@import "./syntax-theme.css";
+@import "./activity-theme.css";
 
 @custom-variant dark (&:is(.dark *));
 

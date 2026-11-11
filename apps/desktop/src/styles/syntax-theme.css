@@ -1,0 +1,64 @@
+/* One restrained palette for source editing and chat code, with readable comments. */
+:root {
+  --syntax-foreground: #24292f;
+  --syntax-surface: #f5f5f5;
+  --syntax-command: #096b82;
+  --syntax-string: #26713d;
+  --syntax-number: #8a5700;
+  --syntax-special: #7652a8;
+  --syntax-comment: #646b73;
+  --syntax-error: #b42335;
+  --syntax-addition: #e5f2e7;
+  --syntax-deletion: #fbe9eb;
+}
+.dark {
+  --syntax-foreground: #e4e4e7;
+  --syntax-surface: #242424;
+  --syntax-command: #7dc4d4;
+  --syntax-string: #a3c48c;
+  --syntax-number: #dfbf85;
+  --syntax-special: #bca5db;
+  --syntax-comment: #a1a1aa;
+  --syntax-error: #e99aa4;
+  --syntax-addition: #26372a;
+  --syntax-deletion: #402a2e;
+}
+.chat-markdown pre {
+  color: var(--syntax-foreground);
+  background-color: var(--syntax-surface);
+}
+:is(.cm-editor, .chat-code) :is(.syntax-command, .syntax-heading, .syntax-strong, .syntax-emphasis),
+.chat-code :is(.hljs-keyword, .hljs-built_in, .hljs-title, .hljs-name, .hljs-attribute, .hljs-attr, .hljs-selector-tag) {
+  color: var(--syntax-command);
+}
+:is(.cm-editor, .chat-code) .syntax-string,
+.chat-code :is(.hljs-string, .hljs-regexp, .hljs-link) {
+  color: var(--syntax-string);
+}
+:is(.cm-editor, .chat-code) .syntax-number,
+.chat-code :is(.hljs-number, .hljs-literal, .hljs-symbol, .hljs-bullet) {
+  color: var(--syntax-number);
+}
+:is(.cm-editor, .chat-code) .syntax-special,
+.chat-code :is(.hljs-meta, .hljs-operator, .hljs-type, .hljs-selector-class, .hljs-selector-id) {
+  color: var(--syntax-special);
+}
+:is(.cm-editor, .chat-code) .syntax-comment,
+.chat-code :is(.hljs-comment, .hljs-quote) {
+  color: var(--syntax-comment);
+}
+:is(.cm-editor, .chat-code) .syntax-invalid { color: var(--syntax-error); }
+:is(.cm-editor, .chat-code) :is(.syntax-heading, .syntax-strong),
+.chat-code :is(.hljs-section, .hljs-strong) { font-weight: 600; }
+:is(.cm-editor, .chat-code) .syntax-emphasis,
+.chat-code .hljs-emphasis { font-style: italic; }
+:is(.cm-editor, .chat-code) .syntax-inserted,
+.chat-code .hljs-addition {
+  color: var(--syntax-string);
+  background-color: var(--syntax-addition);
+}
+:is(.cm-editor, .chat-code) .syntax-deleted,
+.chat-code .hljs-deletion {
+  color: var(--syntax-error);
+  background-color: var(--syntax-deletion);
+}
