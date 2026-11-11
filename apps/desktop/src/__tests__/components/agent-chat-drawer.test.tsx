@@ -132,3 +132,29 @@ it("recalls this chat's prompts while running and returns to an empty composer",
     useAgentChatStore.setState(original); useAgentSetupStore.setState(setup);
   }
 });
+
+it("accents approvals without changing the approval action or request ownership", async () => {
+  const original = useAgentChatStore.getState();
+  const setup = useAgentSetupStore.getState();
+  const respond = vi.fn(async () => {});
+  const request = { id: 42, method: "item/commandExecution/requestApproval", params: { threadId: "approval-thread", command: "python plot.py", reason: "Create a figure" } };
+  useAgentSetupStore.setState({ checkStatus: vi.fn(async () => {}) });
+  useAgentChatStore.setState({
+    respond, activeTabId: original.tabs[0].id, requests: [request],
+    tabs: original.tabs.map((tab, index) => index === 0 ? { ...tab, sessionId: "approval-thread" } : tab),
+  });
+  const host = document.createElement("div");
+  const root = createRoot(host);
+  try {
+    await act(async () => root.render(<AgentChatDrawer />));
+    expect(host.querySelector('[data-activity-kind="approval"]')?.textContent).toBe("Permission requested");
+    expect(host.textContent).toContain("Create a figure");
+    const allow = Array.from(host.querySelectorAll("button")).find(button => button.textContent === "Allow once")!;
+    await act(async () => allow.click());
+    expect(respond).toHaveBeenCalledWith(request, { decision: "accept" });
+  } finally {
+    await act(async () => root.unmount());
+    useAgentChatStore.setState(original);
+    useAgentSetupStore.setState(setup);
+  }
+});

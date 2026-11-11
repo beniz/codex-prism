@@ -5,6 +5,10 @@ and detailed release notes are in [docs/releases](docs/releases/README.md).
 
 ## Unreleased
 
+- Distinguish agent commands, file/image access, research, progress, approvals, and outcomes with small coloured icons and labels. Expanded commands use shell syntax highlighting.
+
+- Use a restrained light/dark syntax palette in the LaTeX and BibTeX editor, with matching language-aware highlighting for chat code blocks. Streamed text remains immediately visible.
+
 - Build completed chats’ PDFs in the background with up to three concurrent compilations. Switching tabs reuses each chat’s saved PDF without rebuilding, including with Incremental disabled.
 
 - Show matching sources' files and directories directly in `@` completion, below whole-source choices, without an extra Browse files step.

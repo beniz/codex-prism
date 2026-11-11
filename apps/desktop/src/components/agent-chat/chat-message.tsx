@@ -1,14 +1,20 @@
-import { memo, type ComponentProps } from "react";
-import ReactMarkdown from "react-markdown";
+import { memo, useState, type ComponentProps } from "react";
+import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 import { ChevronRight } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { ChatItem } from "@/stores/agent-chat-store";
-import { summarizeActivity } from "@/lib/chat-activity";
+import {
+  activityPresentation,
+  activityState,
+  commandLanguage,
+} from "@/lib/chat-activity";
 import { openExternal } from "@/lib/backend/desktop-host";
 import { toast } from "sonner";
+import { ChatCode } from "./chat-code";
+import { ActivityLabel, ActivityStatus } from "./activity-label";
 
 import {
   ContextMenu,
@@ -27,9 +33,11 @@ function ChatLink({ href, ...props }: ComponentProps<"a">) {
       <ContextMenuContent>
         <ContextMenuItem
           onSelect={() => {
-            void navigator.clipboard.writeText(href).catch((error) =>
-              toast.error(`Could not copy link: ${String(error)}`),
-            );
+            void navigator.clipboard
+              .writeText(href)
+              .catch((error) =>
+                toast.error(`Could not copy link: ${String(error)}`),
+              );
           }}
         >
           Copy link address
@@ -39,44 +47,42 @@ function ChatLink({ href, ...props }: ComponentProps<"a">) {
   );
 }
 
+// Stable renderers keep completed blocks mounted as later parts of a reply stream.
+const markdownComponents: Components = {
+  a: ({ node: _node, ...props }) => <ChatLink {...props} />,
+  code: ({ className, children }) => (
+    <ChatCode
+      className={className}
+      language={/\blanguage-([^\s]+)/.exec(className ?? "")?.[1]}
+      code={String(children ?? "")}
+    />
+  ),
+};
+
 export const Message = memo(function Message({ item: m }: { item: ChatItem }) {
   if (m.type === "reasoning") return null;
-  if (m.type === "commandExecution") {
-    const command = m.activity?.command ?? m.text.split("\n")[0];
-    const exitCode = m.activity?.exitCode;
-    return (
-      <details className="group min-w-0 px-1 text-muted-foreground text-xs">
-        <summary className="flex cursor-pointer list-none items-center gap-2 rounded-sm py-1 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
-          <span className="shrink-0">Command:</span>
-          <span className="min-w-0 flex-1 truncate font-mono">
-            {command.replace(/\s+/g, " ")}
-          </span>
-          {exitCode != null && exitCode !== 0 && (
-            <span className="shrink-0">exit {exitCode}</span>
-          )}
-          {m.status && <span className="shrink-0">{m.status}</span>}
-          <ChevronRight
-            aria-hidden="true"
-            className="size-4 shrink-0 group-open:rotate-90"
-          />
-        </summary>
-        <pre className="mt-2 max-h-80 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-muted p-3 font-mono text-foreground text-xs">
-          {command}
-        </pre>
-      </details>
-    );
-  }
-  if (m.type !== "agentMessage" && m.type !== "userMessage" && m.type !== "proposedPlan") {
-    const activity = summarizeActivity(m);
+  if (m.type === "commandExecution") return <CommandActivity item={m} />;
+  if (
+    m.type !== "agentMessage" &&
+    m.type !== "userMessage" &&
+    m.type !== "proposedPlan"
+  ) {
+    const activity = activityPresentation(m);
     return (
       <div
         className="space-y-1 px-1 text-xs text-muted-foreground"
         aria-label="Activity"
+        role="group"
       >
-        <p className="whitespace-pre-wrap break-words">
-          {activity.summary}
-          {m.status ? ` · ${m.status}` : ""}
-        </p>
+        <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1">
+          <ActivityLabel kind={activity.kind} label={activity.label} />{" "}
+          <ActivityStatus state={activityState(m)} />
+        </div>
+        {activity.detail && (
+          <div className="min-w-0 whitespace-pre-wrap break-words">
+            {activity.detail}
+          </div>
+        )}
         {activity.urls.map((url) => (
           <ChatLink
             key={url}
@@ -108,11 +114,19 @@ export const Message = memo(function Message({ item: m }: { item: ChatItem }) {
       aria-label={m.type === "userMessage" ? "You" : "Codex"}
     >
       {m.type === "userMessage" && m.status === "failed" && (
-        <p className="mb-1 text-xs text-muted-foreground">Submission failed</p>
+        <ActivityStatus state={{ tone: "error", label: "Submission failed" }} />
       )}
-      <div className="break-words [&_p]:my-2 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0 [&_pre]:my-2 [&_pre]:overflow-auto [&_pre]:rounded-lg [&_pre]:bg-muted [&_pre]:p-3 [&_code]:font-mono [&_code]:text-xs [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_a]:underline [&_h1]:font-semibold [&_h2]:font-semibold [&_h3]:font-semibold">
+      {(m.phase === "commentary" || m.type === "proposedPlan") && (
+        <div className="mb-1">
+          <ActivityLabel
+            kind={m.type === "proposedPlan" ? "plan" : "progress"}
+            label={m.type === "proposedPlan" ? "Plan" : "Progress"}
+          />
+        </div>
+      )}
+      <div className="chat-markdown break-words [&_p]:my-2 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0 [&_pre]:my-2 [&_pre]:overflow-auto [&_pre]:rounded-lg [&_pre]:p-3 [&_code]:font-mono [&_code]:text-xs [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_a]:underline [&_h1]:font-semibold [&_h2]:font-semibold [&_h3]:font-semibold">
         <ReactMarkdown
-          components={{ a: ({ node: _node, ...props }) => <ChatLink {...props} /> }}
+          components={markdownComponents}
           remarkPlugins={[remarkGfm, remarkMath]}
           rehypePlugins={[rehypeKatex]}
         >
@@ -122,3 +136,34 @@ export const Message = memo(function Message({ item: m }: { item: ChatItem }) {
     </article>
   );
 });
+
+function CommandActivity({ item }: { item: ChatItem }) {
+  const [expanded, setExpanded] = useState(false);
+  const command = String(item.activity?.command ?? item.text.split("\n")[0]);
+  return (
+    <details
+      className="group min-w-0 px-1 text-muted-foreground text-xs"
+      open={expanded}
+      onToggle={(event) => setExpanded(event.currentTarget.open)}
+    >
+      <summary className="flex cursor-pointer list-none items-center gap-2 rounded-sm py-1 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
+        <ActivityLabel kind="command" label="Command" />{" "}
+        <span className="min-w-0 flex-1 truncate font-mono">
+          {command.replace(/\s+/g, " ")}
+        </span>{" "}
+        <ActivityStatus state={activityState(item)} />
+        <ChevronRight
+          aria-hidden="true"
+          className="size-4 shrink-0 group-open:rotate-90"
+        />
+      </summary>
+      {expanded && (
+        <div className="chat-markdown">
+          <pre className="mt-2 max-h-80 overflow-auto whitespace-pre-wrap break-words rounded-lg p-3 font-mono text-xs">
+            <ChatCode code={command} language={commandLanguage(item)} />
+          </pre>
+        </div>
+      )}
+    </details>
+  );
+}

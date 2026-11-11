@@ -1,6 +1,7 @@
 import { SourceCompletion } from "./source-completion";
 import { listContinuation } from "@/lib/composer-lists";
 import { ChatHistory } from "./chat-history";
+import { ActivityLabel } from "./activity-label";
 import { useEffect, useRef, useState } from "react";
 import {
   ArrowUpIcon,
@@ -460,7 +461,7 @@ export function AgentChatDrawer({
             )}
             <ChatHistory key={t.id} messages={t.messages} viewport={viewport} />
             {!t.isStreaming && !t.error && t.mode === "plan" && t.messages.some((m) => m.type === "proposedPlan" && m.status === "completed") && [...t.messages].reverse().find((m) => m.type === "userMessage" || m.type === "proposedPlan")?.status === "completed" && (
-              <div className="flex gap-2" aria-label="Plan actions">
+              <div className="flex gap-2" role="group" aria-label="Plan actions">
                 <Button onClick={() => {
                   useAgentChatStore.setState((state) => ({ tabs: state.tabs.map((tab) => tab.id === t.id ? { ...tab, mode: "default" } : tab) }));
                   void s.sendPrompt("Implement the plan.");
@@ -484,12 +485,13 @@ export function AgentChatDrawer({
               ))}
           </div>
           {(s.error || t.error) && (
-            <p
+            <div
               role="alert"
-              className="mx-3 mb-2 max-h-20 overflow-auto rounded-lg bg-destructive/10 px-3 py-2 text-xs text-destructive"
+              className="mx-3 mb-2 max-h-20 overflow-auto rounded-lg bg-destructive/10 px-3 py-2 text-xs text-foreground"
             >
-              {s.error || t.error}
-            </p>
+              <ActivityLabel kind="error" label="Error" />
+              <p>{s.error || t.error}</p>
+            </div>
           )}
           <div
             ref={composer}
@@ -832,7 +834,8 @@ function Request({ event: e }: { event: AgentEvent }) {
   const p = e.params;
   if (e.method === "item/tool/requestUserInput")
     return (
-      <div className="rounded border p-3">
+      <div className="space-y-2 rounded border p-3">
+        <ActivityLabel kind="approval" label="Input needed" />
         {(p.questions ?? []).map((q: any) => (
           <label key={q.id} className="block">
             {q.question}
@@ -879,10 +882,8 @@ function Request({ event: e }: { event: AgentEvent }) {
   const permissions = e.method === "item/permissions/requestApproval";
   const approval = e.method.endsWith("/requestApproval");
   return (
-    <div className="rounded border p-3">
-      <strong>
-        {approval ? "Permission requested" : "Interaction requested"}
-      </strong>
+    <div className="space-y-2 rounded border p-3">
+      <ActivityLabel kind="approval" label={approval ? "Permission requested" : "Interaction requested"} />
       <pre className="max-h-40 overflow-auto whitespace-pre-wrap text-xs">
         {[
           p.reason,
