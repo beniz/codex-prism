@@ -63,16 +63,28 @@ export function SourceCompletion({ projectId, chatId, draft, input, change }: { 
         if (!catalogue) { catalogue = await sourceRequest<SourceCatalogue>(projectId, chatId, "source_catalogue"); if (!alive) return; cache.current.set("catalogue", catalogue); }
         let next: Choice[];
         if (token.path === undefined) {
-          next = catalogue.entries.filter(s => s.id.startsWith(token.alias.toLowerCase())).map(s => ({ label: `${s.id} — ${s.name}`, insertion: `@${s.id}:/` }));
+          next = catalogue.entries.filter(s => s.id.startsWith(token.alias.toLowerCase())).flatMap(s => [
+            { label: `Use entire source · ${s.id} — ${s.name}`, insertion: referenceText(s.id, "", false) },
+            { label: `Browse files · ${s.id} — ${s.name}`, insertion: `@${s.id}:/` },
+          ]);
           if (alive) setMessage(next.length > 100 ? "More matches available; refine your prefix" : next.length ? "" : "No registered sources match");
         } else {
-          const slash = token.path.lastIndexOf("/");
+          if (!catalogue.entries.some(s => s.id === token.alias)) throw new Error(`Unknown or removed data source: ${token.alias}`);
+          const path = token.path || "/";
+          const slash = path.lastIndexOf("/");
           if (slash < 0) throw new Error("Source paths start with /");
-          const directory = token.path.slice(0, slash + 1); const prefix = token.path.slice(slash + 1);
+          const directory = path.slice(0, slash + 1); const prefix = path.slice(slash + 1);
+          const selection: Choice[] = prefix ? [] : [{
+            label: directory === "/" ? "Use entire source" : "Use this directory",
+            insertion: referenceText(token.alias, token.path, false),
+          }];
+          // Selecting the source must not depend on listing its contents (which
+          // may require a slow or currently unavailable SSH connection).
+          if (alive) setChoices(selection);
           const key = JSON.stringify([token.alias, directory, prefix]);
           let listing = cache.current.get(key) as SourceListing | undefined;
           if (!listing) { listing = await sourceRequest<SourceListing>(projectId, chatId, "source_browse", { sourceId: token.alias, path: directory, prefix, revision: catalogue.revision, generation: catalogue.generation }); if (!alive) return; if (cache.current.size >= 128) cache.current.clear(); cache.current.set(key, listing); }
-          next = listing.entries.map(e => ({ label: e.name + (e.directory ? "/" : ""), insertion: referenceText(token.alias, directory + e.name + (e.directory ? "/" : ""), e.directory) }));
+          next = [...selection, ...listing.entries.map(e => ({ label: e.name + (e.directory ? "/" : ""), insertion: referenceText(token.alias, directory + e.name + (e.directory ? "/" : ""), e.directory) }))];
           if (alive) setMessage(listing.truncated ? "More matches available; refine your prefix" : next.length ? "" : "No matching entries");
         }
         if (alive) setChoices(next.slice(0, 100));

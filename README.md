@@ -118,6 +118,16 @@ For the third example, add the paper in project settings first, then type `@` an
 | Reuse a prompt | Press Up in an empty composer; Down returns through history. |
 | Save a manual recovery point | History → Save checkpoint. |
 
+### Data-source references
+
+| Reference | Meaning |
+|---|---|
+| `@research:` | Use the entire registered source |
+| `@research:/` | Equivalent explicit root |
+| `@research:/reports/` | Use this subdirectory |
+| `@research:/reports/results.pdf` | Use this file |
+| `@attachments:` | Use all registered files in that group |
+
 ## Your files and privacy
 
 Projects, document compilation, and Git history stay local. Codex sends prompts and the content it uses to its configured AI provider. Its installed CLI manages the account and credentials.

@@ -28,7 +28,10 @@ export function sourcePromptText(text: string): string {
     const entries: unknown = JSON.parse(text.slice(offset + marker.length));
     if (Array.isArray(entries) && entries.length && entries.every(entry =>
       entry && typeof entry.reference === "string" && typeof entry.sourceId === "string"
-      && [entry.projectFile, entry.localPath, entry.remotePath].some(path => typeof path === "string"))) {
+      && ([entry.projectFile, entry.localPath, entry.remotePath].some(path => typeof path === "string")
+        || Array.isArray(entry.projectFiles) && entry.projectFiles.length > 0 && entry.projectFiles.every((file: unknown) =>
+          file && typeof file === "object" && "projectFile" in file && typeof file.projectFile === "string"
+          && "sourceId" in file && typeof file.sourceId === "string")))) {
       return text.slice(0, offset);
     }
   } catch { /* Preserve ordinary user text that is not our generated block. */ }

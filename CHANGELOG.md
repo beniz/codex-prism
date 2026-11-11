@@ -5,6 +5,8 @@ and detailed release notes are in [docs/releases](docs/releases/README.md).
 
 ## Unreleased
 
+- Reference entire data sources with `@source:` or `@source:/`, and select directories through completion. Imported-file groups include only registered files; local and SSH sources are explored on demand.
+
 - Clear the chat composer as soon as Codex accepts a prompt, including data-source references, without waiting for review refresh. Failed submissions and newer drafts retain their text.
 
 - Correct new-project writing instructions to describe ordinary Git history and acceptance through Keep. Existing project instructions are preserved.
