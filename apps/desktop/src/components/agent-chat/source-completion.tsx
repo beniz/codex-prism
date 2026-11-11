@@ -61,13 +61,59 @@ export function SourceCompletion({ projectId, chatId, draft, input, change }: { 
       try {
         let catalogue = cache.current.get("catalogue") as SourceCatalogue | undefined;
         if (!catalogue) { catalogue = await sourceRequest<SourceCatalogue>(projectId, chatId, "source_catalogue"); if (!alive) return; cache.current.set("catalogue", catalogue); }
+        const browse = async (alias: string, directory: string, prefix: string) => {
+          const key = JSON.stringify([alias, directory, prefix]);
+          let listing = cache.current.get(key) as SourceListing | undefined;
+          if (!listing) {
+            listing = await sourceRequest<SourceListing>(projectId, chatId, "source_browse", {
+              sourceId: alias, path: directory, prefix,
+              revision: catalogue.revision, generation: catalogue.generation,
+            });
+            if (alive) {
+              if (cache.current.size >= 128) cache.current.clear();
+              cache.current.set(key, listing);
+            }
+          }
+          return listing;
+        };
         let next: Choice[];
         if (token.path === undefined) {
-          next = catalogue.entries.filter(s => s.id.startsWith(token.alias.toLowerCase())).flatMap(s => [
-            { label: `Use entire source · ${s.id} — ${s.name}`, insertion: referenceText(s.id, "", false) },
-            { label: `Browse files · ${s.id} — ${s.name}`, insertion: `@${s.id}:/` },
-          ]);
-          if (alive) setMessage(next.length > 100 ? "More matches available; refine your prefix" : next.length ? "" : "No registered sources match");
+          const matches = catalogue.entries.filter(s => s.id.startsWith(token.alias.toLowerCase()));
+          const sources = matches.slice(0, 100);
+          next = sources.map(s => ({
+            label: `Use entire source · ${s.id} — ${s.name}`,
+            insertion: referenceText(s.id, "", false),
+          }));
+          if (alive) { setChoices(next); setMessage(sources.length ? "Loading files…" : "No registered sources match"); }
+          if (!sources.length) return;
+          let cursor = 0;
+          let truncated = matches.length > sources.length;
+          const errors: string[] = [];
+          // Keep whole-source choices first. Append results as they arrive so
+          // keyboard selection stays on the same row while other sources load.
+          // Limit concurrent listings, particularly for SSH sources.
+          await Promise.all(Array.from({ length: Math.min(2, sources.length) }, async () => {
+            while (alive && cursor < sources.length && next.length < 100) {
+              const source = sources[cursor++];
+              try {
+                const listing = await browse(source.id, "/", "");
+                if (!alive) return;
+                const files = listing.entries.map(e => ({
+                  label: `${sources.length > 1 ? `${source.id} · ` : ""}${e.name}${e.directory ? "/" : ""}`,
+                  insertion: referenceText(source.id, `/${e.name}${e.directory ? "/" : ""}`, e.directory),
+                }));
+                truncated ||= listing.truncated || next.length + files.length > 100;
+                next = [...next, ...files].slice(0, 100);
+                setChoices(next);
+              } catch (error) {
+                if (alive) errors.push(`${source.id}: ${String(error)}`);
+              }
+            }
+          }));
+          if (alive) setMessage([
+            truncated || cursor < sources.length ? "More matches available; refine your prefix" : "",
+            ...errors,
+          ].filter(Boolean).join(" · "));
         } else {
           if (!catalogue.entries.some(s => s.id === token.alias)) throw new Error(`Unknown or removed data source: ${token.alias}`);
           const path = token.path || "/";
@@ -81,9 +127,8 @@ export function SourceCompletion({ projectId, chatId, draft, input, change }: { 
           // Selecting the source must not depend on listing its contents (which
           // may require a slow or currently unavailable SSH connection).
           if (alive) setChoices(selection);
-          const key = JSON.stringify([token.alias, directory, prefix]);
-          let listing = cache.current.get(key) as SourceListing | undefined;
-          if (!listing) { listing = await sourceRequest<SourceListing>(projectId, chatId, "source_browse", { sourceId: token.alias, path: directory, prefix, revision: catalogue.revision, generation: catalogue.generation }); if (!alive) return; if (cache.current.size >= 128) cache.current.clear(); cache.current.set(key, listing); }
+          const listing = await browse(token.alias, directory, prefix);
+          if (!alive) return;
           next = [...selection, ...listing.entries.map(e => ({ label: e.name + (e.directory ? "/" : ""), insertion: referenceText(token.alias, directory + e.name + (e.directory ? "/" : ""), e.directory) }))];
           if (alive) setMessage(listing.truncated ? "More matches available; refine your prefix" : next.length ? "" : "No matching entries");
         }

@@ -5,6 +5,8 @@ and detailed release notes are in [docs/releases](docs/releases/README.md).
 
 ## Unreleased
 
+- Show matching sources' files and directories directly in `@` completion, below whole-source choices, without an extra Browse files step.
+
 - Clear submitted chat text immediately, before data-source validation or agent startup. Restore failed prompts without overwriting newer drafts.
 
 - Reference entire data sources with `@source:` or `@source:/`, and select directories through completion. Imported-file groups include only registered files; local and SSH sources are explored on demand.

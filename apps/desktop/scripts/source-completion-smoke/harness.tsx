@@ -50,12 +50,10 @@ async function until(test: () => boolean) { for (let n = 0; n < 100; n++) { if (
   await submit('Read @attachments:"/reports with spaces/" ');
 
   await type("Read @");
-  await until(() => !!option("Browse files"));
-  await key("ArrowDown"); await key("Enter");
   await until(() => !!option("reports with spaces/"));
   await key("ArrowDown"); await key("Tab");
   await until(() => !!option("paper draft.pdf"));
   await key("ArrowDown"); await key("Enter");
   await submit('Read @attachments:"/reports with spaces/paper draft.pdf" ');
-  return { ok: true, checks: ["@ Tab", "entire source", "explicit root", "quoted directory", "file browsing", "quoted file", "Enter acceptance", "submission and clearing"] };
+  return { ok: true, checks: ["@ Tab", "entire source", "explicit root", "quoted directory", "direct directory listing", "quoted file", "Enter acceptance", "submission and clearing"] };
 };
