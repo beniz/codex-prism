@@ -50,29 +50,6 @@ export const CATEGORY_LABELS: Record<TemplateCategory, string> = {
   starter: "Starter",
 };
 
-export const SUBCATEGORY_LABELS: Record<TemplateSubcategory, string> = {
-  papers: "Papers",
-  theses: "Theses & Dissertations",
-  presentations: "Presentations",
-  posters: "Posters",
-  cv: "CV & Resume",
-  letters: "Letters",
-  reports: "Reports",
-  books: "Books",
-  newsletters: "Newsletters",
-  blank: "Blank",
-};
-
-export const CATEGORY_SUBCATEGORIES: Record<
-  TemplateCategory,
-  TemplateSubcategory[]
-> = {
-  academic: ["papers", "theses", "presentations", "posters"],
-  professional: ["cv", "letters", "reports"],
-  creative: ["books", "newsletters"],
-  starter: ["blank"],
-};
-
 // ─── Template Definitions ───
 
 const TEMPLATES: TemplateDefinition[] = [
@@ -3228,33 +3205,8 @@ export function getTemplateById(id: string): TemplateDefinition | undefined {
   return _templates.find((t) => t.id === id);
 }
 
-export function getTemplatesByCategory(
-  category: TemplateCategory,
-): TemplateDefinition[] {
-  return _templates.filter((t) => t.category === category);
-}
-
 export function getCategories(): TemplateCategory[] {
   return ["academic", "professional", "creative", "starter"];
-}
-
-export function searchTemplates(query: string): TemplateDefinition[] {
-  if (!query.trim()) return _templates;
-  const q = query.toLowerCase().trim();
-  const words = q.split(/\s+/);
-  return _templates.filter((t) => {
-    const haystack = [
-      t.name,
-      t.description,
-      t.documentClass,
-      ...t.tags,
-      t.category,
-      t.subcategory,
-    ]
-      .join(" ")
-      .toLowerCase();
-    return words.every((w) => haystack.includes(w));
-  });
 }
 
 /**

@@ -806,6 +806,67 @@ struct SynctexNode {
     v: f64, // PDF points
 }
 
+/// Common preamble parsing. Keep input names verbatim here: forward navigation
+/// resolves them against its immutable build, while reverse navigation returns
+/// the original name for its caller to map back into the project.
+struct SynctexHeader {
+    inputs: HashMap<u32, String>,
+    magnification: f64,
+    unit: f64,
+    x_offset: f64,
+    y_offset: f64,
+}
+impl Default for SynctexHeader {
+    fn default() -> Self {
+        Self {
+            inputs: HashMap::new(),
+            magnification: 1000.0,
+            unit: 1.0,
+            x_offset: 0.0,
+            y_offset: 0.0,
+        }
+    }
+}
+impl SynctexHeader {
+    fn parse<'a>(lines: &mut impl Iterator<Item = &'a str>) -> Self {
+        let mut header = Self::default();
+        for line in lines.by_ref() {
+            if line == "Content:" {
+                break;
+            }
+            header.read_line(line);
+        }
+        header
+    }
+
+    /// Return the input tag when a filename is added. Forward navigation also
+    /// accepts input records embedded in the content, as in the original parser.
+    fn read_line(&mut self, line: &str) -> Option<u32> {
+        if let Some(rest) = line.strip_prefix("Input:") {
+            if let Some((tag, path)) = rest.split_once(':') {
+                if let Ok(tag) = tag.parse::<u32>() {
+                    self.inputs.insert(tag, path.to_owned());
+                    return Some(tag);
+                }
+            }
+        } else if let Some(value) = line.strip_prefix("Magnification:") {
+            self.magnification = value.trim().parse().unwrap_or(1000.0);
+        } else if let Some(value) = line.strip_prefix("Unit:") {
+            self.unit = value.trim().parse().unwrap_or(1.0);
+        } else if let Some(value) = line.strip_prefix("X Offset:") {
+            self.x_offset = value.trim().parse().unwrap_or(0.0);
+        } else if let Some(value) = line.strip_prefix("Y Offset:") {
+            self.y_offset = value.trim().parse().unwrap_or(0.0);
+        }
+        None
+    }
+
+    fn factor(&self) -> f64 {
+        // 1 TeX pt = 65536 sp; 1 inch = 72.27 TeX pt = 72 PDF bp.
+        self.unit * self.magnification / (1000.0 * 65536.0) * 72.0 / 72.27
+    }
+}
+
 /// Parse synctex data and find the source location closest to (target_x, target_y) on target_page.
 fn parse_synctex_data(
     data: &str,
@@ -813,43 +874,13 @@ fn parse_synctex_data(
     target_x: f64,
     target_y: f64,
 ) -> Option<(String, u32, u32)> {
-    let mut inputs: HashMap<u32, String> = HashMap::new();
-    let mut magnification: f64 = 1000.0;
-    let mut unit: f64 = 1.0;
-    let mut x_offset: f64 = 0.0;
-    let mut y_offset: f64 = 0.0;
-
-    let mut in_content = false;
+    let mut lines = data.lines().map(str::trim);
+    let header = SynctexHeader::parse(&mut lines);
+    let factor = header.factor();
     let mut on_target_page = false;
     let mut nodes: Vec<SynctexNode> = Vec::new();
 
-    for raw_line in data.lines() {
-        let line = raw_line.trim();
-        if line.is_empty() {
-            continue;
-        }
-
-        if !in_content {
-            if let Some(rest) = line.strip_prefix("Input:") {
-                if let Some(colon_pos) = rest.find(':') {
-                    if let Ok(tag) = rest[..colon_pos].parse::<u32>() {
-                        inputs.insert(tag, rest[colon_pos + 1..].to_string());
-                    }
-                }
-            } else if let Some(rest) = line.strip_prefix("Magnification:") {
-                magnification = rest.trim().parse().unwrap_or(1000.0);
-            } else if let Some(rest) = line.strip_prefix("Unit:") {
-                unit = rest.trim().parse().unwrap_or(1.0);
-            } else if let Some(rest) = line.strip_prefix("X Offset:") {
-                x_offset = rest.trim().parse().unwrap_or(0.0);
-            } else if let Some(rest) = line.strip_prefix("Y Offset:") {
-                y_offset = rest.trim().parse().unwrap_or(0.0);
-            } else if line == "Content:" {
-                in_content = true;
-            }
-            continue;
-        }
-
+    for line in lines {
         // Content section
         if line.starts_with("Postamble:") {
             break;
@@ -869,12 +900,9 @@ fn parse_synctex_data(
             }
             // Box/node records: [, (, h, v, k, x, g, $
             b'[' | b'(' | b'h' | b'v' | b'k' | b'x' | b'g' | b'$' if on_target_page => {
-                // Convert synctex internal units to PDF points (bp)
-                // 1 TeX pt = 65536 sp; 1 inch = 72.27 TeX pt = 72 PDF bp
-                let factor = unit * magnification / (1000.0 * 65536.0) * 72.0 / 72.27;
                 if let Some(node) = line
                     .get(1..)
-                    .and_then(|s| parse_synctex_node(s, factor, x_offset, y_offset))
+                    .and_then(|s| parse_synctex_node(s, factor, header.x_offset, header.y_offset))
                 {
                     nodes.push(node);
                 }
@@ -901,7 +929,7 @@ fn parse_synctex_data(
     }
 
     let best = nodes.get(best_idx)?;
-    let filename = inputs.get(&best.tag)?.clone();
+    let filename = header.inputs.get(&best.tag)?.clone();
     Some((filename, best.line, 0))
 }
 
@@ -1829,6 +1857,73 @@ mod tests {
     // --- parse_synctex_data ---
 
     #[test]
+    fn synctex_header_preserves_input_paths_and_defaults_invalid_fields() {
+        let mut lines = "Input:1:C:\\Research notes\\chapter.tex\nInput:2:./chapters/résultats.tex\nInput:bad:ignored.tex\nMagnification:2000\nUnit:65536\nX Offset:12\nY Offset:-8\nContent:\n{3".lines();
+        let header = SynctexHeader::parse(&mut lines);
+        assert_eq!(header.inputs[&1], r"C:\Research notes\chapter.tex");
+        assert_eq!(header.inputs[&2], "./chapters/résultats.tex");
+        assert_eq!(header.inputs.len(), 2);
+        assert!((header.factor() - 2.0 * 72.0 / 72.27).abs() < 1e-12);
+        assert_eq!((header.x_offset, header.y_offset), (12.0, -8.0));
+        assert_eq!(lines.next(), Some("{3"));
+
+        let mut lines = "Magnification:bad\nUnit:bad\nX Offset:bad\nY Offset:bad\nContent:".lines();
+        let header = SynctexHeader::parse(&mut lines);
+        assert_eq!((header.magnification, header.unit), (1000.0, 1.0));
+        assert_eq!((header.x_offset, header.y_offset), (0.0, 0.0));
+        assert!(header.inputs.is_empty());
+    }
+
+    #[test]
+    fn synctex_navigation_preserves_scaling_offsets_and_input_scope() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("build with spaces");
+        std::fs::create_dir_all(root.join("chapters")).unwrap();
+        std::fs::write(root.join("chapters/results.tex"), "source").unwrap();
+        let outside = dir.path().join("outside.tex");
+        std::fs::write(&outside, "external source").unwrap();
+        let data = format!("Input:1:./chapters/results.tex\nInput:2:{}\nInput:3:missing.tex\nMagnification:2000\nUnit:65536\nX Offset:200\nY Offset:-10\nContent:\n{{2\nh1,10:0,50:40,10,2\nh1,20:100,100:40,10,2\nh2,30:500,500:40,10,2\nh3,40:600,600:40,10,2\n}}2\nPostamble:\n", outside.display());
+        let factor = 2.0 * 72.0 / 72.27;
+        let boxes = forward_synctex(&data, &root);
+        assert_eq!(boxes.len(), 2); // Missing/external inputs never enter the forward index.
+        assert!(boxes
+            .iter()
+            .all(|b| b.file == "chapters/results.tex" && b.page == 2));
+        assert_eq!(boxes[0].line, 10);
+        assert!((boxes[0].x - 200.0 * factor).abs() < 1e-10);
+        assert!((boxes[0].y - 30.0 * factor).abs() < 1e-10);
+        assert!((boxes[0].w - 40.0 * factor).abs() < 1e-10);
+        assert!((boxes[0].h - 12.0 * factor).abs() < 1e-10);
+        // Preserve the reverse parser's existing offsets in PDF coordinates.
+        assert_eq!(
+            parse_synctex_data(&data, 2, 200.0, 50.0 * factor - 10.0),
+            Some(("./chapters/results.tex".into(), 10, 0))
+        );
+        assert!(parse_synctex_data(&data, 1, 200.0, 50.0).is_none());
+        // Absolute paths inside the build are accepted too, and normalized only
+        // in the forward index (including canonical Windows path prefixes).
+        let absolute = root.join("chapters/results.tex").canonicalize().unwrap();
+        let data = data.replace("./chapters/results.tex", &absolute.to_string_lossy());
+        assert_eq!(
+            forward_synctex(&data, &root)[0].file,
+            "chapters/results.tex"
+        );
+    }
+
+    #[test]
+    fn forward_synctex_retains_inputs_declared_inside_content() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("included.tex"), "source").unwrap();
+        let data = "Magnification:1000\nUnit:65536\nContent:\n{1\nInput:2:./included.tex\nh2,15:50,100:40,10,2\n}1\nPostamble:\n";
+        let boxes = forward_synctex(data, dir.path());
+        assert_eq!(boxes.len(), 1);
+        assert_eq!(
+            (boxes[0].file.as_str(), boxes[0].line),
+            ("included.tex", 15)
+        );
+    }
+
+    #[test]
     fn test_parse_synctex_data_basic() {
         let data = "\
 SyncTeX Version:1
@@ -2410,38 +2505,24 @@ pub(crate) struct SourceBox {
     pub h: f64,
 }
 pub(crate) fn forward_synctex(data: &str, root: &Path) -> Vec<SourceBox> {
+    let mut header = SynctexHeader::default();
     let mut inputs = HashMap::new();
-    let (mut mag, mut unit, mut xo, mut yo) = (1000.0, 1.0, 0.0, 0.0);
+    // Canonicalize while the immutable build directory still exists.
+    let root = root.canonicalize().ok();
     let mut page = 0;
     let mut boxes = Vec::new();
     let mut seen = HashSet::new();
     let mut horizontal: Vec<Option<SourceBox>> = Vec::new();
     for line in data.lines().map(str::trim) {
-        if let Some(rest) = line.strip_prefix("Input:") {
-            if let Some((tag, path)) = rest.split_once(':') {
-                let path = Path::new(path);
-                let absolute = if path.is_absolute() {
-                    path.to_path_buf()
-                } else {
-                    root.join(path)
-                };
-                // Canonicalize while the immutable build directory still exists.
-                if let (Ok(absolute), Ok(root)) = (absolute.canonicalize(), root.canonicalize()) {
+        if let Some(tag) = header.read_line(line) {
+            if let (Some(root), Some(path)) = (&root, header.inputs.get(&tag)) {
+                // Path::join handles absolute inputs, including Windows prefixes.
+                if let Ok(absolute) = root.join(path).canonicalize() {
                     if let Ok(relative) = absolute.strip_prefix(root) {
-                        if let Ok(tag) = tag.parse::<u32>() {
-                            inputs.insert(tag, relative.to_string_lossy().replace('\\', "/"));
-                        }
+                        inputs.insert(tag, relative.to_string_lossy().replace('\\', "/"));
                     }
                 }
             }
-        } else if let Some(v) = line.strip_prefix("Magnification:") {
-            mag = v.trim().parse().unwrap_or(1000.0);
-        } else if let Some(v) = line.strip_prefix("Unit:") {
-            unit = v.trim().parse().unwrap_or(1.0);
-        } else if let Some(v) = line.strip_prefix("X Offset:") {
-            xo = v.trim().parse().unwrap_or(0.0);
-        } else if let Some(v) = line.strip_prefix("Y Offset:") {
-            yo = v.trim().parse().unwrap_or(0.0);
         } else if let Some(v) = line.strip_prefix('{') {
             page = v.parse().unwrap_or(0);
         } else if line.starts_with('}') || line.starts_with("Postamble:") {
@@ -2449,14 +2530,24 @@ pub(crate) fn forward_synctex(data: &str, root: &Path) -> Vec<SourceBox> {
         } else if line.starts_with(')') {
             horizontal.pop();
         } else if page > 0 && line.starts_with(['x', 'g', 'k', '$']) {
-            let factor = unit * mag / (1000.0 * 65536.0) * 72.0 / 72.27;
-            if let Some(n) = parse_synctex_node(&line[1..], factor, xo * factor, yo * factor) {
+            let factor = header.factor();
+            if let Some(n) = parse_synctex_node(
+                &line[1..],
+                factor,
+                header.x_offset * factor,
+                header.y_offset * factor,
+            ) {
                 if let (Some(file), Some(Some(parent))) = (inputs.get(&n.tag), horizontal.last()) {
                     let mut region = parent.clone();
                     region.file = file.clone();
                     region.line = n.line;
-                    if seen.insert((region.file.clone(), region.line, region.page,
-                        region.x.to_bits(), region.y.to_bits())) {
+                    if seen.insert((
+                        region.file.clone(),
+                        region.line,
+                        region.page,
+                        region.x.to_bits(),
+                        region.y.to_bits(),
+                    )) {
                         boxes.push(region);
                     }
                 }
@@ -2465,8 +2556,13 @@ pub(crate) fn forward_synctex(data: &str, root: &Path) -> Vec<SourceBox> {
             if line.starts_with('(') {
                 horizontal.push(None);
             }
-            let factor = unit * mag / (1000.0 * 65536.0) * 72.0 / 72.27;
-            if let Some(n) = parse_synctex_node(&line[1..], factor, xo * factor, yo * factor) {
+            let factor = header.factor();
+            if let Some(n) = parse_synctex_node(
+                &line[1..],
+                factor,
+                header.x_offset * factor,
+                header.y_offset * factor,
+            ) {
                 let dimensions: Vec<f64> = line
                     .split(':')
                     .nth(2)
@@ -2491,8 +2587,13 @@ pub(crate) fn forward_synctex(data: &str, root: &Path) -> Vec<SourceBox> {
                                 *parent = Some(region.clone());
                             }
                         }
-                        seen.insert((region.file.clone(), region.line, region.page,
-                            region.x.to_bits(), region.y.to_bits()));
+                        seen.insert((
+                            region.file.clone(),
+                            region.line,
+                            region.page,
+                            region.x.to_bits(),
+                            region.y.to_bits(),
+                        ));
                         boxes.push(region);
                     }
                 }

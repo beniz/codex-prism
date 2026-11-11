@@ -18,5 +18,3 @@ export async function saveSourcesWithFiles(projectId: string, root: string, sett
   const pendingImports = [...new Set(files)].map(path => ({ path, destination: `${isImageUpload(path) ? folder : "attachments"}/${path.split(/[/\\]/).pop()}` }));
   return saveProjectSettings(projectId, { ...settings, pendingImports });
 }
-
-export const probeLocalDirectory = (path: string) => invoke<{ reachable: boolean }>("project_service", { projectId: "", operation: "source_probe", args: { path } });

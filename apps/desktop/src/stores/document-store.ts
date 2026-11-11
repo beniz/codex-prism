@@ -46,15 +46,10 @@ export interface ProjectFile {
 }
 
 // ── PDF bytes cache (kept outside Zustand to avoid React diffing large buffers) ──
-// Keyed by rootFileId. Consumers read via getPdfBytes() / getCurrentPdfBytes().
+// Keyed by rootFileId. Consumers read via getCurrentPdfBytes().
 const _pdfBytesCache = new Map<string, Uint8Array>();
 /** Current active PDF root file id (mirrors what Zustand tracks via pdfRevision). */
 let _currentPdfRootId: string | null = null;
-
-/** Get PDF bytes for a specific root file id. */
-export function getPdfBytes(rootFileId: string): Uint8Array | undefined {
-  return _pdfBytesCache.get(rootFileId);
-}
 
 /** Get the current active PDF bytes (convenience for components that don't know the rootId). */
 export function getCurrentPdfBytes(): Uint8Array | null {

@@ -1,4 +1,5 @@
 //! Project identity and filesystem boundary, independent of the desktop transport.
+use crate::file_policy::Policy;
 use serde::{Deserialize, Serialize};
 use sha1::{Digest, Sha1};
 use std::{
@@ -220,15 +221,12 @@ fn snapshot_with_policy(root: &Path, strict: bool) -> Result<BTreeMap<String, Ve
             let path = entry.path();
             let name = entry.file_name().to_string_lossy().to_string();
             let ft = entry.file_type().map_err(|e| e.to_string())?;
-            if strict
-                && (name == ".git"
-                    || name == ".codexprism"
-                    || name == ".claudeprism"
-                    || name == ".prism"
-                    || name == ".venv"
-                    || name == ".env"
-                    || name.starts_with(".env."))
-            {
+            let policy = if strict {
+                Policy::IsolatedSnapshot
+            } else {
+                Policy::LegacySnapshot
+            };
+            if policy.excludes_reserved_entry(&name) {
                 continue;
             }
             if ft.is_symlink() {
@@ -238,10 +236,7 @@ fn snapshot_with_policy(root: &Path, strict: bool) -> Result<BTreeMap<String, Ve
                 continue;
             }
             if ft.is_dir() {
-                if (name.starts_with('.') && !strict)
-                    || ["node_modules", "venv", "env", "__pycache__", "target"]
-                        .contains(&name.as_str())
-                {
+                if policy.excludes_directory(&name) {
                     continue;
                 }
                 walk(root, &path, strict, out)?;
@@ -254,33 +249,13 @@ fn snapshot_with_policy(root: &Path, strict: bool) -> Result<BTreeMap<String, Ve
                         .ok_or("Non-UTF-8 workspace path")?
                         .replace('\\', "/");
                     resolve(root, &rel)?;
-                    if name.ends_with(".synctex.gz") || name.ends_with(".run.xml") {
-                        continue;
-                    }
                     if path.extension().and_then(|e| e.to_str()) == Some("pdf")
                         && path.with_extension("tex").exists()
                     {
                         continue;
                     }
                 }
-                let ext = path.extension().and_then(|x| x.to_str()).unwrap_or("");
-                if [
-                    "aux",
-                    "log",
-                    "out",
-                    "toc",
-                    "lof",
-                    "lot",
-                    "fls",
-                    "fdb_latexmk",
-                    "synctex",
-                    "blg",
-                    "bbl",
-                    "bcf",
-                    "pyc",
-                ]
-                .contains(&ext)
-                {
+                if policy.excludes_file(&name) {
                     continue;
                 }
                 let rel = path
@@ -354,6 +329,94 @@ mod tests {
         assert!(resolve(d.path(), "escape/new").is_err());
     }
     #[test]
+    fn snapshot_policies_keep_inputs_and_hidden_instructions_but_not_build_artifacts() {
+        let d = tempfile::tempdir().unwrap();
+        for name in [
+            "main.tex",
+            "refs.bib",
+            "custom.bst",
+            "figure.pdf",
+            "data.csv",
+            "native.so",
+            "AGENTS.md",
+            ".env.local",
+        ] {
+            fs::write(d.path().join(name), "input").unwrap();
+        }
+        for name in [
+            "slides.nav",
+            "slides.snm",
+            "slides.vrb",
+            "main.AUX",
+            "main.SYNCTEX.GZ",
+            "main.run.xml",
+            "main.pdf",
+        ] {
+            fs::write(d.path().join(name), "output").unwrap();
+        }
+        for name in [
+            ".agents/skills",
+            ".prism/build",
+            ".venv",
+            "env",
+            "node_modules",
+            "target",
+        ] {
+            fs::create_dir_all(d.path().join(name)).unwrap();
+            fs::write(d.path().join(name).join("instructions.md"), "nested").unwrap();
+        }
+        let isolated = isolated_snapshot(d.path()).unwrap();
+        let legacy = snapshot(d.path()).unwrap();
+        for name in [
+            "main.tex",
+            "refs.bib",
+            "custom.bst",
+            "figure.pdf",
+            "data.csv",
+            "native.so",
+            "AGENTS.md",
+        ] {
+            assert!(isolated.contains_key(name), "{name}");
+            assert!(legacy.contains_key(name), "{name}");
+        }
+        assert!(isolated.contains_key(".agents/skills/instructions.md"));
+        assert!(!legacy.contains_key(".agents/skills/instructions.md"));
+        assert!(!isolated.contains_key(".env.local"));
+        assert!(legacy.contains_key(".env.local"));
+        assert!(!isolated.contains_key("main.pdf"));
+        assert!(legacy.contains_key("main.pdf")); // History applies its own PDF/figure policy.
+        for map in [&isolated, &legacy] {
+            for name in [
+                "slides.nav",
+                "slides.snm",
+                "slides.vrb",
+                "main.AUX",
+                "main.SYNCTEX.GZ",
+                "main.run.xml",
+                ".prism/build/instructions.md",
+                ".venv/instructions.md",
+                "env/instructions.md",
+                "node_modules/instructions.md",
+                "target/instructions.md",
+            ] {
+                assert!(!map.contains_key(name), "{name}");
+            }
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn isolation_still_rejects_source_symlinks_while_legacy_review_skips_them() {
+        let d = tempfile::tempdir().unwrap();
+        fs::write(d.path().join("main.tex"), "source").unwrap();
+        std::os::unix::fs::symlink("main.tex", d.path().join("alias.tex")).unwrap();
+        assert!(isolated_snapshot(d.path())
+            .unwrap_err()
+            .contains("symbolic link"));
+        assert!(!snapshot(d.path()).unwrap().contains_key("alias.tex"));
+    }
+
+    #[test]
     fn snapshots_include_assets_not_environment() {
         let d = tempfile::tempdir().unwrap();
         fs::write(d.path().join("a.tex"), "x").unwrap();
@@ -422,10 +485,7 @@ pub(crate) fn project_list(
                 .to_string_lossy()
                 .replace('\\', "/");
             if ft.is_dir() {
-                if name.starts_with('.')
-                    || ["node_modules", "venv", "env", "__pycache__", "target"]
-                        .contains(&name.as_str())
-                {
+                if Policy::Navigator.excludes_directory(&name) {
                     continue;
                 }
                 folders.push(rel);

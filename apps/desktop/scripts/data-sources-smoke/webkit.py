@@ -1,5 +1,5 @@
 """Run Vite on :1438 before this mocked-backend, real WebKit UI test."""
-import gi,json,time,sys
+import gi,json,time,sys,os
 gi.require_version('Gtk','3.0');gi.require_version('WebKit2','4.1')
 from gi.repository import Gtk,WebKit2,GLib
 window=Gtk.Window();window.set_default_size(1400,900)
@@ -30,5 +30,5 @@ def tick():
     print(json.dumps(v),flush=True);passed=bool(v.get('ok'));Gtk.main_quit()
   evaluate('window.smokeResult||null',result)
  return True
-view.load_uri('http://127.0.0.1:1438/scripts/data-sources-smoke/index.html')
+view.load_uri(os.environ.get('PRISM_SMOKE_URL', 'http://127.0.0.1:1438/scripts/data-sources-smoke/index.html'))
 GLib.timeout_add(400,tick);Gtk.main();sys.exit(0 if passed else 1)

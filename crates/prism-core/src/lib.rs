@@ -8,6 +8,7 @@ mod remote_sources;
 pub mod source_mcp;
 pub mod discovery;
 mod events;
+mod file_policy;
 mod history;
 pub mod latex;
 mod pdf_export;

@@ -1,7 +1,7 @@
 // Built-in PDFs are bundled; private PDFs are compiled and cached locally.
 import { backend } from "@/lib/backend";
 import type { TemplateCatalogItem } from "./template-catalog";
-import { getMupdfClient } from "@/lib/mupdf/mupdf-client";
+import { renderPdfThumbnail } from "@/lib/mupdf/pdf-thumbnail";
 import { createLogger } from "@/lib/debug/logger";
 
 const log = createLogger("template-preview");
@@ -134,13 +134,9 @@ export async function generateThumbnail(
   const pending = pendingThumbnails.get(key);
   if (pending) return pending;
   const promise = (async () => {
-    let docId: number | undefined;
-    const client = getMupdfClient();
     try {
       const buffer = await getTemplatePdfBuffer(template);
-      docId = await client.openDocument(buffer);
-      const png = await client.renderThumbnail(docId, 0, 300);
-      const url = URL.createObjectURL(new Blob([png], { type: "image/png" }));
+      const url = await renderPdfThumbnail(buffer, 300);
       thumbnails.set(key, url);
       return url;
     } catch (error) {
@@ -150,8 +146,6 @@ export async function generateThumbnail(
       failed.add(key);
       return null;
     } finally {
-      if (docId !== undefined)
-        await client.closeDocument(docId).catch(() => {});
       pendingThumbnails.delete(key);
       notify();
     }

@@ -28,6 +28,27 @@ describe("tauri fs helpers", () => {
       expect(getProjectFileType("libnative.so")).toBeNull();
     });
 
+    it.each([
+      "slides.nav",
+      "slides.SNM",
+      "slides.vrb",
+      "main.SYNCTEX.GZ",
+      "main.RUN.XML",
+      "C:\\paper\\slides.NAV",
+    ])("hides shared auxiliary classification %s", (name) => {
+      expect(getProjectFileType(name)).toBeNull();
+    });
+    it.each([
+      "main.pdf",
+      "figure.PDF",
+      "refs.bib",
+      "style.bst",
+      "AGENTS.md",
+      "notes.log.tex",
+    ])("keeps document inputs and PDFs visible: %s", (name) => {
+      expect(getProjectFileType(name)).not.toBeNull();
+    });
+
     it("keeps imported files with arbitrary extensions visible", () => {
       expect(getProjectFileType("archive.zip")).toBe("other");
       expect(getProjectFileType("paper.docx")).toBe("other");
