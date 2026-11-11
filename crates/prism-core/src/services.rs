@@ -51,7 +51,9 @@ pub(crate) async fn project_service(
         .await
         .map_err(|e| e.to_string())?;
     }
-    if operation == "proposal_compile" {
+    if operation == "proposal_compile" || operation == "proposal_load_build" {
+        let mut args = args;
+        args["loadOnly"] = json!(operation == "proposal_load_build");
         return crate::proposals::compile(app, project_id, args).await;
     }
     if operation.starts_with("proposal_") {

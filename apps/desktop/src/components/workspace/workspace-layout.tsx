@@ -16,7 +16,8 @@ import { LatexEditor } from "./editor/latex-editor";
 import { PdfPreview } from "./preview/pdf-preview";
 import { AgentChatDrawer } from "@/components/agent-chat/agent-chat-drawer";
 import { ProposedChangesPanel } from "@/components/agent-chat/proposed-changes-panel";
-import { useDocumentStore } from "@/stores/document-store";
+import { getCurrentPdfRootId, resolveTexRoot, useDocumentStore } from "@/stores/document-store";
+import { useChatPdfBuilds } from "@/hooks/use-chat-pdf";
 import { usePreviewStore } from "@/stores/preview-store";
 
 const SIDEBAR_DEFAULT_SIZE = 15;
@@ -30,6 +31,13 @@ function easeInOutSmooth(progress: number) {
 }
 
 export function WorkspaceLayout() {
+  const files = useDocumentStore((s) => s.files);
+  const activeFileId = useDocumentStore((s) => s.activeFileId);
+  useDocumentStore((s) => s.pdfRevision);
+  const activeFile = files.find((file) => file.id === activeFileId);
+  const root = activeFile?.type === "tex" ? resolveTexRoot(activeFile.id, files)
+    : (getCurrentPdfRootId() ?? resolveTexRoot(activeFile?.id ?? "", files));
+  useChatPdfBuilds(files.find((file) => file.id === root)?.relativePath);
   const initialized = useDocumentStore((s) => s.initialized);
   const previewVisible = usePreviewStore((s) => s.visible);
   const setPreviewVisible = usePreviewStore((s) => s.setVisible);

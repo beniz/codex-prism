@@ -169,6 +169,11 @@ export function PdfPreview() {
   const changedPage = useMemo(() => artifact
     ? firstChangedPdfPage(artifact.proposal.changes, artifact.build.locations)
     : undefined, [artifact]);
+  const shownArtifacts = useRef(new Set<string>());
+  const firstDisplay = artifact && !shownArtifacts.current.has(artifact.build.artifactId);
+  useEffect(() => {
+    if (artifact) shownArtifacts.current.add(artifact.build.artifactId);
+  }, [artifact]);
   const artifactRef = useRef(artifact);
   artifactRef.current = artifact;
   const pdfData = artifact?.bytes ?? mainPdfData;
@@ -179,8 +184,8 @@ export function PdfPreview() {
     artifact?.proposal.id ?? "main",
     sourceRootFileId,
   ]);
-  const viewerData = useRef(new Map<string, Uint8Array>());
-  if (pdfData) viewerData.current.set(currentRootFileId, pdfData);
+  const viewerData = useRef(new Map<string, { bytes: Uint8Array; artifactId?: string }>());
+  if (pdfData) viewerData.current.set(currentRootFileId, { bytes: pdfData, artifactId: artifact?.build.artifactId });
   const visual = useVisualReview(mainFile, !chatPdf.proposal);
   useEffect(() => {
     setPdfError(null);
@@ -939,7 +944,7 @@ export function PdfPreview() {
       <div className="relative flex min-h-0 flex-1">
         {aliveOrder.map((rootId) => {
           const data =
-            viewerData.current.get(rootId) ??
+            viewerData.current.get(rootId)?.bytes ??
             (rootId === currentRootFileId && visual.active
               ? new Uint8Array(visual.bytes.current!)
               : null);
@@ -979,7 +984,7 @@ export function PdfPreview() {
                       ? visual.bytes.current!
                       : getPdfArrayBuffer(data)
                   }
-                  pageOnLoad={isActive && artifact ? changedPage ?? currentPage : undefined}
+                  pageOnLoad={isActive && firstDisplay ? changedPage : undefined}
                   sourceLocation={isActive ? sourceLocation : null}
                   selectedRegion={
                     isActive && visual.active
@@ -1010,9 +1015,7 @@ export function PdfPreview() {
                   artifactId={
                     isActive && visual.active
                       ? visual.metadata.after
-                      : isActive
-                        ? artifact?.build.artifactId
-                        : undefined
+                      : viewerData.current.get(rootId)?.artifactId
                   }
                   renderOverlay={
                     isActive && visual.active ? changeOverlay : undefined

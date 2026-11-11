@@ -5,6 +5,8 @@ and detailed release notes are in [docs/releases](docs/releases/README.md).
 
 ## Unreleased
 
+- Build completed chats’ PDFs in the background with up to three concurrent compilations. Switching tabs reuses each chat’s saved PDF without rebuilding, including with Incremental disabled.
+
 - Show matching sources' files and directories directly in `@` completion, below whole-source choices, without an extra Browse files step.
 
 - Clear submitted chat text immediately, before data-source validation or agent startup. Restore failed prompts without overwriting newer drafts.

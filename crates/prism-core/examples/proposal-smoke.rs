@@ -77,6 +77,23 @@ async fn main() {
         let value: Value = serde_json::from_slice(&request[header_end..]).unwrap_or(json!({}));
         let command = value["command"].as_str().unwrap_or("");
         let args = &value["args"];
+        // Let real proposal builds overlap instead of serializing them in the HTTP fixture.
+        if command == "project_service"
+            && ["proposal_compile", "proposal_load_build"]
+                .contains(&args["operation"].as_str().unwrap_or(""))
+        {
+            let backend = backend.clone();
+            let project_id = project.id.clone();
+            let operation = args["operation"].as_str().unwrap().to_owned();
+            let args = args["args"].clone();
+            tokio::spawn(async move {
+                respond(
+                    stream,
+                    backend.project_service(project_id, operation, args).await,
+                );
+            });
+            continue;
+        }
         let result: Result<Value, String> = match command {
             "performance" => {
                 let variable = if args["name"] == "large" {
@@ -184,13 +201,17 @@ async fn main() {
             "plugin:event|listen" => Ok(json!(1)),
             _ => Ok(Value::Null),
         };
-        let response = serde_json::to_vec(&match result {
-            Ok(v) => json!({"value":v}),
-            Err(e) => json!({"error":e}),
-        })
-        .unwrap();
-        let headers=format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Headers: content-type\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",response.len());
-        let _ = stream.write_all(headers.as_bytes());
-        let _ = stream.write_all(&response);
+        respond(stream, result);
     }
+}
+
+fn respond(mut stream: std::net::TcpStream, result: Result<Value, String>) {
+    let response = serde_json::to_vec(&match result {
+        Ok(v) => json!({"value":v}),
+        Err(e) => json!({"error":e}),
+    })
+    .unwrap();
+    let headers=format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Headers: content-type\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",response.len());
+    let _ = stream.write_all(headers.as_bytes());
+    let _ = stream.write_all(&response);
 }

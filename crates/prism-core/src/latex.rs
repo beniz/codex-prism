@@ -751,18 +751,30 @@ pub(crate) async fn compile_preview(
     work: &Path,
     main: &str,
     content: &str,
-    mut cancel: tokio::sync::watch::Receiver<bool>,
+    cancel: tokio::sync::watch::Receiver<bool>,
 ) -> Result<Vec<u8>, String> {
-    let _permit = tokio::select! {
+    compile_preview_checked(state, work, main, content, cancel, &|| Ok(())).await
+}
+pub(crate) async fn compile_preview_checked(
+    state: &LatexCompilerState,
+    work: &Path,
+    main: &str,
+    content: &str,
+    mut cancel: tokio::sync::watch::Receiver<bool>,
+    check: &(dyn Fn() -> Result<(), String> + Sync),
+) -> Result<Vec<u8>, String> {
+    let permit = tokio::select! {
         permit = state.semaphore.clone().acquire_owned() => permit.map_err(|e| e.to_string())?,
         _ = preview_cancelled(&mut cancel) => return Err("Backend is shutting down".into()),
     };
+    check()?;
     let work = work.to_path_buf();
     let main = main.to_owned();
     let content = content.to_owned();
     let runtime = tokio::runtime::Handle::current();
     let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(60);
     tokio::task::spawn_blocking(move || {
+        let _permit = permit;
         lower_thread_priority();
         let stem = Path::new(&main)
             .file_stem()
@@ -1092,13 +1104,6 @@ pub(crate) async fn compile_latex(
 pub(crate) async fn compile_latex_policy(
     state: &LatexCompilerState, project_dir: String, main_file: String, incremental: bool,
 ) -> Result<Vec<u8>, String> {
-    // Acquire semaphore permit (non-blocking)
-    let _permit = state
-        .semaphore
-        .clone()
-        .try_acquire_owned()
-        .map_err(|_| "Server busy, too many concurrent compilations".to_string())?;
-
     // Acquire per-project lock to prevent concurrent compilations on the same build dir.
     let project_lock = {
         let mut locks = state.project_locks.lock().await;
@@ -1107,7 +1112,13 @@ pub(crate) async fn compile_latex_policy(
             .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(())))
             .clone()
     };
-    let _project_guard = project_lock.lock().await;
+    let _project_guard = project_lock.lock_owned().await;
+    let permit = state
+        .semaphore
+        .clone()
+        .acquire_owned()
+        .await
+        .map_err(|e| e.to_string())?;
 
     let t0 = std::time::Instant::now();
 
@@ -1178,6 +1189,7 @@ pub(crate) async fn compile_latex_policy(
     let work_dir_clone = work_dir.clone();
     let main_file_clone = main_file.clone();
     let compile_result = tokio::task::spawn_blocking(move || {
+        let _permit = permit;
         lower_thread_priority();
         compile_with_texlive_policy(&work_dir_clone, &main_file_clone, engine, incremental, |program, args, dir| {
             let (main, flags) = args.split_last().ok_or("Missing compiler argument")?;
@@ -2765,5 +2777,65 @@ mod editor_source_matching_tests {
         assert_eq!(match_source_line(text, &format!("{text}\n{text}"), 3), None);
         assert_eq!(match_source_line(text, "a\nb\nchanged\nd\ne", 3), None);
         assert_eq!(match_source_line("\n", "\n", 1), Some(1));
+    }
+}
+
+#[cfg(test)]
+mod compilation_admission_tests {
+    use super::*;
+    #[tokio::test]
+    async fn main_build_waits_for_capacity_instead_of_reporting_server_busy() {
+        let state = LatexCompilerState::default();
+        let occupied = state
+            .semaphore
+            .clone()
+            .acquire_many_owned(MAX_CONCURRENT as u32)
+            .await
+            .unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let project = tmp
+            .path()
+            .join("missing-project")
+            .to_string_lossy()
+            .into_owned();
+        let mut task = tokio::spawn(async move {
+            compile_latex_policy(&state, project, "main.tex".into(), true).await
+        });
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(50), &mut task)
+                .await
+                .is_err()
+        );
+        drop(occupied);
+        let error = task.await.unwrap().unwrap_err();
+        assert!(
+            error.contains("No .tex file found"),
+            "Unexpected result after admission: {error}"
+        );
+    }
+    #[tokio::test]
+    async fn shutdown_releases_queued_preview_without_spawning_tex() {
+        let state = LatexCompilerState::default();
+        let _occupied = state
+            .semaphore
+            .clone()
+            .acquire_many_owned(MAX_CONCURRENT as u32)
+            .await
+            .unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let (send, cancel) = tokio::sync::watch::channel(false);
+        let work = tmp.path().to_owned();
+        let task =
+            tokio::spawn(
+                async move { compile_preview(&state, &work, "main.tex", "", cancel).await },
+            );
+        send.send_replace(true);
+        let error = tokio::time::timeout(std::time::Duration::from_secs(1), task)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap_err();
+        assert!(error.contains("shutting down"));
+        assert_eq!(std::fs::read_dir(tmp.path()).unwrap().count(), 0);
     }
 }

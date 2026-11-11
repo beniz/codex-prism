@@ -776,26 +776,77 @@ fn recover_inner(app: &Backend, finish_runs: bool) {
     }
 }
 
+fn build_proposal(
+    app: &Backend,
+    project: &str,
+    id: &str,
+    generation: u64,
+) -> Result<Proposal, String> {
+    let p = load(app, id)?;
+    if p.project_id != project
+        || p.generation != generation
+        || !["ready", "conflicts", "interrupted"].contains(&p.state.as_str())
+    {
+        return Err("Stale proposal build".into());
+    }
+    Ok(p)
+}
 pub(crate) async fn compile(app: Backend, project: String, args: Value) -> Result<Value, String> {
     let id = args["proposalId"].as_str().ok_or("Missing proposalId")?;
     let generation = args["generation"].as_u64().ok_or("Missing generation")?;
-    let p = load(&app, id)?;
-    if p.project_id != project || p.generation != generation {
-        return Err("Stale proposal build".into());
-    }
-    let r = snapshot(&app, &p)?;
-    let files = if args["side"] == "base" {
-        &r.before
-    } else {
-        &r.after
-    };
+    let check = || build_proposal(&app, &project, id, generation).map(|_| ());
+    let p = build_proposal(&app, &project, id, generation)?;
+    let _pin = crate::visual_review::pin_workspace(&app, id)?;
     let main = args["mainFile"].as_str().ok_or("Missing mainFile")?;
-    let mut result = crate::visual_review::proposal_pdf_policy(&app, id, main, files, args["incremental"].as_bool().unwrap_or(false)).await?;
-    result["projectId"] = json!(project);
-    result["proposalId"] = json!(id);
-    result["generation"] = json!(generation);
-    result["threadId"] = json!(p.thread_id);
-    result["workspaceId"] = json!(p.id);
+    let side = if args["side"] == "base" {
+        "base"
+    } else {
+        "result"
+    };
+    let target = projects::revision(&serde_json::to_vec(&(main, side)).map_err(|e| e.to_string())?);
+    let reference = dir(&app, id)?.join(format!("build-{}-{target}.json", p.generation));
+    let previous_reference = fs::read(&reference).ok();
+    // A generation is immutable: a persisted reference avoids rereading/hashing all source assets on tab switches.
+    let cached = if args["loadOnly"] == true {
+        previous_reference
+            .as_ref()
+            .and_then(|bytes| serde_json::from_slice::<String>(bytes).ok())
+            .and_then(|key| crate::visual_review::read_build(&app, id, &key).ok())
+    } else {
+        None
+    };
+    let mut result = if let Some(build) = cached {
+        build
+    } else {
+        let r = snapshot(&app, &p)?;
+        let files = if side == "base" { &r.before } else { &r.after };
+        if args["loadOnly"] == true {
+            crate::visual_review::load_proposal_pdf(&app, id, main, files)?
+        } else {
+            crate::visual_review::proposal_pdf_policy(
+                &app,
+                id,
+                main,
+                files,
+                args["incremental"].as_bool().unwrap_or(false),
+                &check,
+            )
+            .await?
+        }
+    };
+    let _project = app.inner.projects.0.lock().map_err(|e| e.to_string())?;
+    check()?;
+    if !result.is_null() {
+        // A slow cache lookup must not replace a concurrently completed explicit rebuild.
+        if args["loadOnly"] != true || fs::read(&reference).ok() == previous_reference {
+            projects::save_json(&reference, &result["artifactId"])?;
+        }
+        result["projectId"] = json!(project);
+        result["proposalId"] = json!(id);
+        result["generation"] = json!(generation);
+        result["threadId"] = json!(p.thread_id);
+        result["workspaceId"] = json!(p.id);
+    }
     Ok(result)
 }
 
@@ -915,6 +966,49 @@ mod tests {
             json!({"proposalId":p.id,"generation":p.generation}),
         )
         .unwrap()
+    }
+    #[tokio::test]
+    async fn persisted_pdf_reference_loads_without_source_rescan_and_rejects_old_generations() {
+        if which::which("pdflatex").is_err() {
+            return;
+        }
+        let (_d, app, main) = fixture();
+        let p = edit(
+            &app,
+            &main.id,
+            "pdf",
+            "main.tex",
+            b"\\documentclass{article}\n\\begin{document}Proposal PDF\\end{document}",
+        );
+        let mut args = json!({"proposalId":p.id,"generation":p.generation,"mainFile":"main.tex","incremental":false});
+        let first = compile(app.clone(), main.id.clone(), args.clone())
+            .await
+            .unwrap();
+        app.shutdown().await;
+        let app = Backend::new(
+            app.inner.config.clone(),
+            std::sync::Arc::new(crate::RecordingEventSink::default()),
+        )
+        .unwrap();
+        // Temporarily make source blobs unavailable to prove the fast path reads only the saved build.
+        let path = snapshot_path(&app, &p).unwrap();
+        let snapshot = fs::read(&path).unwrap();
+        fs::remove_file(&path).unwrap();
+        args["loadOnly"] = json!(true);
+        assert_eq!(
+            compile(app.clone(), main.id.clone(), args.clone())
+                .await
+                .unwrap(),
+            first
+        );
+        fs::write(&path, snapshot).unwrap();
+        let _next = begin(&app, &main.id, Some("pdf"), None).unwrap();
+        assert_eq!(
+            compile(app.clone(), main.id.clone(), args)
+                .await
+                .unwrap_err(),
+            "Stale proposal build"
+        );
     }
     #[test]
     fn commit_subject_uses_first_prompt_and_resets_after_keep_or_discard() {
