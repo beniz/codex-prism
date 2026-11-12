@@ -132,19 +132,19 @@ export function TemplatePreview() {
         }
 
         if (abort.signal.aborted) return;
-        const docId = await client.openDocument(buffer);
+        const docId = await client.openDocument(buffer, undefined, { priority: "foreground", ownerId: `template:${template.id}` });
         if (gen !== loadGenRef.current) {
           client.closeDocument(docId).catch(() => {});
           return;
         }
         docIdRef.current = docId;
 
-        const count = await client.countPages(docId, { signal: abort.signal });
+        const count = await client.countPages(docId, { signal: abort.signal, priority: "foreground", ownerId: `template:${template.id}` });
         if (gen !== loadGenRef.current) return;
 
         const sizes: PageSize[] = [];
         for (let i = 0; i < count; i++) {
-          const size = await client.getPageSize(docId, i, { signal: abort.signal });
+          const size = await client.getPageSize(docId, i, { signal: abort.signal, priority: "foreground", ownerId: `template:${template.id}` });
           if (gen !== loadGenRef.current) return;
           sizes.push(size);
         }
@@ -211,7 +211,7 @@ export function TemplatePreview() {
       const displayW = size.width * scale;
       const displayH = size.height * scale;
       const dpi = scale * 72 * (window.devicePixelRatio || 1);
-      void client.drawPage(docId, pageIndex, dpi, { signal: request.signal }).then((imageData) => {
+      void client.drawPage(docId, pageIndex, dpi, { signal: request.signal, priority: "foreground", ownerId: `template:${template?.id}` }).then((imageData) => {
         if (cancelled || current !== revision || gen !== loadGenRef.current) return;
         const canvas = canvasRef.current;
         if (!canvas) return;
