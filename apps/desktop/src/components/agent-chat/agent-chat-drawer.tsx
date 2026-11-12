@@ -123,6 +123,7 @@ export function AgentChatDrawer({
     setInputHeight(Math.max(56, Math.min(height, Math.max(56, available))));
   };
   const files = useDocumentStore((d) => d.files);
+  const openingProject = useDocumentStore((d) => !!d.projectRoot && !d.initialized);
   const proposals = useAgentChatStore((state) => state.proposals);
   const t = s.tabs.find((t) => t.id === s.activeTabId)!;
   const questionRequests = s.requests.filter(
@@ -175,7 +176,7 @@ export function AgentChatDrawer({
     setup.models.find((m) => m.model === s.selectedModel) ||
     setup.models.find((m) => m.isDefault);
 
-  const canSend =
+  const canSend = !openingProject &&
     !awaitingAnswer &&
     !s.restoringChats &&
     !!t.draft.trim() &&

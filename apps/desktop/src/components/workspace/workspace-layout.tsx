@@ -38,7 +38,7 @@ export function WorkspaceLayout() {
   const root = activeFile?.type === "tex" ? resolveTexRoot(activeFile.id, files)
     : (getCurrentPdfRootId() ?? resolveTexRoot(activeFile?.id ?? "", files));
   useChatPdfBuilds(files.find((file) => file.id === root)?.relativePath);
-  const initialized = useDocumentStore((s) => s.initialized);
+
   const previewVisible = usePreviewStore((s) => s.visible);
   const setPreviewVisible = usePreviewStore((s) => s.setVisible);
   const workspaceRef = useRef<HTMLDivElement>(null);
@@ -181,13 +181,6 @@ export function WorkspaceLayout() {
     return () => resizeObserver.disconnect();
   }, [getCollapsedSidebarSize, sidebarCollapsed]);
 
-  if (!initialized) {
-    return (
-      <div className="flex h-full items-center justify-center">
-        <div className="text-muted-foreground">Loading project...</div>
-      </div>
-    );
-  }
 
   return (
     <div ref={workspaceRef} className="flex h-full flex-col">

@@ -48,6 +48,7 @@ export const ActivityLine = memo(function ActivityLine({
   );
   const operations = useActivityStore((s) => s.operations);
   const setup = useAgentSetupStore((s) => s.status);
+  const opening = useDocumentStore((s) => !!s.projectRoot && !s.initialized);
   const compiling = useDocumentStore((s) => s.isCompiling);
   const saving = useDocumentStore((s) => s.isSaving);
   const compileError = useDocumentStore((s) => s.compileError);
@@ -99,6 +100,9 @@ export const ActivityLine = memo(function ActivityLine({
         ? "Waiting for your answer"
         : "Waiting for approval";
     tone = "waiting";
+  } else if (opening) {
+    text = "Opening project — reading document files…";
+    tone = "busy";
   } else if (
     operation &&
     (operation.projectWide ||

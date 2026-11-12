@@ -163,6 +163,23 @@ describe("useDocumentStore", () => {
   });
 
   describe("openProject", () => {
+    it("shows the workspace before registration finishes", async () => {
+      let release!: () => void;
+      vi.mocked(backend.projects.register).mockImplementationOnce(async () => {
+        await new Promise<void>(resolve => { release = resolve; });
+        return { id: "project-id", root: "/opening", name: "Opening" };
+      });
+      vi.mocked(invoke).mockResolvedValue(undefined as never);
+      vi.mocked(readDir).mockResolvedValue([]);
+      const task = useDocumentStore.getState().openProject("/opening");
+      expect(useDocumentStore.getState().projectRoot).toBe("/opening");
+      expect(useDocumentStore.getState().initialized).toBe(false);
+      expect(useDocumentStore.getState().files).toEqual([]);
+      release();
+      await task;
+      expect(useDocumentStore.getState().initialized).toBe(true);
+    });
+
     it("opens a template's chosen main file ahead of main.tex", async () => {
       vi.mocked(invoke).mockResolvedValue(undefined as never);
       vi.mocked(readDir).mockResolvedValue([
@@ -238,7 +255,8 @@ describe("useDocumentStore", () => {
       expect(readDir).not.toHaveBeenCalledWith("/project/__pycache__");
       expect(stat).toHaveBeenCalledTimes(1);
       expect(stat).toHaveBeenCalledWith("/project/tool.py");
-      expect(readTextFile).toHaveBeenCalledTimes(2);
+      expect(readTextFile).toHaveBeenCalledTimes(1);
+      expect(readTextFile).not.toHaveBeenCalledWith("/project/tool.py");
       expect(readTextFile).not.toHaveBeenCalledWith("/project/compiled.pyc");
       expect(
         useDocumentStore.getState().files.map((file) => file.relativePath),

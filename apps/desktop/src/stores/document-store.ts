@@ -264,6 +264,7 @@ function scheduleAutoSave() {
   }, 2000);
 }
 
+let openingGeneration = 0;
 const refreshQueue = coalescedRefresh();
 
 export const useDocumentStore = create<DocumentState>()((set, get) => ({
@@ -288,14 +289,26 @@ export const useDocumentStore = create<DocumentState>()((set, get) => ({
 
   openProject: async (rootPath: string, preferredMainFile?: string) => {
     log.info(`Opening project: ${rootPath}`);
+    const generation = ++openingGeneration;
+    const current = () => generation === openingGeneration;
+    clearPdfBytesCache();
+    set({ projectRoot: rootPath, projectId: null, files: [], folders: [],
+      activeFileId: "", initialized: false, compileError: null });
+    try {
     const project = await backend.projects.register(rootPath);
+    if (!current()) return;
     set({ projectId: project.id });
     await invoke("allow_project_directory", { rootPath });
     const { files: fsFiles, folders: fsFolders } =
       await scanProjectFolder(rootPath);
+    if (!current()) return;
     const projectFiles: ProjectFile[] = [];
-
-    for (const f of fsFiles) {
+    // Bound native reads; prioritize TeX sources before ancillary files.
+    const ordered = [...fsFiles].sort((a, b) => Number(b.type === "tex") - Number(a.type === "tex"));
+    let next = 0;
+    await Promise.all(Array.from({ length: Math.min(4, ordered.length) }, async () => {
+      while (next < ordered.length && current()) {
+      const f = ordered[next++];
       const pf: ProjectFile = {
         id: f.relativePath,
         name: f.relativePath.split(/[/\\]/).pop() || f.relativePath,
@@ -309,13 +322,9 @@ export const useDocumentStore = create<DocumentState>()((set, get) => ({
 
       // Load content for text-based files (skip large non-essential files)
       if (
-        f.type === "tex" ||
-        f.type === "bib" ||
-        f.type === "style" ||
-        f.type === "other"
+        f.type === "tex"
       ) {
-        const isLargeNonEssential =
-          f.type === "other" && f.fileSize > LARGE_FILE_THRESHOLD;
+        const isLargeNonEssential = false;
         if (!isLargeNonEssential) {
           try {
             pf.content = await readTexFileContent(f.ref);
@@ -327,22 +336,14 @@ export const useDocumentStore = create<DocumentState>()((set, get) => ({
         // Large "other" files: content stays undefined, loaded on-demand via loadFileContent
       }
 
-      // Load dataUrl for image files (skip very large images)
-      if (f.type === "image") {
-        if (f.fileSize <= LARGE_FILE_THRESHOLD) {
-          try {
-            pf.dataUrl = await readImageAsDataUrl(f.ref);
-          } catch {
-            pf.diskToken = undefined;
-            // Retry on refresh.
-          }
-        }
-      }
-
       // PDF files are loaded on-demand via readFile in InlinePdfContent
 
       projectFiles.push(pf);
-    }
+      }
+    }));
+    if (!current()) return;
+    const fileOrder = new Map(fsFiles.map((f, i) => [f.relativePath, i]));
+    projectFiles.sort((a, b) => fileOrder.get(a.id)! - fileOrder.get(b.id)!);
 
     // Find the main tex file
     const mainTex =
@@ -373,10 +374,14 @@ export const useDocumentStore = create<DocumentState>()((set, get) => ({
     const historyStore = useHistoryStore.getState();
     historyStore
       .init(rootPath)
-      .then(() => historyStore.loadSnapshots(rootPath))
+
       .catch((err) => {
         log.error("Failed to initialize history", { error: String(err) });
       });
+    } catch (error) {
+      if (current()) set({ projectRoot: null, projectId: null, files: [], folders: [], initialized: false });
+      throw error;
+    }
   },
 
   renameProject: async (newName: string) => {
@@ -438,6 +443,7 @@ export const useDocumentStore = create<DocumentState>()((set, get) => ({
   },
 
   closeProject: () => {
+    openingGeneration++;
     log.info("Closing project");
     if (autoSaveTimer) {
       clearTimeout(autoSaveTimer);
@@ -1146,15 +1152,21 @@ export const useDocumentStore = create<DocumentState>()((set, get) => ({
     const state = get();
     const file = state.files.find((f) => f.id === id);
     if (!file || file.content !== undefined) return; // already loaded
+    const generation = openingGeneration;
     try {
+      if (file.type === "image") {
+        if (file.dataUrl || (file.fileSize ?? 0) > LARGE_FILE_THRESHOLD) return;
+        const dataUrl = await readImageAsDataUrl(file.ref);
+        if (generation === openingGeneration) set(s => ({ files: s.files.map(f => f === file ? { ...f, dataUrl } : f) }));
+        return;
+      }
       const content = await readTexFileContent(file.ref);
+      if (generation !== openingGeneration) return;
       set((s) => ({
-        files: s.files.map((f) => (f.id === id ? { ...f, content } : f)),
+        files: s.files.map((f) => (f.id === id && f.content === undefined && !f.isDirty ? { ...f, content } : f)),
       }));
-    } catch {
-      set((s) => ({
-        files: s.files.map((f) => (f.id === id ? { ...f, content: "" } : f)),
-      }));
+    } catch (error) {
+      log.warn("Could not load file", { error: String(error) });
     }
   },
 
@@ -1178,7 +1190,7 @@ export const useDocumentStore = create<DocumentState>()((set, get) => ({
   },
 
   setContent: (content) => {
-    if (useAgentChatStore.getState().locked) return;
+    if (!get().initialized || useAgentChatStore.getState().locked) return;
     const state = get();
     set({
       files: state.files.map((f) =>
