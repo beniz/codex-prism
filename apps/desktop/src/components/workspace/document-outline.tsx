@@ -1,24 +1,29 @@
 import { memo, useEffect, useState } from "react";
 import { ListIcon } from "lucide-react";
-import { parseTableOfContents, type TocItem } from "@/lib/latex-outline";
+import {
+  parseProjectTableOfContents,
+  type ProjectTocItem,
+} from "@/lib/latex-outline";
 import { usePdfNavigationStore } from "@/stores/pdf-navigation-store";
+import { resolveTexRoot } from "@/lib/latex-project";
 import { useDocumentStore } from "@/stores/document-store";
 
 const OutlineEntries = memo(function OutlineEntries({
   toc,
 }: {
-  toc: TocItem[];
+  toc: ProjectTocItem[];
 }) {
-  function jump(line: number) {
+  function jump(item: ProjectTocItem) {
     const state = useDocumentStore.getState();
-    const content =
-      state.files.find((file) => file.id === state.activeFileId)?.content ?? "";
-    const lines = content.split("\n");
+    const file = state.files.find((file) => file.id === item.fileId);
+    if (!file || file.content === undefined) return;
+    const line = item.line;
+    const lines = file.content.split("\n");
     let position = 0;
     for (let i = 0; i < line - 1 && i < lines.length; i++)
       position += lines[i].length + 1;
+    if (state.activeFileId !== file.id) state.setActiveFile(file.id);
     state.requestJumpToPosition(position);
-    const file = state.files.find((file) => file.id === state.activeFileId);
     if (state.projectRoot && file?.type === "tex") {
       usePdfNavigationStore.getState().navigate({
         projectRoot: state.projectRoot,
@@ -34,7 +39,7 @@ const OutlineEntries = memo(function OutlineEntries({
         key={index}
         className="flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-left text-sm transition-colors hover:bg-sidebar-accent/50"
         style={{ paddingLeft: `${Math.max(0, item.level - 1) * 12 + 8}px` }}
-        onClick={() => jump(item.line)}
+        onClick={() => jump(item)}
       >
         {item.number && (
           <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
@@ -53,16 +58,16 @@ const OutlineEntries = memo(function OutlineEntries({
 
 // Mount with the active file as its key so switching files updates immediately.
 export function DocumentOutline() {
-  const content = useDocumentStore(
-    (state) =>
-      state.files.find((file) => file.id === state.activeFileId)?.content ?? "",
-  );
-  const [toc, setToc] = useState(() => parseTableOfContents(content));
+  const files = useDocumentStore((state) => state.files);
+  const activeFileId = useDocumentStore((state) => state.activeFileId);
+  const parse = () =>
+    parseProjectTableOfContents(files, resolveTexRoot(activeFileId, files));
+  const [toc, setToc] = useState(parse);
   useEffect(() => {
     // Parsing and reconciling every heading must not block the typing frame.
-    const timer = setTimeout(() => setToc(parseTableOfContents(content)), 250);
+    const timer = setTimeout(() => setToc(parse()), 250);
     return () => clearTimeout(timer);
-  }, [content]);
+  }, [files, activeFileId]);
   return (
     <div className="flex h-full flex-col">
       <div className="flex h-8 shrink-0 items-center justify-center gap-2 px-3">

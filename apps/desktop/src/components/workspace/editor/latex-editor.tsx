@@ -28,7 +28,6 @@ import {
   indentLess,
   toggleComment,
 } from "@codemirror/commands";
-import { syntaxTreeAvailable } from "@codemirror/language";
 import { scientificEditorTheme, scientificLatex } from "@/lib/syntax-theme";
 import { useTheme } from "next-themes";
 import {
@@ -45,7 +44,7 @@ import {
   acceptChunk,
   rejectChunk,
 } from "@codemirror/merge";
-import { latexLinter } from "codemirror-lang-latex";
+import { lintProjectLatex } from "@/lib/latex-lint";
 import { bibtex } from "./lang-bibtex";
 import {
   linter,
@@ -672,13 +671,8 @@ export function LatexEditor() {
         ...(activeFile?.type === "tex"
           ? [
               linter((view) => {
-                // Wait until the Lezer parser has fully parsed the document
-                // to avoid false positives from incomplete syntax trees
-                if (!syntaxTreeAvailable(view.state, view.state.doc.length)) {
-                  return [];
-                }
-                const baseLinter = latexLinter();
-                const diagnostics = baseLinter(view);
+                const doc = useDocumentStore.getState();
+                const diagnostics = lintProjectLatex(view, doc.activeFileId, doc.files);
                 return diagnostics.map((d: Diagnostic) => ({
                   ...d,
                   actions: [

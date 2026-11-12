@@ -68,3 +68,39 @@ it("shows headings immediately on open, then updates after typing pauses", () =>
     vi.useRealTimers();
   }
 });
+
+it("keeps the deck outline when a fragment is active and navigates to another source", () => {
+  vi.useFakeTimers();
+  (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
+  const host = document.createElement("div");
+  const root = createRoot(host);
+  const file = (id: string, content: string) => ({ id, name: id, relativePath: id, type: "tex" as const, content });
+  const main = file("slides.tex", "\\documentclass{beamer}\n\\begin{document}\n\\input{intro}\n\\input{results}\n\\end{document}");
+  const intro = file("intro.tex", "\\begin{frame}{Introduction}\\end{frame}");
+  const results = file("results.tex", "% results\n\\begin{frame}{Results}\\end{frame}");
+  const setActiveFile = vi.fn((id: string) => useDocumentStore.setState({ activeFileId: id }));
+  act(() => useDocumentStore.setState({
+    files: [main, intro, results] as any,
+    activeFileId: intro.id,
+    setActiveFile,
+  }));
+  try {
+    act(() => root.render(<DocumentOutline />));
+    expect(host.textContent).toContain("1Introduction2Results");
+    act(() => host.querySelectorAll("button")[1].click());
+    expect(setActiveFile).toHaveBeenCalledWith("results.tex");
+    expect(useDocumentStore.getState().requestJumpToPosition).toHaveBeenLastCalledWith(10);
+    expect(usePdfNavigationStore.getState().request).toMatchObject({
+      filePath: "results.tex", line: 2, sourceLine: "\\begin{frame}{Results}\\end{frame}",
+    });
+    act(() => vi.advanceTimersByTime(250));
+    expect(host.textContent).toContain("1Introduction2Results");
+    // Changes to another file must update the deck while Results stays active.
+    act(() => useDocumentStore.setState({ files: [main, { ...intro, content: "\\begin{frame}{Revised}\\end{frame}" }, results] as any }));
+    act(() => vi.advanceTimersByTime(250));
+    expect(host.textContent).toContain("1Revised2Results");
+  } finally {
+    act(() => root.unmount());
+    vi.useRealTimers();
+  }
+});

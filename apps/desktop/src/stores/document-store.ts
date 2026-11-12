@@ -1,3 +1,5 @@
+import { resolveTexRoot } from "@/lib/latex-project";
+export { resolveTexRoot } from "@/lib/latex-project";
 import { clearChatPdfCache } from "@/hooks/use-chat-pdf";
 import { toast } from "sonner";
 import { coalescedRefresh } from "@/lib/coalesced-refresh";
@@ -158,62 +160,6 @@ interface DocumentState {
 
 function getActiveFile(state: { files: ProjectFile[]; activeFileId: string }) {
   return state.files.find((f) => f.id === state.activeFileId);
-}
-
-/**
- * Resolve the root .tex file for compilation.
- *
- * Priority order:
- * 1. `% !TEX root = <file>` magic comment in the first 20 lines of the active file
- * 2. The file itself, if it contains `\documentclass`
- * 3. `main.tex` or `document.tex` that contains `\documentclass`
- * 4. Any other .tex file in the project that contains `\documentclass`
- * 5. Fallback: the active file itself
- */
-export function resolveTexRoot(fileId: string, files: ProjectFile[]): string {
-  const file = files.find((f) => f.id === fileId);
-  if (!file || file.type !== "tex" || !file.content) return fileId;
-
-  // 1. Check for % !TEX root magic comment
-  const lines = file.content.split("\n").slice(0, 20);
-  for (const line of lines) {
-    const match = line.match(/^%\s*!TEX\s+root\s*=\s*(.+)/i);
-    if (match) {
-      const rootPath = match[1].trim();
-      const target =
-        files.find((f) => f.relativePath === rootPath) ??
-        files.find((f) => f.name === rootPath);
-      if (target) return target.id;
-    }
-  }
-
-  // 2. If the current file contains \documentclass, it is a root file
-  if (/\\documentclass[\s{[]/.test(file.content)) {
-    return fileId;
-  }
-
-  // 3. Look for main.tex or document.tex with \documentclass
-  const wellKnown = files.find(
-    (f) =>
-      (f.name === "main.tex" || f.name === "document.tex") &&
-      f.type === "tex" &&
-      f.content &&
-      /\\documentclass[\s{[]/.test(f.content),
-  );
-  if (wellKnown) return wellKnown.id;
-
-  // 4. Any .tex file with \documentclass
-  const anyRoot = files.find(
-    (f) =>
-      f.type === "tex" &&
-      f.id !== fileId &&
-      f.content &&
-      /\\documentclass[\s{[]/.test(f.content),
-  );
-  if (anyRoot) return anyRoot.id;
-
-  // 5. Fallback: the active file itself
-  return fileId;
 }
 
 /** Re-key the external PDF bytes cache when a file is renamed/moved. */
