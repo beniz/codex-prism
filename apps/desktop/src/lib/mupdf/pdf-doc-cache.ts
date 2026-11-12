@@ -12,6 +12,8 @@ interface CachedDoc {
 
 const MAX_OPEN_DOCS = 5;
 const cache = new Map<string, CachedDoc>();
+let epoch = 0;
+const opening = new Map<string, Promise<DocCacheResult>>();
 
 /** Create a fast fingerprint from PDF bytes (length + sampled bytes). */
 function computeFingerprint(data: Uint8Array): string {
@@ -83,37 +85,62 @@ export async function getOrOpenDocument(
   const hit = getCachedDocument(data, artifactId);
   if (hit) return hit;
 
-  // Cache miss — evict if needed, then open
-  await evictOldest();
   const fingerprint = artifactId ?? computeFingerprint(data);
+  const pending = opening.get(fingerprint);
+  if (pending) return pending;
+  const task = (async () => {
+    // Cache miss — evict if needed, then open
+    const startedEpoch = epoch;
+    await evictOldest();
+    if (startedEpoch !== epoch)
+      throw new DOMException("Cancelled", "AbortError");
 
-  log.debug(
-    `Cache miss, opening document (${(data.byteLength / 1024).toFixed(0)} KB)`,
-  );
-  const client = getMupdfClient();
-  // Always copy — the original buffer may not be transferable (e.g., from Tauri),
-  // and transfer detaches the ArrayBuffer which would corrupt the pdfCache reference.
-  const buffer = data.buffer.slice(
-    data.byteOffset,
-    data.byteOffset + data.byteLength,
-  ) as ArrayBuffer;
-  const docId = await client.openDocument(buffer);
-  const pageSizes = await client.getAllPageSizes(docId);
+    log.debug(
+      `Cache miss, opening document (${(data.byteLength / 1024).toFixed(0)} KB)`,
+    );
+    const client = getMupdfClient();
+    // Always copy — the original buffer may not be transferable (e.g., from Tauri),
+    // and transfer detaches the ArrayBuffer which would corrupt the pdfCache reference.
+    const buffer = data.buffer.slice(
+      data.byteOffset,
+      data.byteOffset + data.byteLength,
+    ) as ArrayBuffer;
+    const docId = await client.openDocument(buffer);
+    let pageSizes: PageSize[];
+    try {
+      if (startedEpoch !== epoch)
+        throw new DOMException("Cancelled", "AbortError");
+      pageSizes = await client.getAllPageSizes(docId);
+      if (startedEpoch !== epoch)
+        throw new DOMException("Cancelled", "AbortError");
+    } catch (error) {
+      await client.closeDocument(docId).catch(() => {});
+      throw error;
+    }
 
-  cache.set(fingerprint, {
-    docId,
-    pageSizes,
-    lastAccess: Date.now(),
-  });
+    cache.set(fingerprint, {
+      docId,
+      pageSizes,
+      lastAccess: Date.now(),
+    });
 
-  log.info(
-    `Opened doc ${docId}: ${pageSizes.length} pages, cache size=${cache.size}`,
-  );
-  return { docId, pageSizes, cacheHit: false };
+    log.info(
+      `Opened doc ${docId}: ${pageSizes.length} pages, cache size=${cache.size}`,
+    );
+    return { docId, pageSizes, cacheHit: false };
+  })();
+  opening.set(fingerprint, task);
+  try {
+    return await task;
+  } finally {
+    if (opening.get(fingerprint) === task) opening.delete(fingerprint);
+  }
 }
 
 /** Close all cached documents (e.g., on project close). */
 export async function clearDocCache(): Promise<void> {
+  epoch++;
+  opening.clear();
   const entries = [...cache.values()];
   const count = entries.length;
   cache.clear();

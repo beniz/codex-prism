@@ -1,3 +1,4 @@
+import type { ChangePageTarget } from "@/hooks/use-first-changed-page";
 import {
   memo,
   useCallback,
@@ -200,8 +201,9 @@ export interface CaptureResult {
 interface PdfViewerProps {
   data: ArrayBuffer;
   artifactId?: string;
-  /** One-time destination when a different PDF is loaded. */
-  pageOnLoad?: number;
+  /** One-time destination bound to a completed analysis and displayed artifact. */
+  changePageTarget?: ChangePageTarget;
+  onChangePageShown?: (key: string) => void;
   sourceLocation?: { page: number; x: number; y: number } | null;
   selectedRegion?: { page: number; x: number; y: number };
   onPageClick?: (page: number, x: number, y: number) => void;
@@ -228,7 +230,8 @@ interface PdfViewerProps {
 export const PdfViewer = memo(function PdfViewer({
   data,
   artifactId,
-  pageOnLoad,
+  changePageTarget,
+  onChangePageShown,
   selectedRegion,
   sourceLocation,
   onPageClick,
@@ -257,6 +260,9 @@ export const PdfViewer = memo(function PdfViewer({
   const [loading, setLoading] = useState(true);
   const docIdRef = useRef(0);
   const loadGenRef = useRef(0);
+  const [loadedDocument, setLoadedDocument] = useState<{ data: ArrayBuffer; artifactId?: string }>();
+  const appliedChange = useRef<string | undefined>(undefined);
+  useEffect(() => () => { loadGenRef.current++; }, []);
 
   const scaleRef = useRef(scale);
   scaleRef.current = scale;
@@ -449,13 +455,14 @@ export const PdfViewer = memo(function PdfViewer({
     const syncResult = getCachedDocument(pdfData, artifactId);
     if (syncResult && syncResult.docId === docIdRef.current) {
       // Same document already displayed — only restore scroll position on file switch
+      setLoadedDocument({ data, artifactId });
       isFirstLoad.current = false;
       if (rootFileId) {
         const targetPage = scrollPositionCache.get(rootFileId) ?? 0;
         if (targetPage > 0) {
           requestAnimationFrame(() => {
             const container = containerRef.current;
-            if (container) scrollToPage(container, targetPage);
+            if (container && gen === loadGenRef.current) scrollToPage(container, targetPage);
           });
         }
       }
@@ -495,6 +502,7 @@ export const PdfViewer = memo(function PdfViewer({
     // Synchronous cache hit for a different doc (file switch to cached PDF)
     if (syncResult) {
       docIdRef.current = syncResult.docId;
+      setLoadedDocument({ data, artifactId });
       setPageSizes(syncResult.pageSizes);
       setLoading(false);
 
@@ -507,7 +515,7 @@ export const PdfViewer = memo(function PdfViewer({
       isFirstLoad.current = false;
       onLoadSuccess?.(syncResult.pageSizes.length);
 
-      const targetPage = pageOnLoad ?? (rootFileId ? scrollPositionCache.get(rootFileId) : undefined) ?? savedPageRef.current;
+      const targetPage = (rootFileId ? scrollPositionCache.get(rootFileId) : undefined) ?? savedPageRef.current;
       if (targetPage > 0) scrollToPageEl(Math.min(targetPage, syncResult.pageSizes.length));
       return;
     }
@@ -524,6 +532,7 @@ export const PdfViewer = memo(function PdfViewer({
         if (gen !== loadGenRef.current) return;
 
         docIdRef.current = docId;
+        setLoadedDocument({ data, artifactId });
         setPageSizes(sizes);
         setLoading(false);
 
@@ -533,18 +542,35 @@ export const PdfViewer = memo(function PdfViewer({
         isFirstLoad.current = false;
         onLoadSuccess?.(sizes.length);
 
-        const targetPage = pageOnLoad ?? savedPageRef.current;
+        const targetPage = savedPageRef.current;
         if (targetPage > 0) {
           savedPageRef.current = 0;
           scrollToPageEl(Math.min(targetPage, sizes.length));
         }
       } catch (err) {
-        if (gen !== loadGenRef.current) return;
+        if (gen !== loadGenRef.current || (err instanceof DOMException && err.name === "AbortError")) return;
         setLoading(false);
         onError?.(err instanceof Error ? err.message : String(err));
       }
     })();
   }, [data, artifactId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Analysis can finish after loading and after user scrolling. Its owner explicitly
+  // requests one jump; never apply it to an inactive or different PDF revision.
+  useEffect(() => {
+    const target = changePageTarget;
+    if (!isActive || !target || target.artifactId !== artifactId || (loadedDocument?.data !== data || loadedDocument.artifactId !== artifactId) || appliedChange.current === target.key) return;
+    const gen = loadGenRef.current;
+    const frame = requestAnimationFrame(() => {
+      const container = containerRef.current;
+      if (gen !== loadGenRef.current || !container) return;
+      if (scrollToPage(container, Math.min(target.page, pageSizes.length))) {
+        appliedChange.current = target.key;
+        onChangePageShown?.(target.key);
+      }
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [changePageTarget, isActive, artifactId, loadedDocument, data, pageSizes, onChangePageShown]);
 
   useEffect(() => {
     if (!selectedRegion) return;

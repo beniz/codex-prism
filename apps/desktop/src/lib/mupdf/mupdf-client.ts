@@ -8,146 +8,199 @@ import type {
 import { createLogger } from "@/lib/debug/logger";
 
 const log = createLogger("mupdf-worker");
-
+export interface RequestOptions {
+  signal?: AbortSignal;
+}
 export interface MupdfClient {
   openDocument(buffer: ArrayBuffer, magic?: string): Promise<number>;
   closeDocument(docId: number): Promise<void>;
-  countPages(docId: number): Promise<number>;
-  getPageSize(docId: number, pageIndex: number): Promise<PageSize>;
-  getAllPageSizes(docId: number): Promise<PageSize[]>;
-  drawPage(docId: number, pageIndex: number, dpi: number): Promise<ImageData>;
-  getPageText(docId: number, pageIndex: number): Promise<StructuredTextData>;
-  getPageLinks(docId: number, pageIndex: number): Promise<LinkData[]>;
+  countPages(docId: number, options?: RequestOptions): Promise<number>;
+  getPageSize(
+    docId: number,
+    pageIndex: number,
+    options?: RequestOptions,
+  ): Promise<PageSize>;
+  getAllPageSizes(docId: number, options?: RequestOptions): Promise<PageSize[]>;
+  drawPage(
+    docId: number,
+    pageIndex: number,
+    dpi: number,
+    options?: RequestOptions,
+  ): Promise<ImageData>;
+  getPageText(
+    docId: number,
+    pageIndex: number,
+    options?: RequestOptions,
+  ): Promise<StructuredTextData>;
+  getPageLinks(
+    docId: number,
+    pageIndex: number,
+    options?: RequestOptions,
+  ): Promise<LinkData[]>;
   renderThumbnail(
     docId: number,
     pageIndex: number,
     targetWidth: number,
+    options?: RequestOptions,
   ): Promise<ArrayBuffer>;
-  reviewRegions(docId: number, boxes: SourceBox[]): Promise<Region[]>;
-  reviewCrop(docId: number, region: Region): Promise<ArrayBuffer>;
+  reviewRegions(
+    docId: number,
+    boxes: SourceBox[],
+    options?: RequestOptions,
+  ): Promise<Region[]>;
+  reviewCrop(
+    docId: number,
+    region: Region,
+    options?: RequestOptions,
+  ): Promise<ArrayBuffer>;
   destroy(): void;
 }
 
-type PendingRequest = {
-  resolve: (value: any) => void;
-  reject: (error: Error) => void;
-};
+interface Request {
+  id: number;
+  method: string;
+  args: unknown[];
+  finish(error?: Error, value?: unknown): void;
+}
+const TIMEOUT_MS = 30_000;
 
-function createClient(): MupdfClient {
+/** Keep waiting work here: messages already posted to synchronous WASM cannot be cancelled. */
+export function createMupdfClient(): MupdfClient {
   const worker = new Worker(new URL("./mupdf-worker.ts", import.meta.url), {
     type: "module",
   });
-
-  const pending = new Map<number, PendingRequest>();
+  const queue: Request[] = [];
+  let active: Request | undefined;
+  let ready = false;
+  let failed: Error | undefined;
   let nextId = 1;
-  let ready: Promise<void>;
-  let resolveReady: () => void;
+  let executionTimer: ReturnType<typeof setTimeout> | undefined;
+  const initializationTimer = setTimeout(
+    () => fail(new Error("MuPDF worker initialization timed out")),
+    TIMEOUT_MS,
+  );
 
-  ready = new Promise((resolve) => {
-    resolveReady = resolve;
-  });
+  function fail(error: Error) {
+    if (failed) return;
+    failed = error;
+    clearTimeout(initializationTimer);
+    clearTimeout(executionTimer);
+    worker.terminate();
+    active?.finish(error);
+    active = undefined;
+    for (const request of queue.splice(0)) request.finish(error);
+    // Do not replace this client: cached document IDs belong to this worker.
+    log.error("Worker unavailable", { error: String(error) });
+  }
 
-  worker.onmessage = (event: MessageEvent) => {
-    const data = event.data as WorkerResponse;
-    const [type, id, payload] = data;
+  function dispatch() {
+    if (!ready || failed || active || !queue.length) return;
+    const request = queue.shift()!;
+    active = request;
+    executionTimer = setTimeout(
+      () => fail(new Error(`MuPDF worker timeout: ${request.method}`)),
+      TIMEOUT_MS,
+    );
+    try {
+      worker.postMessage([request.method, request.id, request.args], {
+        transfer: request.args.filter(
+          (arg): arg is ArrayBuffer => arg instanceof ArrayBuffer,
+        ),
+      });
+      request.args = [];
+    } catch (error) {
+      clearTimeout(executionTimer);
+      active = undefined;
+      request.finish(error instanceof Error ? error : new Error(String(error)));
+      dispatch();
+    }
+  }
 
+  worker.onmessage = (event: MessageEvent<WorkerResponse>) => {
+    const [type, id, payload] = event.data;
+    if (failed) return;
     if (type === "INIT") {
-      log.info("Worker initialized");
-      resolveReady();
+      clearTimeout(initializationTimer);
+      ready = true;
+      dispatch();
       return;
     }
-
-    const request = pending.get(id);
-    if (!request) return;
-    pending.delete(id);
-
-    if (type === "RESULT") {
-      request.resolve(payload);
-    } else if (type === "ERROR") {
-      const err = payload as { name: string; message: string };
-      request.reject(new Error(`${err.name}: ${err.message}`));
-    }
+    if (!active || active.id !== id) return;
+    const request = active;
+    active = undefined;
+    clearTimeout(executionTimer);
+    if (type === "ERROR") {
+      const error = payload as { name: string; message: string };
+      request.finish(new Error(`${error.name}: ${error.message}`));
+    } else request.finish(undefined, payload);
+    dispatch();
   };
+  worker.onerror = (event) =>
+    fail(new Error(event.message || "MuPDF worker failed"));
+  worker.onmessageerror = () =>
+    fail(new Error("Invalid MuPDF worker response"));
 
-  worker.onerror = (event) => {
-    log.error("Worker fatal error", { message: event.message });
-    // Nullify singleton so next getMupdfClient() creates a fresh worker
-    instance = null;
-  };
-
-  const CALL_TIMEOUT_MS = 30_000;
-
-  function call(method: string, ...args: unknown[]): Promise<any> {
-    return ready.then(() => {
-      return new Promise((resolve, reject) => {
-        const id = nextId++;
-
-        const timer = setTimeout(() => {
-          if (pending.has(id)) {
-            pending.delete(id);
-            reject(
-              new Error(
-                `MuPDF worker timeout: ${method} took longer than ${CALL_TIMEOUT_MS}ms`,
-              ),
-            );
-          }
-        }, CALL_TIMEOUT_MS);
-
-        pending.set(id, {
-          resolve: (value: any) => {
-            clearTimeout(timer);
-            resolve(value);
-          },
-          reject: (error: Error) => {
-            clearTimeout(timer);
-            reject(error);
-          },
-        });
-
-        const transferables: Transferable[] = [];
-        for (const arg of args) {
-          if (arg instanceof ArrayBuffer) {
-            transferables.push(arg);
-          }
-        }
-
-        worker.postMessage([method, id, args], { transfer: transferables });
-      });
+  function call<T>(
+    method: string,
+    args: unknown[],
+    options?: RequestOptions,
+  ): Promise<T> {
+    const signal = options?.signal;
+    if (signal?.aborted)
+      return Promise.reject(new DOMException("Cancelled", "AbortError"));
+    if (failed) return Promise.reject(failed);
+    return new Promise<T>((resolve, reject) => {
+      let settled = false;
+      const request: Request = {
+        id: nextId++,
+        method,
+        args,
+        finish(error, value) {
+          if (settled) return;
+          settled = true;
+          signal?.removeEventListener("abort", abort);
+          request.args = [];
+          if (error) reject(error);
+          else resolve(value as T);
+        },
+      };
+      function abort() {
+        const index = queue.indexOf(request);
+        if (index >= 0) queue.splice(index, 1);
+        request.finish(new DOMException("Cancelled", "AbortError"));
+        // An aborted active request still owns the slot until the worker replies.
+      }
+      signal?.addEventListener("abort", abort, { once: true });
+      queue.push(request);
+      dispatch();
     });
   }
 
   return {
     openDocument: (buffer, magic = "application/pdf") =>
-      call("openDocument", buffer, magic),
-    closeDocument: (docId) => call("closeDocument", docId),
-    countPages: (docId) => call("countPages", docId),
-    getPageSize: (docId, pageIndex) => call("getPageSize", docId, pageIndex),
-    getAllPageSizes: (docId) => call("getAllPageSizes", docId),
-    drawPage: (docId, pageIndex, dpi) =>
-      call("drawPage", docId, pageIndex, dpi),
-    getPageText: (docId, pageIndex) => call("getPageText", docId, pageIndex),
-    getPageLinks: (docId, pageIndex) => call("getPageLinks", docId, pageIndex),
-    renderThumbnail: (docId, pageIndex, targetWidth) =>
-      call("renderThumbnail", docId, pageIndex, targetWidth),
-    reviewRegions: (docId, boxes) => call("reviewRegions", docId, boxes),
-    reviewCrop: async (docId, region) => {
-      const start = performance.now();
-      const bytes = (await call("reviewCrop", docId, region)) as ArrayBuffer;
-      log.debug("Visual crop rendered", {
-        durationMs: Math.round(performance.now() - start),
-        bytes: bytes.byteLength,
-      });
-      return bytes;
-    },
-    destroy: () => worker.terminate(),
+      call("openDocument", [buffer, magic]),
+    closeDocument: (docId) => call("closeDocument", [docId]),
+    countPages: (docId, options) => call("countPages", [docId], options),
+    getPageSize: (docId, pageIndex, options) =>
+      call("getPageSize", [docId, pageIndex], options),
+    getAllPageSizes: (docId, options) =>
+      call("getAllPageSizes", [docId], options),
+    drawPage: (docId, pageIndex, dpi, options) =>
+      call("drawPage", [docId, pageIndex, dpi], options),
+    getPageText: (docId, pageIndex, options) =>
+      call("getPageText", [docId, pageIndex], options),
+    getPageLinks: (docId, pageIndex, options) =>
+      call("getPageLinks", [docId, pageIndex], options),
+    renderThumbnail: (docId, pageIndex, width, options) =>
+      call("renderThumbnail", [docId, pageIndex, width], options),
+    reviewRegions: (docId, boxes, options) =>
+      call("reviewRegions", [docId, boxes], options),
+    reviewCrop: (docId, region, options) =>
+      call("reviewCrop", [docId, region], options),
+    destroy: () => fail(new Error("MuPDF worker was closed")),
   };
 }
-
 let instance: MupdfClient | null = null;
-
 export function getMupdfClient(): MupdfClient {
-  if (!instance) {
-    instance = createClient();
-  }
-  return instance;
+  return (instance ??= createMupdfClient());
 }

@@ -77,14 +77,17 @@ export function ProposalReport({
           "compile",
           { mainFile: main, side: "base" },
         );
+        if (abort.signal.aborted) return;
         const before = await client.openDocument(
           new Uint8Array(base.bytes).buffer,
         );
         opened.push(before);
+        if (abort.signal.aborted) return;
         const after = await client.openDocument(
           new Uint8Array(result.bytes).buffer,
         );
         opened.push(after);
+        if (abort.signal.aborted) return;
         const cards = [];
         for (const change of proposal.changes) {
           if (abort.signal.aborted) return;
@@ -109,24 +112,27 @@ export function ProposalReport({
             before: await client.reviewRegions(
               before,
               locate(base.locations, "before"),
+              { signal: abort.signal },
             ),
             after: await client.reviewRegions(
               after,
               locate(result.locations, "after"),
+              { signal: abort.signal },
             ),
           });
         }
         if (!abort.signal.aborted) setReport({ before, after, cards });
       } catch (e) {
+        for (const id of opened.splice(0)) void client.closeDocument(id).catch(() => {});
         if (!abort.signal.aborted) setError(String(e));
       } finally {
         if (abort.signal.aborted)
-          for (const id of opened.splice(0)) void client.closeDocument(id);
+          for (const id of opened.splice(0)) void client.closeDocument(id).catch(() => {});
       }
     })();
     return () => {
       abort.abort();
-      for (const id of opened.splice(0)) void client.closeDocument(id);
+      for (const id of opened.splice(0)) void client.closeDocument(id).catch(() => {});
     };
   }, [proposal.id, proposal.generation, main, result]);
   return (

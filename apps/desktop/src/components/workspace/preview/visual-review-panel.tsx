@@ -7,23 +7,23 @@ export function Crop({ doc, region }: { doc: number; region: Region }) {
   const [url, setUrl] = useState<string>();
   const [error, setError] = useState(false);
   useEffect(() => {
-    let alive = true;
+    const abort = new AbortController();
     setUrl(undefined);
     setError(false);
     let url: string | undefined;
     void getMupdfClient()
-      .reviewCrop(doc, region)
+      .reviewCrop(doc, region, { signal: abort.signal })
       .then((bytes) => {
-        if (alive) {
+        if (!abort.signal.aborted) {
           url = URL.createObjectURL(new Blob([bytes], { type: "image/png" }));
           setUrl(url);
         }
       })
       .catch(() => {
-        if (alive) setError(true);
+        if (!abort.signal.aborted) setError(true);
       });
     return () => {
-      alive = false;
+      abort.abort();
       if (url) URL.revokeObjectURL(url);
     };
   }, [doc, region]);

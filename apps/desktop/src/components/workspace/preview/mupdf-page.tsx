@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback, memo } from "react";
+import { useEffect, useRef, useState, memo } from "react";
 import { getMupdfClient } from "@/lib/mupdf/mupdf-client";
 import { createLogger } from "@/lib/debug/logger";
 import { APP_VISIBILITY_RESTORED } from "@/lib/debug/log-store";
@@ -27,14 +27,14 @@ export const MupdfPage = memo(function MupdfPage({
   overlay,
 }: MupdfPageProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [textData, setTextData] = useState<StructuredTextData | null>(null);
-  const [links, setLinks] = useState<LinkData[]>([]);
+  const [textLayer, setTextLayer] = useState<{ docId: number; pageIndex: number; data: StructuredTextData }>();
+  const [linkLayer, setLinkLayer] = useState<{ docId: number; pageIndex: number; data: LinkData[] }>();
+  const textData = textLayer?.docId === docId && textLayer.pageIndex === pageIndex ? textLayer.data : null;
+  const links = linkLayer?.docId === docId && linkLayer.pageIndex === pageIndex ? linkLayer.data : [];
   const [renderScale, setRenderScale] = useState(scale);
   const [pixelRatio, setPixelRatio] = useState(() => window.devicePixelRatio || 1);
   const [restoreGeneration, setRestoreGeneration] = useState(0);
   const renderGenRef = useRef(0);
-  const renderingRef = useRef(false);
-  const queuedRenderRef = useRef<(() => void) | null>(null);
 
   const cssW = pageWidth * scale;
   const cssH = pageHeight * scale;
@@ -70,87 +70,61 @@ export const MupdfPage = memo(function MupdfPage({
     };
   }, [pixelRatio]);
 
-  /** Re-render the page onto the canvas via MuPDF worker. */
-  const renderPage = useCallback(() => {
-    if (!isVisible || docId <= 0) return;
-
-    if (renderingRef.current) {
-      queuedRenderRef.current = renderPage;
+  // Each effect owns its request. The shared client drops aborted queued work.
+  useEffect(() => {
+    const abort = new AbortController();
+    const gen = ++renderGenRef.current;
+    if (!isVisible || docId <= 0) {
+      if (canvasRef.current) {
+        canvasRef.current.width = 0;
+        canvasRef.current.height = 0;
+      }
       return;
     }
-    renderingRef.current = true;
-    const gen = ++renderGenRef.current;
-    const client = getMupdfClient();
-    const dpi = renderScale * 72 * pixelRatio;
-
-    client
-      .drawPage(docId, pageIndex, dpi)
+    const current = () => !abort.signal.aborted && gen === renderGenRef.current;
+    void getMupdfClient().drawPage(docId, pageIndex, renderScale * 72 * pixelRatio, { signal: abort.signal })
       .then(async (imageData) => {
-        if (gen !== renderGenRef.current) return;
-        const canvas = canvasRef.current;
-        if (!canvas) return;
+        if (!current()) return;
         const bitmap = await createImageBitmap(imageData);
-        if (gen !== renderGenRef.current) {
-          bitmap.close();
-          return;
-        }
-        canvas.width = imageData.width;
-        canvas.height = imageData.height;
-        const ctx = canvas.getContext("2d")!;
-        ctx.drawImage(bitmap, 0, 0);
-        bitmap.close();
+        try {
+          const canvas = canvasRef.current;
+          if (!current() || !canvas) return;
+          canvas.width = imageData.width;
+          canvas.height = imageData.height;
+          canvas.getContext("2d")!.drawImage(bitmap, 0, 0);
+        } finally { bitmap.close(); }
       })
       .catch((err) => {
-        if (gen !== renderGenRef.current) return;
-        log.error(`Render error page ${pageIndex}`, { error: String(err) });
-      })
-      .finally(() => {
-        renderingRef.current = false;
-        const next = queuedRenderRef.current;
-        queuedRenderRef.current = null;
-        next?.();
+        if (current()) log.error(`Render error page ${pageIndex}`, { error: String(err) });
       });
+    return () => { abort.abort(); renderGenRef.current++; };
   }, [docId, pageIndex, renderScale, pixelRatio, isVisible, restoreGeneration]);
-
-  // Render the canvas immediately on load, then at debounced high-quality zoom.
-  useEffect(() => {
-    if (isVisible && docId > 0) renderPage();
-    else if (canvasRef.current) {
-      // CSS preserves page geometry; release the offscreen GPU bitmap.
-      canvasRef.current.width = 0;
-      canvasRef.current.height = 0;
-    }
-    return () => {
-      renderGenRef.current++;
-      queuedRenderRef.current = null;
-    };
-  }, [docId, pageIndex, renderScale, isVisible, renderPage]);
 
   // Text and link layers do not need to be refetched for every zoom change.
   useEffect(() => {
     if (!isVisible || docId <= 0) return;
-    let cancelled = false;
+    const abort = new AbortController();
 
     const client = getMupdfClient();
 
     client
-      .getPageText(docId, pageIndex)
+      .getPageText(docId, pageIndex, { signal: abort.signal })
       .then((data) => {
-        if (cancelled) return;
-        setTextData(data);
+        if (abort.signal.aborted) return;
+        setTextLayer({ docId, pageIndex, data });
       })
       .catch(() => {});
 
     client
-      .getPageLinks(docId, pageIndex)
+      .getPageLinks(docId, pageIndex, { signal: abort.signal })
       .then((data) => {
-        if (cancelled) return;
-        setLinks(data);
+        if (abort.signal.aborted) return;
+        setLinkLayer({ docId, pageIndex, data });
       })
       .catch(() => {});
 
     return () => {
-      cancelled = true;
+      abort.abort();
     };
   }, [docId, pageIndex, isVisible]);
 

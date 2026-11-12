@@ -113,6 +113,7 @@ export function TemplatePreview() {
     if (!template) return;
 
     const gen = ++loadGenRef.current;
+    const abort = new AbortController();
     const retry = retryCount !== consumedRetry.current;
     consumedRetry.current = retryCount;
     setLoading(true);
@@ -130,6 +131,7 @@ export function TemplatePreview() {
           await client.closeDocument(docIdRef.current).catch(() => {});
         }
 
+        if (abort.signal.aborted) return;
         const docId = await client.openDocument(buffer);
         if (gen !== loadGenRef.current) {
           client.closeDocument(docId).catch(() => {});
@@ -137,12 +139,12 @@ export function TemplatePreview() {
         }
         docIdRef.current = docId;
 
-        const count = await client.countPages(docId);
+        const count = await client.countPages(docId, { signal: abort.signal });
         if (gen !== loadGenRef.current) return;
 
         const sizes: PageSize[] = [];
         for (let i = 0; i < count; i++) {
-          const size = await client.getPageSize(docId, i);
+          const size = await client.getPageSize(docId, i, { signal: abort.signal });
           if (gen !== loadGenRef.current) return;
           sizes.push(size);
         }
@@ -163,6 +165,7 @@ export function TemplatePreview() {
       }
     })();
     return () => {
+      abort.abort();
       ++loadGenRef.current;
       if (docIdRef.current > 0) {
         void getMupdfClient()
@@ -195,9 +198,12 @@ export function TemplatePreview() {
     const gen = loadGenRef.current;
     let cancelled = false;
     let revision = 0;
+    let request: AbortController | undefined;
     let frame = 0;
     const render = () => {
       const current = ++revision;
+      request?.abort();
+      request = new AbortController();
       const maxW = container.clientWidth - 48;
       const maxH = container.clientHeight - 48;
       if (maxW <= 0 || maxH <= 0) return;
@@ -205,7 +211,7 @@ export function TemplatePreview() {
       const displayW = size.width * scale;
       const displayH = size.height * scale;
       const dpi = scale * 72 * (window.devicePixelRatio || 1);
-      void client.drawPage(docId, pageIndex, dpi).then((imageData) => {
+      void client.drawPage(docId, pageIndex, dpi, { signal: request.signal }).then((imageData) => {
         if (cancelled || current !== revision || gen !== loadGenRef.current) return;
         const canvas = canvasRef.current;
         if (!canvas) return;
@@ -222,6 +228,7 @@ export function TemplatePreview() {
       });
     };
     const schedule = () => {
+      request?.abort();
       ++revision; // Discard a render measured before the latest resize.
       cancelAnimationFrame(frame);
       frame = requestAnimationFrame(render);
@@ -231,6 +238,7 @@ export function TemplatePreview() {
     schedule();
     return () => {
       cancelled = true;
+      request?.abort();
       observer.disconnect();
       cancelAnimationFrame(frame);
     };
