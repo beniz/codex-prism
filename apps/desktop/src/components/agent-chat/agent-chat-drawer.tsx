@@ -1,9 +1,10 @@
+import { ActivityLine } from "./activity-line";
 import { QuestionRequest } from "./question-request";
 import { SourceCompletion } from "./source-completion";
 import { listContinuation } from "@/lib/composer-lists";
 import { ChatHistory } from "./chat-history";
 import { ActivityLabel } from "./activity-label";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ArrowUpIcon,
   SquareIcon,
@@ -100,6 +101,7 @@ export function AgentChatDrawer({
   };
   const [open, setOpen] = useState(true);
   const [settings, setSettings] = useState(false);
+  const openConnection = useCallback(() => setSettings(true), []);
   const [sessions, setSessions] = useState<Session[]>([]);
   const [attaching, setAttaching] = useState(false);
   const [filePicker, setFilePicker] = useState(false);
@@ -261,7 +263,7 @@ export function AgentChatDrawer({
     <section
       aria-label="Codex chat"
       className={cn(
-        "flex min-h-0 shrink-0 flex-col overflow-hidden border-t bg-background",
+        "@container/chat flex min-h-0 shrink-0 flex-col overflow-hidden border-t bg-background",
         open && (fillHeight ? "flex-1" : "h-[min(28rem,55%)]"),
       )}
     >
@@ -475,15 +477,6 @@ export function AgentChatDrawer({
                   void s.sendPrompt("Implement the plan.");
                 }}>Implement plan</Button>
                 <Button variant="outline" onClick={() => input.current?.focus()}>Refine plan</Button>
-              </div>
-            )}
-            {t.isStreaming && !awaitingAnswer && (
-              <div
-                role="status"
-                className="flex items-center gap-2 text-xs text-muted-foreground"
-              >
-                <Loader2Icon className="size-3 animate-spin" />
-                Codex is working…
               </div>
             )}
             {s.requests
@@ -822,27 +815,8 @@ export function AgentChatDrawer({
                 </div>
               </div>
             </div>
-            <div className="flex items-center justify-between gap-2 px-1 pt-1.5 text-[10px] text-muted-foreground">
-              <span>
-                {awaitingAnswer ? (
-                  "Select answers, then submit to continue"
-                ) : attaching ? (
-                  "Adding files…"
-                ) : s.pendingReview ? (
-                  "Resolve the legacy review before sending"
-                ) : s.locked ? (
-                  "Project editing paused during execution"
-                ) : setup.status !== "ready" ? (
-                  <button
-                    className="underline underline-offset-2"
-                    onClick={() => setSettings(true)}
-                  >
-                    Connect Codex to start chatting
-                  </button>
-                ) : (
-                  "Project context included"
-                )}
-              </span>
+            <div className="flex min-h-5 items-center justify-between gap-2 px-1 pt-1.5 text-[10px] text-muted-foreground">
+              <ActivityLine attaching={attaching} onConnect={openConnection} />
               <span className="shrink-0">
                 <span
                   data-chat-mode={t.mode}
@@ -851,7 +825,7 @@ export function AgentChatDrawer({
                 >
                   {t.mode === "plan" ? "Plan" : "Agent"}
                 </span>
-                {!awaitingAnswer && " · Shift+Tab to switch · Enter to send"}
+                {!awaitingAnswer && <span className="@[30rem]/chat:inline hidden"> · Shift+Tab to switch · Enter to send</span>}
               </span>
             </div>
           </div>

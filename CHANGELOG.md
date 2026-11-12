@@ -5,6 +5,8 @@ and detailed release notes are in [docs/releases](docs/releases/README.md).
 
 ## Unreleased
 
+- Explain ongoing agent, proposal, and PDF activity below the chat composer without polling or typing-triggered updates. Keep progress remains tied to its originating chat when switching tabs.
+
 - Speed up switching between chat PDFs with two rendering workers, foreground page priority, and a bounded cache of rendered pages.
 
 - Avoid false LaTeX warnings from syntax trees awaiting publication; fix missing-document warnings in included files and show the full document outline across literal `\input`/`\include` files, with continuous slide numbering and navigation to each source. Resolve included files to their owning document before unrelated standalone figures.

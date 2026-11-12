@@ -1,3 +1,4 @@
+import { useActivityStore, endStoppingActivity, beginActivity, proposalActivityBusy, startActivityTurn, updateActivityItem, finishActivityTurn, resetActivities, disconnectActivities } from "./activity-store";
 import { sourcePromptText, sourceRequest } from "@/lib/source-completion";
 import { readChatTabs, writeChatTabs, type SavedChatTabs } from "@/lib/chat-tabs";
 import { toast } from "sonner";
@@ -154,10 +155,18 @@ export const useAgentChatStore = create<ChatState>((set, get) => ({
   decideProposal: async (action) => {
     const state = get();
     const p = activeProposal(state);
-    if (!p) return;
+    if (!p || proposalActivityBusy(p.id)) return;
+    const owner = state.tabs.find(t => t.id === p.chatId || (t.sessionId && t.sessionId === p.threadId));
+    const activity = beginActivity({ projectPath: state.activeProjectPath, chatId: owner?.id,
+      proposalId: p.id, generation: p.generation }, action, { projectWide: action === "apply" });
+    const generation = projectGeneration;
+    set(s => ({ error: null, tabs: s.tabs.map(t => t.id === owner?.id ? { ...t, error: null } : t) }));
     try {
       const result = await proposals.operate(p, action);
+      if (generation !== projectGeneration) return;
+      activity.update("refreshing");
       await get().refreshReview();
+      if (generation !== projectGeneration) return;
       if (result?.historyWarning)
         toast.warning(
           `Changes applied, but history could not be saved: ${result.historyWarning}`,
@@ -171,6 +180,7 @@ export const useAgentChatStore = create<ChatState>((set, get) => ({
           (t) => t.sessionId === p.threadId || t.id === p.chatId,
         );
         if (owner) get().setActiveTab(owner.id);
+        activity.update("repair");
         await get().sendPrompt(result.prompt);
       }
       if (
@@ -187,6 +197,7 @@ export const useAgentChatStore = create<ChatState>((set, get) => ({
           doc.files,
         );
         if (target && doc.projectRoot) {
+          activity.update("updatingPdf");
           if (result?.reusedBuilds?.includes(target.targetPath)) {
             const pdf = await loadExistingPdf(doc.projectRoot, target.targetPath).catch(() => null);
             if (pdf && get().projectId === p.projectId) {
@@ -208,8 +219,11 @@ export const useAgentChatStore = create<ChatState>((set, get) => ({
         }
       }
     } catch (e) {
-      set({ error: String(e) });
-    }
+      if (generation === projectGeneration) set(s => ({
+        error: !owner || s.activeTabId === owner.id ? String(e) : s.error,
+        tabs: s.tabs.map(t => t.id === owner?.id ? { ...t, error: String(e) } : t),
+      }));
+    } finally { activity.finish(); }
   },
   review: { active: false, changes: [] },
   locked: false,
@@ -236,6 +250,7 @@ export const useAgentChatStore = create<ChatState>((set, get) => ({
   resetForProject: (root) => {
     if (get().activeProjectPath === root) return;
     const generation = ++projectGeneration;
+    resetActivities();
     clearDeltas();
     const saved = root ? readChatTabs(root) : null;
     const t = tab();
@@ -388,6 +403,7 @@ export const useAgentChatStore = create<ChatState>((set, get) => ({
     const paths = Array.isArray(path) ? path : [path];
     if (!id || !paths.length) return;
     set({ error: null });
+    const activity = beginActivity({ projectPath: get().activeProjectPath }, undo ? "discard" : "apply", { projectWide: true });
     try {
       const result = await backend.review.resolveBatch(
         id,
@@ -406,6 +422,7 @@ export const useAgentChatStore = create<ChatState>((set, get) => ({
         useDocumentStore.getState().projectId !== id
       )
         return;
+      activity.update("refreshing");
       await useDocumentStore.getState().refreshFiles();
       // Keep refreshes the ordinary preview even with Auto off or other files pending.
       // Partial Undo still uses the rebuilt visual artifact until review is complete.
@@ -420,6 +437,7 @@ export const useAgentChatStore = create<ChatState>((set, get) => ({
           doc.files,
         );
         if (target && doc.projectRoot) {
+          activity.update("updatingPdf");
           doc.setIsCompiling(true);
           try {
             const pdf = await compileLatex(doc.projectRoot, target.targetPath);
@@ -444,13 +462,14 @@ export const useAgentChatStore = create<ChatState>((set, get) => ({
           .catch(() => {});
         if (get().projectId === id) set({ error: String(e) });
       }
-    }
+    } finally { activity.finish(); }
   },
   sendPrompt: async (prompt, context) => {
     const state = get();
     const t = state.tabs.find((t) => t.id === state.activeTabId);
     if (state.restoringChats || !t || submissions.has(t.id)) return;
     const generation = projectGeneration;
+    const activity = beginActivity({ projectPath: state.activeProjectPath, chatId: t.id }, "preparing");
     const clearedDraft = t.draft === prompt && prompt.length > 0;
     const messageId = `pending-user-${crypto.randomUUID()}`;
     let accepted = false;
@@ -509,6 +528,7 @@ export const useAgentChatStore = create<ChatState>((set, get) => ({
       if (t.isStreaming) {
         if (state.projectId && t.sessionId && t.turnId)
           try {
+            activity.update("steering");
             await backend.agent.control(
               state.projectId,
               t.sessionId,
@@ -595,6 +615,7 @@ export const useAgentChatStore = create<ChatState>((set, get) => ({
               : x,
           ),
         }));
+        activity.update("starting");
         const result = await backend.agent.send(
           project.id,
           t.sessionId,
@@ -618,6 +639,8 @@ export const useAgentChatStore = create<ChatState>((set, get) => ({
         accepted = true;
         settleDraft();
         if (generation !== projectGeneration) return;
+        if (get().tabs.find(x => x.id === t.id)?.isStreaming)
+          startActivityTurn({ projectPath: state.activeProjectPath, chatId: t.id }, result.turn.id);
         set((s) => ({
           tabs: s.tabs.map((x) =>
             x.id === t.id
@@ -629,6 +652,9 @@ export const useAgentChatStore = create<ChatState>((set, get) => ({
         settleDraft();
         release();
         if (generation !== projectGeneration) return;
+        const failedTurn = get().tabs.find(x => x.id === t.id)?.turnId;
+        if (failedTurn) finishActivityTurn(t.id, failedTurn);
+        endStoppingActivity(t.id);
         set((s) => ({
           isStreaming: s.activeTabId === t.id ? false : s.isStreaming,
           error: s.activeTabId === t.id ? String(e) : s.error,
@@ -643,6 +669,7 @@ export const useAgentChatStore = create<ChatState>((set, get) => ({
       } finally {
         release();
       }
+      activity.finish();
       // Refresh after releasing the submission guard so steering stays available.
       try {
         await get().refreshReview();
@@ -653,22 +680,31 @@ export const useAgentChatStore = create<ChatState>((set, get) => ({
         }));
       }
     } finally {
+      activity.finish();
       settleDraft();
       release();
     }
   },
   cancelExecution: async () => {
     const s = get();
-    const t = s.tabs.find((t) => t.id === s.activeTabId);
-    if (s.projectId && t?.sessionId && t.turnId)
-      try {
-        await backend.agent.control(s.projectId, t.sessionId, t.turnId);
-      } catch (e) {
-        set({ error: String(e) });
-      }
+    const t = s.tabs.find(t => t.id === s.activeTabId);
+    if (!s.projectId || !t?.sessionId || !t.turnId) return;
+    if (useActivityStore.getState().operations.some(o => o.chatId === t.id && o.kind === "stopping")) return;
+    const generation = projectGeneration;
+    const activity = beginActivity({ projectPath: s.activeProjectPath, chatId: t.id }, "stopping");
+    // Acknowledgement does not mean the turn has stopped. Lifecycle events clear this.
+    try { await backend.agent.control(s.projectId, t.sessionId, t.turnId); }
+    catch (e) {
+      activity.finish();
+      if (generation === projectGeneration && get().tabs.find(x => x.id === t.id)?.turnId === t.turnId)
+        set(current => ({ error: current.activeTabId === t.id ? String(e) : current.error,
+          tabs: current.tabs.map(x => x.id === t.id ? { ...x, error: String(e) } : x) }));
+    }
   },
   resumeSession: async (id, title) => {
     if (get().restoringChats) return;
+    const activity = beginActivity({ projectPath: get().activeProjectPath }, "restoring");
+    try {
     await ensureAgentEvents();
     const root = useDocumentStore.getState().projectRoot;
     if (!root) return;
@@ -706,6 +742,7 @@ export const useAgentChatStore = create<ChatState>((set, get) => ({
         ),
         isStreaming: s.activeTabId === t.id || s.isStreaming,
       }));
+    } finally { activity.finish(); }
   },
   respond: async (r, result) => {
     if (r.id === undefined) return;
@@ -725,6 +762,7 @@ export const useAgentChatStore = create<ChatState>((set, get) => ({
       return;
     }
     if (e.method === "connection/closed") {
+      disconnectActivities();
       set((s) => ({
         isStreaming: false,
         error:
@@ -761,14 +799,21 @@ export const useAgentChatStore = create<ChatState>((set, get) => ({
       }));
       return;
     }
-    if (e.method === "turn/started")
+    if (e.method === "turn/started") {
+      endStoppingActivity(t.id);
+      startActivityTurn({ projectPath: get().activeProjectPath, chatId: t.id }, p.turn.id);
       set((s) => ({
         tabs: s.tabs.map((x) =>
           x.id === t.id ? { ...x, turnId: p.turn.id, isStreaming: true } : x,
         ),
       }));
+    }
     if (e.method === "item/started" || e.method === "item/completed") {
       const item = toItem(p.item);
+      if (t.isStreaming && t.turnId && (!p.turnId || p.turnId === t.turnId)) {
+        startActivityTurn({ projectPath: get().activeProjectPath, chatId: t.id }, t.turnId);
+        updateActivityItem(t.id, t.turnId, item, e.method === "item/started");
+      }
       set((s) => ({
         tabs: s.tabs.map((x) =>
           x.id === t.id
@@ -818,6 +863,12 @@ export const useAgentChatStore = create<ChatState>((set, get) => ({
       }));
     }
     if (e.method === "turn/completed") {
+      const completedTurn = p.turn.id ?? t.turnId;
+      if (t.turnId && completedTurn !== t.turnId) return;
+      if (completedTurn) finishActivityTurn(t.id, completedTurn);
+      endStoppingActivity(t.id);
+      const activity = beginActivity({ projectPath: get().activeProjectPath, chatId: t.id }, "reviewing");
+      const generation = projectGeneration;
       const error = p.turn.error?.message ?? null;
       set((s) => ({
         isStreaming: s.activeTabId === t.id ? false : s.isStreaming,
@@ -830,10 +881,12 @@ export const useAgentChatStore = create<ChatState>((set, get) => ({
       void get()
         .refreshReview()
         .then(async () => {
+          if (generation !== projectGeneration) return;
           const doc = useDocumentStore.getState();
           await doc.refreshFiles();
         })
-        .catch((e) => set({ error: String(e) }));
+        .catch((e) => { if (generation === projectGeneration) set({ error: String(e) }); })
+        .finally(() => activity.finish());
     }
   },
 }));

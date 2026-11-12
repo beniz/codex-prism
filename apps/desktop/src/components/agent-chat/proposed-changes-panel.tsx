@@ -1,3 +1,4 @@
+import { beginActivity, useActivityStore, proposalActivityBusy } from "@/stores/activity-store";
 import { PendingChatWork } from "../workspace/proposal-preview";
 import { useEffect, useRef, useState } from "react";
 import { ChevronDownIcon } from "lucide-react";
@@ -22,16 +23,11 @@ function ProposalReview() {
   const error = useAgentChatStore(s => s.error);
   const decideProposal = useAgentChatStore(s => s.decideProposal);
   const refreshReview = useAgentChatStore(s => s.refreshReview);
-  const [busy, setBusy] = useState(false);
+  const busy = useActivityStore(s => s.operations.some(o => o.proposalId === p.id && o.group === "operation"));
   const [expanded, setExpanded] = useState<string | null>(null);
   const running = ["running", "repairing", "applying"].includes(p.state);
   const decide = async (action: "apply" | "discard" | "repair") => {
-    setBusy(true);
-    try {
-      await decideProposal(action);
-    } finally {
-      setBusy(false);
-    }
+    await decideProposal(action);
   };
   return (
     <section
@@ -91,12 +87,15 @@ function ProposalReview() {
           type="button"
           disabled={busy}
           onClick={async () => {
-            setBusy(true);
+            if (proposalActivityBusy(p.id)) return;
+            const state = useAgentChatStore.getState();
+            const activity = beginActivity({ projectPath: state.activeProjectPath, chatId: state.activeTabId,
+              proposalId: p.id, generation: p.generation }, "apply", { projectWide: true });
             try {
               await proposals.operate(p, "recover");
               await refreshReview();
             } finally {
-              setBusy(false);
+              activity.finish();
             }
           }}
         >

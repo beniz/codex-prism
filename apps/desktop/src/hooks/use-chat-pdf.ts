@@ -1,3 +1,4 @@
+import { beginActivity } from "@/stores/activity-store";
 import { clearFirstChangedPageCache } from "./use-first-changed-page";
 import { useSettingsStore } from "@/stores/settings-store";
 import { matchSourceLine } from "@/lib/source-line-match";
@@ -16,7 +17,7 @@ export interface ChatPdfArtifact {
 }
 // Shared by the workspace coordinator and every viewer, including across viewer remounts.
 const artifacts = new Map<string, ChatPdfArtifact>();
-type Job = { busy: boolean; error: string | null };
+type Job = { busy: boolean; error: string | null; activity: ReturnType<typeof beginActivity> };
 const jobs = new Map<string, Job>();
 const listeners = new Set<() => void>();
 let revision = 0;
@@ -38,6 +39,7 @@ export function clearChatPdfCache() {
   clearFirstChangedPageCache();
   epoch++;
   artifacts.clear();
+  for (const job of jobs.values()) job.activity.finish();
   jobs.clear();
   selectedKey = undefined;
   notify();
@@ -52,7 +54,11 @@ async function ensureBuild(p: Proposal, main: string, force = false, foreground 
   if (!force && (existing?.error || (cached?.proposal.generation === p.generation))) return;
   // Background scheduling runs once per generation. An evicted foreground PDF is loaded again.
   if (!force && existing && !foreground) return;
-  const job: Job = { busy: true, error: null };
+  const chat = useAgentChatStore.getState().tabs.find(t => t.id === p.chatId || (t.sessionId && t.sessionId === p.threadId));
+  const job: Job = { busy: true, error: null, activity: beginActivity({
+    projectPath: useDocumentStore.getState().projectRoot, chatId: chat?.id ?? p.chatId ?? undefined,
+    proposalId: p.id, generation: p.generation,
+  }, "preparingPdf", { group: "build" }) };
   const startedEpoch = epoch;
   const current = () => startedEpoch === epoch && jobs.get(target) === job &&
     useDocumentStore.getState().projectId === p.projectId &&
@@ -81,6 +87,7 @@ async function ensureBuild(p: Proposal, main: string, force = false, foreground 
   } catch (e) {
     if (current()) job.error = String(e);
   } finally {
+    job.activity.finish();
     job.busy = false;
     if (startedEpoch === epoch) notify();
   }
@@ -97,7 +104,10 @@ export function useChatPdfBuilds(main: string | undefined) {
     }
     for (const key of jobs.keys()) {
       const [owner, id, generation] = JSON.parse(key) as [string, string, number];
-      if (owner !== project || !pending.some((p) => p.id === id && p.generation === generation)) jobs.delete(key);
+      if (owner !== project || !pending.some((p) => p.id === id && p.generation === generation)) {
+        jobs.get(key)?.activity.finish();
+        jobs.delete(key);
+      }
     }
     if (!main) return;
     for (const p of pending) {
@@ -184,4 +194,16 @@ export async function chatHeadingLocation(
       a.page - b.page || a.y - b.y)[0];
   // A fresh object ensures repeated clicks on the same heading scroll again.
   return box ? { ...box } : null;
+}
+
+/** Read-only: reporting a failure never starts or reloads a build. */
+export function useProposalPdfError(proposal: { id: string; projectId: string; generation: number } | undefined) {
+  return useSyncExternalStore(subscribe, () => {
+    if (!proposal) return null;
+    for (const [key, job] of jobs) {
+      const [projectId, id, generation] = JSON.parse(key);
+      if (id === proposal.id && projectId === proposal.projectId && generation === proposal.generation && job.error) return job.error;
+    }
+    return null;
+  });
 }
