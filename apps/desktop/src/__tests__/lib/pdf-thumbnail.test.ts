@@ -14,7 +14,7 @@ beforeEach(() => {
   client.openDocument.mockReset().mockResolvedValue(0);
   client.renderThumbnail.mockReset().mockResolvedValue(new ArrayBuffer(1));
   client.closeDocument.mockReset().mockResolvedValue(undefined);
-  vi.mocked(getMupdfClient).mockReturnValue(client as unknown as MupdfClient);
+  vi.mocked(getMupdfClient).mockReturnValue(client as unknown as ReturnType<typeof getMupdfClient>);
   vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:thumbnail");
 });
 

@@ -1,3 +1,4 @@
+import { resetActivities, useActivityStore } from "@/stores/activity-store";
 import { readChatTabs, writeChatTabs } from "@/lib/chat-tabs";
 import { beforeEach, describe, it, expect, vi } from "vitest";
 import { useAgentChatStore } from "@/stores/agent-chat-store";
@@ -42,6 +43,7 @@ vi.mock("@/lib/latex-compiler", () => ({
 }));
 const save = vi.fn(async () => {});
 beforeEach(() => {
+  resetActivities();
   vi.clearAllMocks();
   localStorage.clear();
   useSettingsStore.setState({ visualChangeReports: true });
@@ -982,4 +984,81 @@ describe("immediate composer submission", () => {
       await sending;
     }
   });
+});
+
+it("owns acceptance activity by proposal across tab switches and ignores duplicate Keep", async () => {
+  let finish!: (value: any) => void;
+  vi.mocked(proposals.operate).mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+  vi.mocked(resolveCompileTarget).mockReturnValue(null);
+  const a = useAgentChatStore.getState().tabs[0];
+  useAgentChatStore.setState({ tabs: [a, { ...a, id: "tab2", title: "Second" }], proposals: [
+    { id: "p-a", projectId: "p1", chatId: a.id, state: "ready", generation: 1 },
+    { id: "p-b", projectId: "p1", chatId: "tab2", state: "ready", generation: 1 },
+  ] as any });
+  const pending = useAgentChatStore.getState().decideProposal("apply");
+  await useAgentChatStore.getState().decideProposal("apply");
+  useAgentChatStore.getState().setActiveTab("tab2");
+  expect(proposals.operate).toHaveBeenCalledTimes(1);
+  expect(useActivityStore.getState().operations).toMatchObject([{ chatId: a.id, proposalId: "p-a", kind: "apply", projectWide: true }]);
+  finish({ conflicts: [] }); await pending;
+  expect(useActivityStore.getState().operations).toEqual([]);
+  expect(useAgentChatStore.getState().activeTabId).toBe("tab2");
+});
+it("reports PDF reuse without implying compilation and clears failed acceptance activity", async () => {
+  let load!: (bytes: Uint8Array) => void;
+  vi.mocked(resolveCompileTarget).mockReturnValue({ rootId: "main.tex", targetPath: "main.tex" });
+  vi.mocked(loadExistingPdf).mockReset().mockImplementationOnce(() => new Promise(resolve => { load = resolve; }));
+  vi.mocked(useDocumentStore.getState).mockReturnValue({ ...useDocumentStore.getState(), setPdfData: vi.fn() } as any);
+  useAgentChatStore.setState({ proposals: [{ id: "p-a", projectId: "p1", chatId: "tab1", state: "ready", generation: 1 }] as any });
+  vi.mocked(proposals.operate).mockResolvedValueOnce({ conflicts: [], reusedBuilds: ["main.tex"] });
+  const pending = useAgentChatStore.getState().decideProposal("apply");
+  await vi.waitFor(() => expect(load).toBeDefined());
+  expect(useActivityStore.getState().operations[0].kind).toBe("updatingPdf");
+  load(new Uint8Array([37])); await pending;
+  expect(compileLatex).not.toHaveBeenCalled();
+  expect(useActivityStore.getState().operations).toEqual([]);
+  useAgentChatStore.setState({ proposals: [{ id: "p-a", projectId: "p1", chatId: "tab1", state: "ready", generation: 2 }] as any });
+  vi.mocked(proposals.operate).mockRejectedValueOnce(new Error("merge failed"));
+  await useAgentChatStore.getState().decideProposal("apply");
+  expect(useActivityStore.getState().operations).toEqual([]);
+  expect(useAgentChatStore.getState().error).toContain("merge failed");
+});
+it("keeps stopping visible after acknowledgement and clears it only on turn completion", async () => {
+  useAgentChatStore.setState(s => ({ tabs: s.tabs.map(t => ({ ...t, sessionId: "thread1", turnId: "turn1", isStreaming: true })) }));
+  vi.mocked(backend.agent.control).mockResolvedValue(undefined);
+  await useAgentChatStore.getState().cancelExecution();
+  expect(useActivityStore.getState().operations[0].kind).toBe("stopping");
+  useAgentChatStore.getState().handleEvent({ method: "turn/completed", params: { threadId: "thread1", turn: { id: "turn0" } } });
+  expect(useActivityStore.getState().operations[0].kind).toBe("stopping");
+  useAgentChatStore.getState().handleEvent({ method: "turn/completed", params: { threadId: "thread1", turn: { id: "turn1" } } });
+  expect(useActivityStore.getState().operations.some(o => o.kind === "stopping")).toBe(false);
+  await vi.waitFor(() => expect(useActivityStore.getState().operations).toEqual([]));
+});
+it("never publishes activity for typing or streaming text deltas", async () => {
+  useAgentChatStore.setState(s => ({ tabs: s.tabs.map(t => ({ ...t, sessionId: "thread1", turnId: "turn1", isStreaming: true })) }));
+  useAgentChatStore.getState().handleEvent({ method: "turn/started", params: { threadId: "thread1", turn: { id: "turn1" } } });
+  const changed = vi.fn(); const unsubscribe = useActivityStore.subscribe(changed);
+  try {
+    for (let i = 0; i < 100; i++) {
+      useAgentChatStore.setState(s => ({ tabs: s.tabs.map(t => ({ ...t, draft: `draft ${i}` })) }));
+      useAgentChatStore.getState().handleEvent({ method: "item/agentMessage/delta", params: { threadId: "thread1", itemId: "message", delta: "word" } });
+    }
+    await new Promise(resolve => setTimeout(resolve, 40));
+    expect(changed).not.toHaveBeenCalled();
+    useAgentChatStore.getState().handleEvent({ method: "item/started", params: { threadId: "thread1", turnId: "turn1", item: { id: "command", type: "commandExecution", command: "ls" } } });
+    expect(changed).toHaveBeenCalledTimes(1);
+    expect(useActivityStore.getState().operations[0].kind).toBe("command");
+  } finally { unsubscribe(); }
+});
+
+it("clears prompt preparation after validation failure and stopping after a failed cancellation", async () => {
+  vi.mocked(invoke).mockRejectedValueOnce(new Error("Unknown data source"));
+  await useAgentChatStore.getState().sendPrompt("Read @attachments:/missing.pdf");
+  expect(useActivityStore.getState().operations).toEqual([]);
+  useAgentChatStore.setState(s => ({ tabs: s.tabs.map(t => ({ ...t, sessionId: "thread1", turnId: "turn1", isStreaming: true })) }));
+  vi.mocked(backend.agent.control).mockRejectedValueOnce(new Error("Stop request failed"));
+  await useAgentChatStore.getState().cancelExecution();
+  expect(useActivityStore.getState().operations).toEqual([]);
+  expect(useAgentChatStore.getState().tabs[0].isStreaming).toBe(true);
+  expect(useAgentChatStore.getState().error).toContain("Stop request failed");
 });

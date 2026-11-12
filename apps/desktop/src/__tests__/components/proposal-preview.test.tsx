@@ -3,6 +3,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { beforeEach, afterEach, expect, it, vi } from "vitest";
 import {
   useChatPdf,
+  useProposalPdfError,
   useChatPdfBuilds,
   clearChatPdfCache,
   safeChatSource,
@@ -31,7 +32,7 @@ vi.mock("@/stores/document-store", () => ({
   }),
 }));
 vi.mock("@/stores/agent-chat-store", () => ({
-  useAgentChatStore: Object.assign(() => chatState, {
+  useAgentChatStore: Object.assign((selector: any) => selector(chatState), {
     getState: () => chatState,
   }),
   activeProposal: () =>
@@ -358,4 +359,21 @@ it("keeps separate cached PDFs for different TeX roots", async () => {
   await render();
   expect(current.artifact?.bytes[0]).toBe(1);
   expect(proposals.operate).toHaveBeenCalledTimes(2);
+});
+
+it("exposes PDF errors read-only without scheduling builds or leaking another generation", async () => {
+  let selected = proposal;
+  function ErrorStatus() { return <span>{useProposalPdfError(selected)}</span>; }
+  await act(async () => root.render(<ErrorStatus />));
+  expect(proposals.loadBuild).not.toHaveBeenCalled();
+  expect(proposals.operate).not.toHaveBeenCalled();
+  vi.mocked(proposals.operate).mockRejectedValueOnce(new Error("Build failed"));
+  await render();
+  await act(async () => root.render(<ErrorStatus />));
+  expect(host.textContent).toContain("Build failed");
+  expect(proposals.operate).toHaveBeenCalledTimes(1);
+  selected = { ...proposal, generation: 2 };
+  await act(async () => root.render(<ErrorStatus />));
+  expect(host.textContent).toBe("");
+  expect(proposals.operate).toHaveBeenCalledTimes(1);
 });

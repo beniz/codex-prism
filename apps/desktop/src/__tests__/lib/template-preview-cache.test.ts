@@ -1,7 +1,6 @@
 import { beforeEach, expect, it, vi } from "vitest";
 import { privateTemplateItem } from "@/lib/template-catalog";
 import { getAllTemplates } from "@/lib/template-registry";
-import type { MupdfClient } from "@/lib/mupdf/mupdf-client";
 
 vi.mock("@/lib/mupdf/mupdf-client", () => ({ getMupdfClient: vi.fn() }));
 const template = (id: string, revision = "one") =>
@@ -106,7 +105,7 @@ async function mockRenderer() {
     renderThumbnail: vi.fn(async () => new ArrayBuffer(1)),
     closeDocument: vi.fn(async () => {}),
   };
-  vi.mocked(getMupdfClient).mockReturnValue(client as unknown as MupdfClient);
+  vi.mocked(getMupdfClient).mockReturnValue(client as unknown as ReturnType<typeof getMupdfClient>);
   vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:template");
   return client;
 }

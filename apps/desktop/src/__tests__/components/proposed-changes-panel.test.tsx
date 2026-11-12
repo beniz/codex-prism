@@ -1,3 +1,4 @@
+import { beginActivity, resetActivities } from "@/stores/activity-store";
 import type { Proposal } from "@/lib/backend";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
@@ -35,6 +36,7 @@ vi.mock("@/lib/review-diff-client", () => ({
   ),
 }));
 afterEach(() => {
+  resetActivities();
   state.proposals = [];
   vi.clearAllMocks();
 });
@@ -217,4 +219,21 @@ it("shows Keep only after a proposal has changes and enables it when the turn fi
   } finally {
     await act(async () => root.unmount());
   }
+});
+
+it("does not transfer a busy Keep button to another chat's proposal", async () => {
+  const proposal = { id: "a", projectId: "project", chatId: "chat-a", threadId: null, parent: null, generation: 1, state: "ready", conflicts: [], changes: [state.review.changes[0]] } as Proposal;
+  state.proposals = [proposal];
+  const busy = beginActivity({ projectPath: "/paper", chatId: "chat-a", proposalId: "a" }, "apply");
+  const host = document.createElement("div"); const root = createRoot(host);
+  const keep = () => host.querySelector<HTMLButtonElement>('button[title="Keep all changes from this chat"]')!;
+  try {
+    await act(async () => root.render(<ProposedChangesPanel />));
+    expect(keep().disabled).toBe(true); expect(keep().textContent).toBe("…");
+    state.proposals = [{ ...proposal, id: "b", chatId: "chat-b" }];
+    await act(async () => root.render(<ProposedChangesPanel />));
+    expect(keep().disabled).toBe(false); expect(keep().textContent).toBe("Keep");
+    await act(async () => busy.finish());
+    expect(keep().disabled).toBe(false);
+  } finally { await act(async () => root.unmount()); }
 });

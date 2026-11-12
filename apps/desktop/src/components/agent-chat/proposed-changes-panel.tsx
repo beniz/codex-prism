@@ -1,3 +1,4 @@
+import { beginActivity, useActivityStore, proposalActivityBusy } from "@/stores/activity-store";
 import { PendingChatWork } from "../workspace/proposal-preview";
 import { useEffect, useRef, useState } from "react";
 import { ChevronDownIcon } from "lucide-react";
@@ -8,8 +9,7 @@ import { loadReviewDiff } from "@/lib/review-diff-client";
 import { cn } from "@/lib/utils";
 
 export function ProposedChangesPanel() {
-  const state = useAgentChatStore();
-  const proposal = activeProposal(state);
+  const proposal = useAgentChatStore(activeProposal);
   return (
     <>
       {" "}
@@ -19,18 +19,15 @@ export function ProposedChangesPanel() {
   );
 }
 function ProposalReview() {
-  const state = useAgentChatStore();
-  const p = activeProposal(state)!;
-  const [busy, setBusy] = useState(false);
+  const p = useAgentChatStore(activeProposal)!;
+  const error = useAgentChatStore(s => s.error);
+  const decideProposal = useAgentChatStore(s => s.decideProposal);
+  const refreshReview = useAgentChatStore(s => s.refreshReview);
+  const busy = useActivityStore(s => s.operations.some(o => o.proposalId === p.id && o.group === "operation"));
   const [expanded, setExpanded] = useState<string | null>(null);
   const running = ["running", "repairing", "applying"].includes(p.state);
   const decide = async (action: "apply" | "discard" | "repair") => {
-    setBusy(true);
-    try {
-      await state.decideProposal(action);
-    } finally {
-      setBusy(false);
-    }
+    await decideProposal(action);
   };
   return (
     <section
@@ -90,19 +87,22 @@ function ProposalReview() {
           type="button"
           disabled={busy}
           onClick={async () => {
-            setBusy(true);
+            if (proposalActivityBusy(p.id)) return;
+            const state = useAgentChatStore.getState();
+            const activity = beginActivity({ projectPath: state.activeProjectPath, chatId: state.activeTabId,
+              proposalId: p.id, generation: p.generation }, "apply", { projectWide: true });
             try {
               await proposals.operate(p, "recover");
-              await state.refreshReview();
+              await refreshReview();
             } finally {
-              setBusy(false);
+              activity.finish();
             }
           }}
         >
           Retry interrupted application
         </button>
       )}
-      {state.error && <p role="alert">{state.error}</p>}
+      {error && <p role="alert">{error}</p>}
       {p.changes.map((change) => (
         <FileReview
           key={change.path}

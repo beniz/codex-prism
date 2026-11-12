@@ -5,6 +5,22 @@ and detailed release notes are in [docs/releases](docs/releases/README.md).
 
 ## Unreleased
 
+- Explain ongoing agent, proposal, and PDF activity below the chat composer without polling or typing-triggered updates. Keep progress remains tied to its originating chat when switching tabs.
+
+- Speed up switching between chat PDFs with two rendering workers, foreground page priority, and a bounded cache of rendered pages.
+
+- Avoid false LaTeX warnings from syntax trees awaiting publication; fix missing-document warnings in included files and show the full document outline across literal `\input`/`\include` files, with continuous slide numbering and navigation to each source. Resolve included files to their owning document before unrelated standalone figures.
+
+- Cancel obsolete PDF preview requests and analyze changed pages in a background worker, keeping the visible PDF usable and preserving the automatic jump to the first change.
+
+- Reduce chat typing latency by avoiding unrelated PDF and review redraws and batching draft autosaves, while retaining immediate text updates and flushing drafts on navigation or close.
+
+- Highlight Plan mode and show agent questions in the chat composer, with explicit selected-answer colours, a separate submit action, and selections preserved when switching chats.
+
+- Fix PDF-to-LaTeX navigation for included files and cached PDFs. Remove ambiguous word-based jumps and verify source lines against the displayed build.
+
+- Open project settings by clicking the Data sources heading in the sidebar.
+
 - Check for new releases every 12 hours and show an update indicator beside the version. Official AppImage, macOS, and Windows packages support signed downloads and a guarded restart; Debian installations detect externally installed upgrades, and source builds show update instructions.
 
 - Distinguish agent commands, file/image access, research, progress, approvals, and outcomes with small coloured icons and labels. Expanded commands use shell syntax highlighting.

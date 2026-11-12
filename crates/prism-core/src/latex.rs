@@ -46,6 +46,8 @@ pub struct SynctexResult {
     pub file: String,
     pub line: u32,
     pub column: u32,
+    #[serde(rename = "sourceRevision")]
+    pub source_revision: String,
 }
 
 // --- Helpers ---
@@ -880,20 +882,26 @@ impl SynctexHeader {
 }
 
 /// Parse synctex data and find the source location closest to (target_x, target_y) on target_page.
+#[cfg(test)]
 fn parse_synctex_data(
-    data: &str,
-    target_page: u32,
-    target_x: f64,
-    target_y: f64,
+    data: &str, target_page: u32, target_x: f64, target_y: f64,
+) -> Option<(String, u32, u32)> {
+    parse_synctex_source(data, target_page, target_x, target_y, |_| true)
+}
+
+fn parse_synctex_source(
+    data: &str, target_page: u32, target_x: f64, target_y: f64,
+    allowed: impl Fn(&str) -> bool,
 ) -> Option<(String, u32, u32)> {
     let mut lines = data.lines().map(str::trim);
-    let header = SynctexHeader::parse(&mut lines);
+    let mut header = SynctexHeader::parse(&mut lines);
     let factor = header.factor();
     let mut on_target_page = false;
     let mut nodes: Vec<SynctexNode> = Vec::new();
 
     for line in lines {
-        // Content section
+        // TeX can declare included files after the content section begins.
+        if header.read_line(line).is_some() { continue; }
         if line.starts_with("Postamble:") {
             break;
         }
@@ -914,7 +922,7 @@ fn parse_synctex_data(
             b'[' | b'(' | b'h' | b'v' | b'k' | b'x' | b'g' | b'$' if on_target_page => {
                 if let Some(node) = line
                     .get(1..)
-                    .and_then(|s| parse_synctex_node(s, factor, header.x_offset, header.y_offset))
+                    .and_then(|s| parse_synctex_node(s, factor, header.x_offset * factor, header.y_offset * factor))
                 {
                     nodes.push(node);
                 }
@@ -923,24 +931,15 @@ fn parse_synctex_data(
         }
     }
 
-    if nodes.is_empty() {
-        return None;
-    }
+    // Ignore generated auxiliaries and external TeX packages before choosing a
+    // node, otherwise they can hide the nearest editable source location.
+    let best = nodes.iter()
+        .filter(|node| header.inputs.get(&node.tag).is_some_and(|path| allowed(path)))
+        .min_by(|a, b| {
+            let distance = |n: &SynctexNode| (n.h - target_x).powi(2) + (n.v - target_y).powi(2);
+            distance(a).total_cmp(&distance(b))
+        })?;
 
-    // Find closest node to (target_x, target_y)
-    let mut best_idx = 0;
-    let mut best_dist = f64::MAX;
-    for (i, node) in nodes.iter().enumerate() {
-        let dx = node.h - target_x;
-        let dy = node.v - target_y;
-        let dist = dx * dx + dy * dy;
-        if dist < best_dist {
-            best_dist = dist;
-            best_idx = i;
-        }
-    }
-
-    let best = nodes.get(best_idx)?;
     let filename = header.inputs.get(&best.tag)?.clone();
     Some((filename, best.line, 0))
 }
@@ -1332,63 +1331,65 @@ pub(crate) fn synctex_view_source(
 pub(crate) async fn synctex_edit(
     state: &LatexCompilerState,
     project_dir: String,
+    main_file: String,
+    pdf_revision: String,
     page: u32,
     x: f64,
     y: f64,
-) -> Result<SynctexResult, String> {
-    let builds = state.last_builds.lock().await;
-    let build = builds
-        .get(&project_dir)
-        .ok_or("No build found for this project")?;
+) -> Result<Option<SynctexResult>, String> {
+    // Source synchronization mutates the persistent build before TeX rewrites
+    // its output. Never read a half-updated PDF/source/SyncTeX combination.
+    let lock = state.project_locks.lock().await.entry(project_dir.clone())
+        .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(()))).clone();
+    let Ok(guard) = lock.try_lock_owned() else { return Ok(None); };
+    let cached = state.last_builds.lock().await.get(&project_dir).and_then(|build| {
+        (Path::new(&main_file).file_stem().and_then(|s| s.to_str()) == Some(build.main_file_name.as_str()))
+            .then(|| build.work_dir.join(format!("{}.pdf", build.main_file_name)))
+    });
+    tokio::task::spawn_blocking(move || {
+        let _guard = guard;
+        synctex_edit_source(&project_dir, &main_file, &pdf_revision, page, x, y, cached.as_deref())
+    }).await.map_err(|e| e.to_string())?
+}
 
-    let synctex_gz = build
-        .work_dir
-        .join(format!("{}.synctex.gz", build.main_file_name));
-    let synctex_plain = build
-        .work_dir
-        .join(format!("{}.synctex", build.main_file_name));
-
-    let work_dir = build.work_dir.clone();
-    drop(builds); // Release lock before I/O
-
-    // Read, decompress, and parse synctex data (blocking I/O + CPU work → offload)
-    let (mut file, line, column) = tokio::task::spawn_blocking(move || {
-        let synctex_data = if synctex_gz.exists() {
-            let compressed = std::fs::read(&synctex_gz)
-                .map_err(|e| format!("Failed to read synctex.gz: {}", e))?;
-            let mut decoder = flate2::read::GzDecoder::new(&compressed[..]);
-            let mut data = String::new();
-            decoder
-                .read_to_string(&mut data)
-                .map_err(|e| format!("Failed to decompress synctex: {}", e))?;
-            Ok::<_, String>(data)
-        } else if synctex_plain.exists() {
-            std::fs::read_to_string(&synctex_plain)
-                .map_err(|e| format!("Failed to read synctex: {}", e))
-        } else {
-            Err("No synctex data found. Recompile with synctex enabled.".to_string())
-        }?;
-
-        parse_synctex_data(&synctex_data, page, x, y)
-            .ok_or_else(|| "Could not resolve source location".to_string())
-    })
-    .await
-    .map_err(|e| format!("Synctex task panicked: {}", e))??;
-
-    // Normalize: strip work_dir prefix and "./" or ".\\" prefix
-    let work_dir_str = work_dir.to_string_lossy().to_string();
-    if let Some(rest) = file.strip_prefix(&format!("{}/", work_dir_str)) {
-        file = rest.to_string();
-    } else if let Some(rest) = file.strip_prefix(&format!("{}\\", work_dir_str)) {
-        file = rest.to_string();
-    }
-    if let Some(rest) = file.strip_prefix("./") {
-        file = rest.to_string();
-    } else if let Some(rest) = file.strip_prefix(".\\") {
-        file = rest.to_string();
-    }
-
-    Ok(SynctexResult { file, line, column })
+fn synctex_edit_source(
+    project_dir: &str, main_file: &str, pdf_revision: &str,
+    page: u32, x: f64, y: f64, cached: Option<&Path>,
+) -> Result<Option<SynctexResult>, String> {
+    if page == 0 || !x.is_finite() || !y.is_finite() { return Ok(None); }
+    let root = std::fs::canonicalize(project_dir).map_err(|e| e.to_string())?;
+    let found = find_pdf_revision(&root, main_file, Some(pdf_revision))?;
+    // A previous accepted PDF may still be displayed while its replacement loads.
+    // Cached build paths are usable only after verifying the exact PDF bytes too.
+    let pdf = found.map(|(path, _)| path).or_else(|| {
+        let path = cached?.canonicalize().ok()?;
+        if !path.starts_with(&root) { return None; }
+        let bytes = std::fs::read(&path).ok()?;
+        (bytes.starts_with(b"%PDF-") && crate::projects::revision(&bytes) == pdf_revision).then_some(path)
+    });
+    let Some(pdf) = pdf else { return Ok(None); };
+    let work = pdf.parent().ok_or("Invalid PDF directory")?;
+    let gz = pdf.with_extension("synctex.gz");
+    let plain = pdf.with_extension("synctex");
+    let data = if gz.exists() {
+        let mut data = String::new();
+        flate2::read::GzDecoder::new(std::fs::File::open(gz).map_err(|e| e.to_string())?)
+            .read_to_string(&mut data).map_err(|e| e.to_string())?;
+        data
+    } else if plain.exists() {
+        std::fs::read_to_string(plain).map_err(|e| e.to_string())?
+    } else { return Ok(None); };
+    let source_root = if work.starts_with(root.join(".prism/build")) || work.starts_with(root.join(".prism/accepted")) { work } else { root.as_path() };
+    let resolve = |name: &str| -> Option<(PathBuf, String)> {
+        let source = work.join(name).canonicalize().ok()?;
+        if !matches!(source.extension().and_then(|s| s.to_str()), Some("tex" | "bib" | "sty" | "cls")) { return None; }
+        let relative = source.strip_prefix(source_root).ok()?.to_string_lossy().replace('\\', "/");
+        Some((source, relative))
+    };
+    let Some((name, line, column)) = parse_synctex_source(&data, page, x, y, |name| resolve(name).is_some()) else { return Ok(None); };
+    let Some((source, file)) = resolve(&name) else { return Ok(None); };
+    let captured = std::fs::read(source).map_err(|e| e.to_string())?;
+    Ok(Some(SynctexResult { file, line, column, source_revision: crate::projects::revision(&captured) }))
 }
 
 /// Clear in-memory build state on app exit.
@@ -1906,9 +1907,9 @@ mod tests {
         assert!((boxes[0].y - 30.0 * factor).abs() < 1e-10);
         assert!((boxes[0].w - 40.0 * factor).abs() < 1e-10);
         assert!((boxes[0].h - 12.0 * factor).abs() < 1e-10);
-        // Preserve the reverse parser's existing offsets in PDF coordinates.
+        // Reverse lookup uses the same scaled offsets as forward navigation.
         assert_eq!(
-            parse_synctex_data(&data, 2, 200.0, 50.0 * factor - 10.0),
+            parse_synctex_data(&data, 2, 200.0 * factor, 40.0 * factor),
             Some(("./chapters/results.tex".into(), 10, 0))
         );
         assert!(parse_synctex_data(&data, 1, 200.0, 50.0).is_none());
@@ -1927,6 +1928,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("included.tex"), "source").unwrap();
         let data = "Magnification:1000\nUnit:65536\nContent:\n{1\nInput:2:./included.tex\nh2,15:50,100:40,10,2\n}1\nPostamble:\n";
+        assert_eq!(parse_synctex_data(data, 1, 50.0, 100.0), Some(("./included.tex".into(), 15, 0)));
         let boxes = forward_synctex(data, dir.path());
         assert_eq!(boxes.len(), 1);
         assert_eq!(
@@ -2648,6 +2650,9 @@ mod outline_navigation_tests {
         .unwrap();
         assert_eq!(found.page, 2);
         assert!(found.y > 0.0 && found.y < 400.0);
+        let reverse = synctex_edit_source(root.to_str().unwrap(), "main.tex", &crate::projects::revision(&bytes), found.page, found.x + found.w / 2.0, found.y + found.h / 2.0, None).unwrap().unwrap();
+        assert_eq!(reverse.file, "chapter.tex");
+        assert_eq!(reverse.source_revision, crate::projects::revision(&std::fs::read(root.join("chapter.tex")).unwrap()));
     }
     #[test]
     fn locates_included_heading_and_rejects_stale_pdf_or_source() {
@@ -2837,5 +2842,43 @@ mod compilation_admission_tests {
             .unwrap_err();
         assert!(error.contains("shutting down"));
         assert_eq!(std::fs::read_dir(tmp.path()).unwrap().count(), 0);
+    }
+}
+
+#[cfg(test)]
+mod inverse_navigation_tests {
+    use super::*;
+    #[test]
+    fn inverse_uses_displayed_pdf_and_its_captured_source() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().canonicalize().unwrap();
+        let work = root.join(".prism/accepted/fixture");
+        std::fs::create_dir_all(work.join("chapters")).unwrap();
+        std::fs::create_dir_all(root.join(".prism/build")).unwrap();
+        let pdf = b"%PDF-displayed";
+        std::fs::write(work.join("slides.pdf"), pdf).unwrap();
+        let captured = b"first\nsecond\nthird";
+        std::fs::write(work.join("chapters/included.tex"), captured).unwrap();
+        let outside = dir.path().join("external.sty");
+        std::fs::write(&outside, "external").unwrap();
+        let input = work.join("chapters/included.tex");
+        std::fs::write(work.join("slides.synctex"), format!("Input:2:{}\nUnit:65536\nContent:\n{{2\nInput:3:{}\nh2,999:50,100:60,10,0\nh3,3:52,100:60,10,0\n}}2\n", outside.display(), input.display())).unwrap();
+        let relative = ".prism/accepted/fixture/slides.pdf";
+        crate::projects::save_json(&root.join(format!(".prism/accepted-{}.json", crate::projects::revision(b"slides.tex"))), &relative).unwrap();
+        // Another compilation/root is newer, but its mapping must never be used.
+        let cached = root.join(".prism/build/other.pdf");
+        std::fs::write(&cached, b"%PDF-other").unwrap();
+        let revision = crate::projects::revision(pdf);
+        let locate = |hash: &str| synctex_edit_source(root.to_str().unwrap(), "slides.tex", hash, 2, 50.0, 100.0, Some(&cached)).unwrap();
+        let result = locate(&revision).unwrap();
+        assert_eq!(result.file, "chapters/included.tex");
+        assert_eq!(result.line, 3);
+        assert_eq!(result.source_revision, crate::projects::revision(captured));
+        assert!(locate("missing-revision").is_none());
+        assert!(synctex_edit_source(root.to_str().unwrap(), "other.tex", &revision, 2, 50.0, 100.0, None).unwrap().is_none());
+        // Capture hashes remain tied to the build, even when live source changes.
+        std::fs::create_dir_all(root.join("chapters")).unwrap();
+        std::fs::write(root.join("chapters/included.tex"), "changed source").unwrap();
+        assert_eq!(locate(&revision).unwrap().source_revision, crate::projects::revision(captured));
     }
 }
