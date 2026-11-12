@@ -28,9 +28,8 @@ import {
   indentLess,
   toggleComment,
 } from "@codemirror/commands";
-import { syntaxHighlighting, syntaxTreeAvailable } from "@codemirror/language";
-import { oneDark, oneDarkHighlightStyle } from "@codemirror/theme-one-dark";
-import { defaultHighlightStyle } from "@codemirror/language";
+import { syntaxTreeAvailable } from "@codemirror/language";
+import { scientificEditorTheme, scientificLatex } from "@/lib/syntax-theme";
 import { useTheme } from "next-themes";
 import {
   search,
@@ -46,7 +45,7 @@ import {
   acceptChunk,
   rejectChunk,
 } from "@codemirror/merge";
-import { latex, latexLinter } from "codemirror-lang-latex";
+import { latexLinter } from "codemirror-lang-latex";
 import { bibtex } from "./lang-bibtex";
 import {
   linter,
@@ -669,7 +668,7 @@ export function LatexEditor() {
           ...defaultKeymap,
           ...historyKeymap,
         ]),
-        activeFile?.type === "bib" ? bibtex() : latex({ enableLinting: false }),
+        activeFile?.type === "bib" ? bibtex() : scientificLatex(),
         ...(activeFile?.type === "tex"
           ? [
               linter((view) => {
@@ -706,9 +705,7 @@ export function LatexEditor() {
             ]
           : []),
         themeCompartmentRef.current.of(
-          resolvedTheme === "dark"
-            ? [oneDark, syntaxHighlighting(oneDarkHighlightStyle)]
-            : [syntaxHighlighting(defaultHighlightStyle)],
+          scientificEditorTheme(resolvedTheme === "dark"),
         ),
         search(),
         highlightSelectionMatches(),
@@ -870,9 +867,7 @@ export function LatexEditor() {
     const view = viewRef.current;
     if (!view) return;
     const extensions =
-      resolvedTheme === "dark"
-        ? [oneDark, syntaxHighlighting(oneDarkHighlightStyle)]
-        : [syntaxHighlighting(defaultHighlightStyle)];
+      scientificEditorTheme(resolvedTheme === "dark");
     view.dispatch({
       effects: themeCompartmentRef.current.reconfigure(extensions),
     });

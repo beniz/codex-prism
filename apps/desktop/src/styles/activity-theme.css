@@ -1,0 +1,14 @@
+:root { --activity-reading: #245f9f; }
+.dark { --activity-reading: #91b9ed; }
+.activity-label { color: var(--syntax-comment); }
+.activity-label[data-activity-kind="command"] { color: var(--syntax-command); }
+.activity-label:is([data-activity-kind="read"], [data-activity-kind="image"], [data-activity-kind="edit"]) {
+  color: var(--activity-reading);
+}
+.activity-label:is([data-activity-kind="research"], [data-activity-kind="plan"]) { color: var(--syntax-special); }
+.activity-label[data-activity-kind="approval"],
+.activity-status[data-activity-status="waiting"] { color: var(--syntax-number); }
+.activity-label[data-activity-kind="error"],
+.activity-status[data-activity-status="error"] { color: var(--syntax-error); }
+.activity-status[data-activity-status="success"] { color: var(--syntax-string); }
+.activity-status[data-activity-status="progress"] { color: var(--syntax-comment); }

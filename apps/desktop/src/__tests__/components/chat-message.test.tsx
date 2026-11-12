@@ -35,7 +35,10 @@ describe("chat presentation", () => {
       },
     };
     const html = renderToStaticMarkup(<Message item={item} />);
-    expect(html).toContain("Search: LaTeX figures; TikZ diagrams");
+    const host = document.createElement("div");
+    host.innerHTML = html;
+    expect(host.querySelector('[data-activity-kind="research"]')?.textContent).toBe("Search");
+    expect(host.textContent).toContain("LaTeX figures; TikZ diagrams");
     expect(html).toContain('href="https://example.org/guide"');
     expect(html).not.toContain("<details");
     expect(html).not.toContain("javascript:");
@@ -134,3 +137,30 @@ it.each(["activity", "commentary", "final_answer"] as const)(
     }
   },
 );
+
+it("shows a blue image label and a neutral path, with a separate successful outcome", () => {
+  const host = document.createElement("div");
+  host.innerHTML = renderToStaticMarkup(<Message item={{ id: "image", type: "imageView", text: "", status: "completed", activity: { path: "/figures/curve.pdf" } }} />);
+  expect(host.querySelector('[data-activity-kind="image"]')?.textContent).toBe("Viewed image");
+  expect(host.querySelector('[data-activity-kind="image"]')?.textContent).not.toContain("curve.pdf");
+  expect(host.textContent).toContain("/figures/curve.pdf");
+  expect(host.querySelector('[data-activity-status="success"]')?.textContent).toBe("Completed");
+});
+
+it("marks failed completed commands red without exposing command output", () => {
+  const host = document.createElement("div");
+  host.innerHTML = renderToStaticMarkup(<Message item={{ id: "cmd", type: "commandExecution", text: "hidden command output", status: "completed", activity: { command: "pdflatex main.tex", exitCode: 2 } }} />);
+  expect(host.querySelector('[data-activity-kind="command"]')?.textContent).toBe("Command");
+  expect(host.querySelector('[data-activity-status="error"]')?.textContent).toBe("Failed · exit 2");
+  expect(host.querySelector('[data-activity-status="success"]')).toBeNull();
+  expect(host.textContent).not.toContain("hidden command output");
+  expect(host.querySelector("pre")).toBeNull();
+});
+
+it("labels visible commentary as progress while keeping reasoning hidden", () => {
+  const host = document.createElement("div");
+  host.innerHTML = renderToStaticMarkup(<Message item={{ id: "note", type: "agentMessage", phase: "commentary", text: "I will compare the figures." }} />);
+  expect(host.querySelector('[data-activity-kind="progress"]')?.textContent).toBe("Progress");
+  expect(host.querySelector('[data-activity-kind="progress"]')?.textContent).not.toContain("compare");
+  expect(renderToStaticMarkup(<Message item={{ id: "reason", type: "reasoning", text: "Not displayed" }} />)).toBe("");
+});
