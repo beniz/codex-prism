@@ -1,3 +1,4 @@
+import { QuestionRequest } from "./question-request";
 import { SourceCompletion } from "./source-completion";
 import { listContinuation } from "@/lib/composer-lists";
 import { ChatHistory } from "./chat-history";
@@ -122,6 +123,12 @@ export function AgentChatDrawer({
   const files = useDocumentStore((d) => d.files);
   const proposals = useAgentChatStore((state) => state.proposals);
   const t = s.tabs.find((t) => t.id === s.activeTabId)!;
+  const questionRequests = s.requests.filter(
+    r => r.method === "item/tool/requestUserInput",
+  );
+  const awaitingAnswer = questionRequests.some(
+    r => r.params.threadId === t.sessionId,
+  );
   const reportError = (e: unknown) =>
     useAgentChatStore.setState({ error: String(e) });
   useEffect(() => {
@@ -153,7 +160,7 @@ export function AgentChatDrawer({
     };
   }, [s.projectId, s.isStreaming]);
   useEffect(() => {
-    if (input.current) {
+    if (input.current && !awaitingAnswer) {
       if (inputHeight !== null) {
         input.current.style.height = `${inputHeight}px`;
       } else {
@@ -161,12 +168,13 @@ export function AgentChatDrawer({
         input.current.style.height = `${Math.min(input.current.scrollHeight, 128)}px`;
       }
     }
-  }, [t.draft, open, inputHeight]);
+  }, [t.draft, open, inputHeight, awaitingAnswer]);
   const model =
     setup.models.find((m) => m.model === s.selectedModel) ||
     setup.models.find((m) => m.isDefault);
 
   const canSend =
+    !awaitingAnswer &&
     !s.restoringChats &&
     !!t.draft.trim() &&
     !s.pendingReview &&
@@ -466,10 +474,10 @@ export function AgentChatDrawer({
                   useAgentChatStore.setState((state) => ({ tabs: state.tabs.map((tab) => tab.id === t.id ? { ...tab, mode: "default" } : tab) }));
                   void s.sendPrompt("Implement the plan.");
                 }}>Implement plan</Button>
-                <Button variant="outline" onClick={() => document.querySelector<HTMLTextAreaElement>("textarea")?.focus()}>Refine plan</Button>
+                <Button variant="outline" onClick={() => input.current?.focus()}>Refine plan</Button>
               </div>
             )}
-            {t.isStreaming && (
+            {t.isStreaming && !awaitingAnswer && (
               <div
                 role="status"
                 className="flex items-center gap-2 text-xs text-muted-foreground"
@@ -479,7 +487,7 @@ export function AgentChatDrawer({
               </div>
             )}
             {s.requests
-              .filter((r) => r.params.threadId === t.sessionId)
+              .filter((r) => r.params.threadId === t.sessionId && r.method !== "item/tool/requestUserInput")
               .map((r) => (
                 <Request key={String(r.id)} event={r} />
               ))}
@@ -495,13 +503,14 @@ export function AgentChatDrawer({
           )}
           <div
             ref={composer}
+            data-chat-composer="true"
             className="max-h-[70%] shrink-0 overflow-auto px-3 pb-3 pt-1"
           >
             <button
               type="button"
               aria-label="Resize message input"
               title="Drag up to enlarge; use arrow keys to resize. Double-click to reset."
-              className="group flex h-3 w-full touch-none cursor-ns-resize items-center justify-center rounded focus-visible:outline-2 focus-visible:outline-ring"
+              className={cn("group h-3 w-full touch-none cursor-ns-resize items-center justify-center rounded focus-visible:outline-2 focus-visible:outline-ring", awaitingAnswer ? "hidden" : "flex")}
               onPointerDown={(e) => {
                 if (e.button !== 0) return;
                 e.preventDefault();
@@ -541,265 +550,283 @@ export function AgentChatDrawer({
               <span className="h-1 w-8 rounded-full bg-border group-hover:bg-muted-foreground/60" />
             </button>
             <div className="rounded-2xl border border-input bg-muted/20 p-2 shadow-xs transition-shadow focus-within:border-ring/50 focus-within:ring-2 focus-within:ring-ring/10">
-              {s.pendingAttachments.length > 0 && (
-                <div className="flex max-h-24 flex-wrap gap-1.5 overflow-auto px-1 pb-2">
-                  {s.pendingAttachments.map((a) => (
-                    <div
-                      key={a.label}
-                      title={a.filePath || a.label}
-                      className="flex max-w-full items-center gap-1.5 rounded-lg border bg-background py-1 pl-2 pr-1 text-xs"
-                    >
-                      {a.imageDataUrl ? (
-                        <img
-                          src={a.imageDataUrl}
-                          alt="Attached capture"
-                          className="size-6 rounded object-cover"
-                        />
-                      ) : (
-                        <FileTextIcon className="size-3.5 shrink-0 text-muted-foreground" />
-                      )}
-                      <span className="max-w-40 truncate">
-                        {a.label.split("/").pop()}
-                      </span>
-                      <Button
-                        variant="ghost"
-                        size="icon-xs"
-                        aria-label={`Remove ${a.label}`}
-                        onClick={() => s.requestPinnedContextRemoval([a.label])}
-                      >
-                        <XIcon />
-                      </Button>
-                    </div>
-                  ))}
+              {questionRequests.map(request => (
+                <div
+                  key={`${typeof request.id}:${request.id}:${request.params.threadId}`}
+                  hidden={request.params.threadId !== t.sessionId}
+                >
+                  <QuestionRequest
+                    event={request}
+                    planning={s.tabs.find(tab => tab.sessionId === request.params.threadId)?.mode === "plan"}
+                    onStop={request.params.threadId === t.sessionId && t.isStreaming
+                      ? () => void s.cancelExecution()
+                      : undefined}
+                  />
                 </div>
-              )}
-              <SourceCompletion projectId={s.projectId} chatId={t.id} draft={t.draft} input={input} change={setDraft} />
-              <textarea
-                ref={input}
-                rows={2}
-                disabled={s.restoringChats}
-                aria-label="Message Codex"
-                className="block min-h-14 w-full resize-none border-0 bg-transparent px-2 py-1.5 text-sm outline-none placeholder:text-muted-foreground/70"
-                placeholder={
-                  t.isStreaming
-                    ? "Guide the current turn…"
-                    : s.pendingReview
-                      ? "Resolve the legacy review…"
-                      : "Ask Codex anything about your project…"
-                }
-                value={t.draft}
-                onChange={(e) => { promptHistory.current = null; setDraft(e.target.value); }}
-                onKeyDown={(e) => {
-                  if (e.nativeEvent.isComposing) return;
-                  if ((e.key === "ArrowUp" || e.key === "ArrowDown") && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
-                    let history = promptHistory.current;
-                    if (history && (history.chatId !== t.id || history.value !== t.draft)) {
-                      promptHistory.current = null;
-                      history = null;
+              ))}
+              <div hidden={awaitingAnswer}>
+                {s.pendingAttachments.length > 0 && (
+                  <div className="flex max-h-24 flex-wrap gap-1.5 overflow-auto px-1 pb-2">
+                    {s.pendingAttachments.map((a) => (
+                      <div
+                        key={a.label}
+                        title={a.filePath || a.label}
+                        className="flex max-w-full items-center gap-1.5 rounded-lg border bg-background py-1 pl-2 pr-1 text-xs"
+                      >
+                        {a.imageDataUrl ? (
+                          <img
+                            src={a.imageDataUrl}
+                            alt="Attached capture"
+                            className="size-6 rounded object-cover"
+                          />
+                        ) : (
+                          <FileTextIcon className="size-3.5 shrink-0 text-muted-foreground" />
+                        )}
+                        <span className="max-w-40 truncate">
+                          {a.label.split("/").pop()}
+                        </span>
+                        <Button
+                          variant="ghost"
+                          size="icon-xs"
+                          aria-label={`Remove ${a.label}`}
+                          onClick={() => s.requestPinnedContextRemoval([a.label])}
+                        >
+                          <XIcon />
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {!awaitingAnswer && <SourceCompletion projectId={s.projectId} chatId={t.id} draft={t.draft} input={input} change={setDraft} />}
+                <textarea
+                  ref={input}
+                  rows={2}
+                  disabled={s.restoringChats}
+                  aria-label="Message Codex"
+                  className="block min-h-14 w-full resize-none border-0 bg-transparent px-2 py-1.5 text-sm outline-none placeholder:text-muted-foreground/70"
+                  placeholder={
+                    t.isStreaming
+                      ? "Guide the current turn…"
+                      : s.pendingReview
+                        ? "Resolve the legacy review…"
+                        : "Ask Codex anything about your project…"
+                  }
+                  value={t.draft}
+                  onChange={(e) => { promptHistory.current = null; setDraft(e.target.value); }}
+                  onKeyDown={(e) => {
+                    if (e.nativeEvent.isComposing) return;
+                    if ((e.key === "ArrowUp" || e.key === "ArrowDown") && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
+                      let history = promptHistory.current;
+                      if (history && (history.chatId !== t.id || history.value !== t.draft)) {
+                        promptHistory.current = null;
+                        history = null;
+                      }
+                      if (!history && e.key === "ArrowUp" && t.draft === "") {
+                        const prompts = t.messages.filter(m => m.type === "userMessage" && m.text?.trim()).map(m => m.text!);
+                        if (prompts.length) history = { chatId: t.id, prompts, index: prompts.length, value: "" };
+                      }
+                      if (history) {
+                        e.preventDefault();
+                        history.index = Math.max(0, Math.min(history.prompts.length, history.index + (e.key === "ArrowUp" ? -1 : 1)));
+                        history.value = history.prompts[history.index] ?? "";
+                        promptHistory.current = history.index === history.prompts.length ? null : history;
+                        setDraft(history.value);
+                        return;
+                      }
                     }
-                    if (!history && e.key === "ArrowUp" && t.draft === "") {
-                      const prompts = t.messages.filter(m => m.type === "userMessage" && m.text?.trim()).map(m => m.text!);
-                      if (prompts.length) history = { chatId: t.id, prompts, index: prompts.length, value: "" };
-                    }
-                    if (history) {
+
+                    if (e.key === "Tab" && e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey && !t.isStreaming && !s.restoringChats) {
                       e.preventDefault();
-                      history.index = Math.max(0, Math.min(history.prompts.length, history.index + (e.key === "ArrowUp" ? -1 : 1)));
-                      history.value = history.prompts[history.index] ?? "";
-                      promptHistory.current = history.index === history.prompts.length ? null : history;
-                      setDraft(history.value);
+                      useAgentChatStore.setState((state) => ({ tabs: state.tabs.map((tab) => tab.id === t.id ? { ...tab, mode: tab.mode === "plan" ? "default" : "plan" } : tab) }));
                       return;
                     }
-                  }
-
-                  if (e.key === "Tab" && e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey && !t.isStreaming && !s.restoringChats) {
-                    e.preventDefault();
-                    useAgentChatStore.setState((state) => ({ tabs: state.tabs.map((tab) => tab.id === t.id ? { ...tab, mode: tab.mode === "plan" ? "default" : "plan" } : tab) }));
-                    return;
-                  }
-                  if (
-                    e.key === "Enter" &&
-                    e.shiftKey &&
-                    !e.ctrlKey &&
-                    !e.metaKey &&
-                    !e.altKey
-                  ) {
-                    const field = e.currentTarget;
-                    const edit = listContinuation(
-                      field.value,
-                      field.selectionStart,
-                      field.selectionEnd,
-                    );
-                    if (edit) {
-                      e.preventDefault();
-                      field.setRangeText(edit.text, edit.from, edit.to, "end");
-                      setDraft(field.value);
+                    if (
+                      e.key === "Enter" &&
+                      e.shiftKey &&
+                      !e.ctrlKey &&
+                      !e.metaKey &&
+                      !e.altKey
+                    ) {
+                      const field = e.currentTarget;
+                      const edit = listContinuation(
+                        field.value,
+                        field.selectionStart,
+                        field.selectionEnd,
+                      );
+                      if (edit) {
+                        e.preventDefault();
+                        field.setRangeText(edit.text, edit.from, edit.to, "end");
+                        setDraft(field.value);
+                      }
+                      return;
                     }
-                    return;
-                  }
-                  if (
-                    e.key === "Enter" &&
-                    !e.shiftKey &&
-                    !e.nativeEvent.isComposing
-                  ) {
-                    e.preventDefault();
-                    send();
-                  }
-                }}
-              />
-              <div className="flex flex-wrap items-center gap-1 pt-1">
-                <Popover open={filePicker} onOpenChange={setFilePicker}>
-                  <PopoverTrigger asChild>
-                    <Button
-                      variant="ghost"
-                      size="icon-sm"
-                      disabled={s.locked || attaching}
-                      title="Attach files"
-                      aria-label="Attach files"
-                    >
-                      {attaching ? (
-                        <Loader2Icon className="animate-spin" />
-                      ) : (
-                        <PaperclipIcon />
-                      )}
-                    </Button>
-                  </PopoverTrigger>
-                  <PopoverContent side="top" align="start" className="w-72 p-2">
-                    <Button
-                      variant="ghost"
-                      className="w-full justify-start"
-                      onClick={() => void upload()}
-                    >
-                      <UploadIcon />
-                      Upload from computer
-                    </Button>
-                    <p className="px-3 pb-2 text-[11px] text-muted-foreground">
-                      Files are copied into the project; images use its image
-                      folder.
-                    </p>
-                    <div className="border-t pt-2">
-                      <div className="mb-2 flex items-center gap-2 rounded-md border px-2">
-                        <SearchIcon className="size-3.5 text-muted-foreground" />
-                        <input
-                          aria-label="Search project files"
-                          placeholder="Search project files…"
-                          className="h-8 min-w-0 flex-1 bg-transparent text-xs outline-none"
-                          value={query}
-                          onChange={(e) => setQuery(e.target.value)}
-                        />
-                      </div>
-                      <div className="max-h-44 overflow-auto">
-                        {files
-                          .filter((f) =>
+                    if (
+                      e.key === "Enter" &&
+                      !e.shiftKey &&
+                      !e.nativeEvent.isComposing
+                    ) {
+                      e.preventDefault();
+                      send();
+                    }
+                  }}
+                />
+                <div className="flex flex-wrap items-center gap-1 pt-1">
+                  <Popover open={filePicker} onOpenChange={setFilePicker}>
+                    <PopoverTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        disabled={s.locked || attaching}
+                        title="Attach files"
+                        aria-label="Attach files"
+                      >
+                        {attaching ? (
+                          <Loader2Icon className="animate-spin" />
+                        ) : (
+                          <PaperclipIcon />
+                        )}
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent side="top" align="start" className="w-72 p-2">
+                      <Button
+                        variant="ghost"
+                        className="w-full justify-start"
+                        onClick={() => void upload()}
+                      >
+                        <UploadIcon />
+                        Upload from computer
+                      </Button>
+                      <p className="px-3 pb-2 text-[11px] text-muted-foreground">
+                        Files are copied into the project; images use its image
+                        folder.
+                      </p>
+                      <div className="border-t pt-2">
+                        <div className="mb-2 flex items-center gap-2 rounded-md border px-2">
+                          <SearchIcon className="size-3.5 text-muted-foreground" />
+                          <input
+                            aria-label="Search project files"
+                            placeholder="Search project files…"
+                            className="h-8 min-w-0 flex-1 bg-transparent text-xs outline-none"
+                            value={query}
+                            onChange={(e) => setQuery(e.target.value)}
+                          />
+                        </div>
+                        <div className="max-h-44 overflow-auto">
+                          {files
+                            .filter((f) =>
+                              f.relativePath
+                                .toLowerCase()
+                                .includes(query.toLowerCase()),
+                            )
+                            .map((f) => {
+                              const selected = s.pendingAttachments.some(
+                                (a) => a.filePath === f.relativePath,
+                              );
+                              return (
+                                <Button
+                                  key={f.id}
+                                  variant="ghost"
+                                  size="sm"
+                                  className="w-full justify-start font-normal"
+                                  disabled={selected}
+                                  onClick={() => attach(f.relativePath)}
+                                >
+                                  <FileTextIcon className="size-3.5 shrink-0" />
+                                  <span className="truncate text-xs">
+                                    {f.relativePath}
+                                  </span>
+                                  {selected && (
+                                    <CheckIcon className="ml-auto size-3 shrink-0" />
+                                  )}
+                                </Button>
+                              );
+                            })}
+                          {!files.some((f) =>
                             f.relativePath
                               .toLowerCase()
                               .includes(query.toLowerCase()),
-                          )
-                          .map((f) => {
-                            const selected = s.pendingAttachments.some(
-                              (a) => a.filePath === f.relativePath,
-                            );
-                            return (
-                              <Button
-                                key={f.id}
-                                variant="ghost"
-                                size="sm"
-                                className="w-full justify-start font-normal"
-                                disabled={selected}
-                                onClick={() => attach(f.relativePath)}
-                              >
-                                <FileTextIcon className="size-3.5 shrink-0" />
-                                <span className="truncate text-xs">
-                                  {f.relativePath}
-                                </span>
-                                {selected && (
-                                  <CheckIcon className="ml-auto size-3 shrink-0" />
-                                )}
-                              </Button>
-                            );
-                          })}
-                        {!files.some((f) =>
-                          f.relativePath
-                            .toLowerCase()
-                            .includes(query.toLowerCase()),
-                        ) && (
-                          <p className="p-2 text-xs text-muted-foreground">
-                            No matching project files
-                          </p>
-                        )}
+                          ) && (
+                            <p className="p-2 text-xs text-muted-foreground">
+                              No matching project files
+                            </p>
+                          )}
+                        </div>
                       </div>
-                    </div>
-                  </PopoverContent>
-                </Popover>
-                <select
-                  aria-label="Model"
-                  title="Model"
-                  className="h-8 min-w-0 max-w-[45%] cursor-pointer rounded-lg bg-transparent px-1 text-xs text-muted-foreground outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring"
-                  value={s.selectedModel}
-                  onChange={(e) =>
-                    useAgentChatStore.setState({
-                      selectedModel: e.target.value,
-                      effortLevel: "",
-                    })
-                  }
-                >
-                  <option value="">
-                    {model?.displayName || "Codex default"}
-                  </option>
-                  {setup.models.map((m) => (
-                    <option key={m.id} value={m.model}>
-                      {m.displayName}
+                    </PopoverContent>
+                  </Popover>
+                  <select
+                    aria-label="Model"
+                    title="Model"
+                    className="h-8 min-w-0 max-w-[45%] cursor-pointer rounded-lg bg-transparent px-1 text-xs text-muted-foreground outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring"
+                    value={s.selectedModel}
+                    onChange={(e) =>
+                      useAgentChatStore.setState({
+                        selectedModel: e.target.value,
+                        effortLevel: "",
+                      })
+                    }
+                  >
+                    <option value="">
+                      {model?.displayName || "Codex default"}
                     </option>
-                  ))}
-                </select>
-                <select
-                  aria-label="Reasoning effort"
-                  title="Reasoning effort"
-                  className="h-8 min-w-0 max-w-[25%] cursor-pointer rounded-lg bg-transparent px-1 text-xs text-muted-foreground outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring"
-                  value={s.effortLevel}
-                  onChange={(e) =>
-                    useAgentChatStore.setState({ effortLevel: e.target.value })
-                  }
-                >
-                  <option value="">Effort</option>
-                  {model?.supportedReasoningEfforts.map((e) => (
-                    <option key={e.reasoningEffort} value={e.reasoningEffort}>
-                      {e.reasoningEffort}
-                    </option>
-                  ))}
-                </select>
-                <div className="ml-auto flex gap-1">
-                  {t.isStreaming && (
+                    {setup.models.map((m) => (
+                      <option key={m.id} value={m.model}>
+                        {m.displayName}
+                      </option>
+                    ))}
+                  </select>
+                  <select
+                    aria-label="Reasoning effort"
+                    title="Reasoning effort"
+                    className="h-8 min-w-0 max-w-[25%] cursor-pointer rounded-lg bg-transparent px-1 text-xs text-muted-foreground outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring"
+                    value={s.effortLevel}
+                    onChange={(e) =>
+                      useAgentChatStore.setState({ effortLevel: e.target.value })
+                    }
+                  >
+                    <option value="">Effort</option>
+                    {model?.supportedReasoningEfforts.map((e) => (
+                      <option key={e.reasoningEffort} value={e.reasoningEffort}>
+                        {e.reasoningEffort}
+                      </option>
+                    ))}
+                  </select>
+                  <div className="ml-auto flex gap-1">
+                    {t.isStreaming && (
+                      <Button
+                        variant="outline"
+                        size="icon-sm"
+                        className="rounded-full"
+                        title="Stop Codex"
+                        aria-label="Stop Codex"
+                        onClick={() => void s.cancelExecution()}
+                      >
+                        <SquareIcon className="size-3 fill-current" />
+                      </Button>
+                    )}
                     <Button
-                      variant="outline"
                       size="icon-sm"
                       className="rounded-full"
-                      title="Stop Codex"
-                      aria-label="Stop Codex"
-                      onClick={() => void s.cancelExecution()}
+                      disabled={!canSend}
+                      title={
+                        t.isStreaming ? "Guide current turn" : "Send message"
+                      }
+                      aria-label={
+                        t.isStreaming ? "Guide current turn" : "Send message"
+                      }
+                      onClick={send}
                     >
-                      <SquareIcon className="size-3 fill-current" />
+                      <ArrowUpIcon />
                     </Button>
-                  )}
-                  <Button
-                    size="icon-sm"
-                    className="rounded-full"
-                    disabled={!canSend}
-                    title={
-                      t.isStreaming ? "Guide current turn" : "Send message"
-                    }
-                    aria-label={
-                      t.isStreaming ? "Guide current turn" : "Send message"
-                    }
-                    onClick={send}
-                  >
-                    <ArrowUpIcon />
-                  </Button>
+                  </div>
                 </div>
               </div>
             </div>
             <div className="flex items-center justify-between gap-2 px-1 pt-1.5 text-[10px] text-muted-foreground">
               <span>
-                {attaching ? (
+                {awaitingAnswer ? (
+                  "Select answers, then submit to continue"
+                ) : attaching ? (
                   "Adding files…"
                 ) : s.pendingReview ? (
                   "Resolve the legacy review before sending"
@@ -817,7 +844,14 @@ export function AgentChatDrawer({
                 )}
               </span>
               <span className="shrink-0">
-                {t.mode === "plan" ? "Plan" : "Agent"} · Shift+Tab to switch · Enter to send
+                <span
+                  data-chat-mode={t.mode}
+                  className={cn("rounded px-1.5 py-0.5 font-semibold",
+                    t.mode === "plan" && "bg-violet-500/10 text-[var(--syntax-special)]")}
+                >
+                  {t.mode === "plan" ? "Plan" : "Agent"}
+                </span>
+                {!awaitingAnswer && " · Shift+Tab to switch · Enter to send"}
               </span>
             </div>
           </div>
@@ -829,56 +863,7 @@ export function AgentChatDrawer({
 
 function Request({ event: e }: { event: AgentEvent }) {
   const respond = useAgentChatStore((s) => s.respond);
-  const [answers, setAnswers] = useState<Record<string, string>>({});
-  const [submitting, setSubmitting] = useState(false);
   const p = e.params;
-  if (e.method === "item/tool/requestUserInput")
-    return (
-      <div className="space-y-2 rounded border p-3">
-        <ActivityLabel kind="approval" label="Input needed" />
-        {(p.questions ?? []).map((q: any) => (
-          <label key={q.id} className="block">
-            {q.question}
-            <input
-              className="block rounded border p-1"
-              value={answers[q.id] ?? ""}
-              onChange={(ev) =>
-                setAnswers({ ...answers, [q.id]: ev.target.value })
-              }
-            />
-            {q.options?.map((o: any) => (
-              <Button
-                variant="outline"
-                size="sm"
-                key={o.label}
-                onClick={() => setAnswers({ ...answers, [q.id]: o.label })}
-              >
-                {o.label}{o.description ? ` — ${o.description}` : ""}
-              </Button>
-            ))}
-          </label>
-        ))}
-        <Button
-          variant="outline"
-          size="sm"
-          disabled={submitting || (p.questions ?? []).some((q: any) => !answers[q.id]?.trim())}
-          onClick={() => {
-            if (submitting) return;
-            setSubmitting(true);
-            void respond(e, {
-              answers: Object.fromEntries(
-                Object.entries(answers).map(([id, value]) => [
-                  id,
-                  { answers: [value] },
-                ]),
-              ),
-            }).finally(() => setSubmitting(false));
-          }}
-        >
-          Answer
-        </Button>
-      </div>
-    );
   const permissions = e.method === "item/permissions/requestApproval";
   const approval = e.method.endsWith("/requestApproval");
   return (
