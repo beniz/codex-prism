@@ -271,6 +271,8 @@ pub(crate) async fn project_service(
             let result = latex::synctex_edit(
                 &state,
                 root,
+                str_arg("mainFile")?,
+                str_arg("pdfRevision")?,
                 args["page"].as_u64().ok_or("Missing page")? as u32,
                 args["x"].as_f64().ok_or("Missing x")?,
                 args["y"].as_f64().ok_or("Missing y")?,

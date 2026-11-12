@@ -5,6 +5,8 @@ and detailed release notes are in [docs/releases](docs/releases/README.md).
 
 ## Unreleased
 
+- Fix PDF-to-LaTeX navigation for included files and cached PDFs. Remove ambiguous word-based jumps and verify source lines against the displayed build.
+
 - Open project settings by clicking the Data sources heading in the sidebar.
 
 - Check for new releases every 12 hours and show an update indicator beside the version. Official AppImage, macOS, and Windows packages support signed downloads and a guarded restart; Debian installations detect externally installed upgrades, and source builds show update instructions.

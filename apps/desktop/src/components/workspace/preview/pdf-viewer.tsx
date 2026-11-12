@@ -214,7 +214,6 @@ interface PdfViewerProps {
   onError?: (error: string) => void;
   onLoadSuccess?: (numPages: number) => void;
   onScaleChange?: (scale: number) => void;
-  onTextClick?: (text: string) => void;
   onSynctexClick?: (page: number, x: number, y: number) => void;
   onTextSelect?: (selection: PdfTextSelection | null) => void;
   onFirstPageSize?: (width: number, height: number) => void;
@@ -240,7 +239,6 @@ export const PdfViewer = memo(function PdfViewer({
   onError,
   onLoadSuccess,
   onScaleChange,
-  onTextClick,
   onSynctexClick,
   onTextSelect,
   onFirstPageSize,
@@ -1197,21 +1195,6 @@ export const PdfViewer = memo(function PdfViewer({
     [captureMode, dragStart, dragPageNum, onCapture],
   );
 
-  // Text layer click for onTextClick
-  const handleTextLayerClick = useCallback(
-    (e: React.MouseEvent) => {
-      if (!onTextClick) return;
-      const target = e.target as HTMLElement;
-      if (target.tagName === "text" && target.closest(".mupdf-text-layer")) {
-        const text = target.textContent?.trim();
-        if (text && text.length > 2) {
-          onTextClick(text);
-        }
-      }
-    },
-    [onTextClick],
-  );
-
   const selRect =
     dragStart && dragEnd
       ? {
@@ -1254,7 +1237,6 @@ export const PdfViewer = memo(function PdfViewer({
       <div
         ref={contentRef}
         className="flex min-w-fit flex-col items-center gap-4 p-4"
-        onClick={handleTextLayerClick}
       >
         {loading && numPages === 0 && (
           <div className="flex items-center gap-2 text-muted-foreground">
