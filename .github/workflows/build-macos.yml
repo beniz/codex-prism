@@ -3,6 +3,13 @@ name: Build macOS
 on:
   workflow_dispatch:
   workflow_call:
+    secrets:
+      TAURI_SIGNING_PRIVATE_KEY:
+        required: false
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD:
+        required: false
+      PRISM_UPDATE_PUBLIC_KEY:
+        required: false
     inputs:
       release_tag:
         description: Release tag to build (empty for a test build)
@@ -21,11 +28,16 @@ jobs:
     name: Apple Silicon DMG
     runs-on: macos-15
     timeout-minutes: 60
+    env:
+      PRISM_OFFICIAL_BUILD: ${{ inputs.release_tag != '' && '1' || '0' }}
+      PRISM_UPDATE_PUBLIC_KEY: ${{ inputs.release_tag != '' && secrets.PRISM_UPDATE_PUBLIC_KEY || '' }}
+      TAURI_SIGNING_PRIVATE_KEY: ${{ inputs.release_tag != '' && secrets.TAURI_SIGNING_PRIVATE_KEY || '' }}
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ inputs.release_tag != '' && secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD || '' }}
+      CARGO_TERM_COLOR: always
+
     defaults:
       run:
         shell: bash
-    env:
-      CARGO_TERM_COLOR: always
 
     steps:
       - name: Check out source
@@ -45,7 +57,7 @@ jobs:
           test "$(uname -m)" = arm64
           corepack enable
           corepack pnpm --version
-          rustup toolchain install 1.88.0 --profile minimal --target aarch64-apple-darwin
+          rustup toolchain install 1.90.0 --profile minimal --target aarch64-apple-darwin
           cargo --version
           python3 --version
           if ! command -v pkg-config >/dev/null; then
@@ -62,6 +74,12 @@ jobs:
       - name: Install frontend dependencies
         run: corepack pnpm install --frozen-lockfile
 
+      - name: Require release signing keys
+        if: inputs.release_tag != ''
+        shell: bash
+        run: |
+          test -n "$TAURI_SIGNING_PRIVATE_KEY"
+          test -n "$PRISM_UPDATE_PUBLIC_KEY"
       - name: Validate release version
         if: inputs.release_tag != ''
         env:
@@ -78,7 +96,13 @@ jobs:
           # Ad-hoc signing needs no certificate; this build is not notarized.
           APPLE_SIGNING_IDENTITY: '-'
         run: |
-          corepack pnpm --filter @codex-prism/desktop tauri build \
+          extra=()
+          if [ "$PRISM_OFFICIAL_BUILD" = "1" ]; then
+            extra+=(--config "$(node scripts/updater-config.mjs)")
+          else
+            extra+=(--config src-tauri/tauri.local-build.conf.json)
+          fi
+          corepack pnpm --filter @codex-prism/desktop tauri build "${extra[@]}" \
             --target aarch64-apple-darwin --bundles app,dmg -- --locked
 
       - name: Verify app signature and checksum DMG
@@ -96,6 +120,7 @@ jobs:
           path: |
             apps/desktop/src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg
             apps/desktop/src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/SHA256SUMS
+            apps/desktop/src-tauri/target/aarch64-apple-darwin/release/bundle/macos/*.app.tar.gz*
           if-no-files-found: error
           retention-days: 14
           compression-level: 0

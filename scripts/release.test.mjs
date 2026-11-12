@@ -108,7 +108,11 @@ test("collect includes version-specific release notes and hashes their exact byt
     createHash("sha256").update(notes).digest("hex"),
   );
 });
-test("AppDir icon survives relocation instead of depending on the build path", async (t) => {
+// Windows stat/chmod do not represent the POSIX executable bits verified in
+// an AppImage. Keep this complete package check on Linux and macOS.
+test("AppDir icon survives relocation instead of depending on the build path", {
+  skip: process.platform === "win32" ? "Requires POSIX executable permissions" : false,
+}, async (t) => {
   const base = await mkdtemp(join(tmpdir(), "prism-appdir-test-"));
   t.after(() => rm(base, { recursive: true, force: true }));
   const dir = join(base, "original");
@@ -139,4 +143,16 @@ test("AppDir validation rejects icons outside the package", async (t) => {
   await writeFile(join(base, "outside.png"), "external");
   await symlink(join(base, "outside.png"), join(dir, "prism.png"));
   await assert.rejects(normalizeAppDir(dir), /escapes/);
+});
+
+test("AppDir validation rejects a non-executable launcher", async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), "prism-appdir-permissions-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const icon = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=", "base64");
+  await writeFile(join(dir, "prism.png"), icon);
+  await writeFile(join(dir, "prism.desktop"), "[Desktop Entry]\nIcon=prism\n");
+  await writeFile(join(dir, ".DirIcon"), icon);
+  await writeFile(join(dir, "AppRun"), "#!/bin/sh\nexit 0\n");
+  await chmod(join(dir, "AppRun"), 0o644);
+  await assert.rejects(verifyAppDir(dir), /AppRun is not executable/);
 });

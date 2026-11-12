@@ -47,7 +47,7 @@ pub(crate) fn save_json(path: &Path, value: &impl Serialize) -> Result<(), Strin
     )
 }
 
-fn registry(app: &crate::Backend) -> Result<Vec<Project>, String> {
+pub(crate) fn registry(app: &crate::Backend) -> Result<Vec<Project>, String> {
     let p = data_dir(app)?.join("projects.json");
     if !p.exists() {
         return Ok(vec![]);

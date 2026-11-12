@@ -896,10 +896,10 @@ export function activeProposal(
 }
 
 // Persist tab identity, drafts and project model preferences; Codex remains the source of message history.
-useAgentChatStore.subscribe((state) => {
+export function persistChatTabs() {
+  const state = useAgentChatStore.getState();
   if (!state.activeProjectPath || !state.projectId || state.restoringChats) return;
-  try {
-    writeChatTabs(state.activeProjectPath, {
+  writeChatTabs(state.activeProjectPath, {
       activeTabId: state.activeTabId,
       selectedModel: state.selectedModel,
       effortLevel: state.effortLevel,
@@ -907,7 +907,7 @@ useAgentChatStore.subscribe((state) => {
         id, title, sessionId, draft: draft || submittedDraft || "", mode,
       })),
     });
-  } catch {
-    // Storage may be unavailable; backend conversations remain accessible in History.
-  }
+}
+useAgentChatStore.subscribe(() => {
+  try { persistChatTabs(); } catch { /* Automatic persistence may fail; explicit update saves must report it. */ }
 });

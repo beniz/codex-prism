@@ -10,9 +10,9 @@ The workflow validates the tag against the package, Cargo and Tauri versions, th
 | Windows 10/11 x64 | `-setup.exe` | GitHub `windows-2022` runner |
 | macOS Apple Silicon | `.dmg` | GitHub `macos-15` runner |
 
-After all builds and tests pass, one publishing job creates a **draft GitHub release** containing all four packages, `SHA256SUMS`, `RELEASE_NOTES.md`, and `release.json` with the source commit and artifact hashes. It uses the workflow's built-in `GITHUB_TOKEN`; no separate publishing token or signing secrets are required. Build jobs have read-only repository permissions; only the publishing job can write releases.
+After all builds and tests pass, one publishing job creates a **draft GitHub release** containing all four packages, the macOS updater archive, updater signatures, `latest.json`, `SHA256SUMS`, `RELEASE_NOTES.md`, and `release.json` with the source commit and artifact hashes. It uses the workflow's built-in `GITHUB_TOKEN`; no separate publishing token is required. Configure the updater signing secrets described below before releasing. Build jobs have read-only repository permissions; only the publishing job can write releases.
 
-Windows packages are unsigned. macOS packages are ad-hoc signed, not Apple-notarized. Linux packages target Ubuntu 26.04 and are not promised to work on older distributions. Automatic application updates are not enabled.
+Windows packages are unsigned. macOS packages are ad-hoc signed, not Apple-notarized. Linux packages target Ubuntu 26.04 and are not promised to work on older distributions. Signed application updates are available for AppImage, Windows and macOS installations; Debian packages remain externally managed.
 
 ## Prepare a release
 
@@ -60,13 +60,21 @@ Manual macOS artifacts are named `codex-prism-macos-arm64`; Windows artifacts ar
 
 ## Local Linux packaging
 
-Build on Ubuntu 26.04 x86_64. Install the [development dependencies](../../README_AGENTS.md#build-from-source) plus `patchelf`, `librsvg2-bin`, `file`, `curl`, `wget`, `xdg-utils`, `libpng-dev`, `zlib1g-dev`, and `squashfs-tools`. Install Node 22 with Corepack and Rust 1.88.0.
+Build on Ubuntu 26.04 x86_64. Install the [development dependencies](../../README_AGENTS.md#build-from-source) plus `patchelf`, `librsvg2-bin`, `file`, `curl`, `wget`, `xdg-utils`, `libpng-dev`, `zlib1g-dev`, and `squashfs-tools`. Install Node 22 with Corepack and Rust 1.90.0.
 
 ```sh
 corepack pnpm install --frozen-lockfile
 corepack pnpm release:build
 ```
 
-Artifacts go to `dist/releases/v<version>/`. Packaging embeds a portable PNG `.DirIcon` and validates the AppImage after extraction into a separate directory, before generating checksums. AppImage filenames omit `linux` to follow catalog conventions. Signing, if added, must happen after this normalization.
+Artifacts go to `dist/releases/v<version>/`. Packaging embeds a portable PNG `.DirIcon` and validates the AppImage after extraction into a separate directory, before generating checksums. AppImage filenames omit `linux` to follow catalog conventions. Official updater signing happens after this normalization.
 
 Local `release:build` can build an uncommitted checkout for testing. The `codex-prism` symlink in `~/.local/bin` continues launching the repository checkout; remove or rename it if an installed package should take precedence.
+
+## Signed updates
+
+See [application updates and signing setup](../updating.md). Official releases now
+require updater signing secrets, verified updater artifacts and `latest.json`, and
+a passing three-platform `Test updater` workflow before draft assembly. The first
+updater-enabled version requires a manual installation. Publish the complete draft
+only after verifying all assets; do not publish or retarget an incomplete feed.

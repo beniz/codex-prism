@@ -73,6 +73,7 @@ pub(crate) struct Inner {
 #[derive(Default)]
 struct Lifecycle {
     stopping: bool,
+    updating: bool,
     stopped: bool,
     active: usize,
 }
@@ -91,6 +92,19 @@ impl Drop for OperationGuard {
         }
     }
 }
+/// Holding this guard prevents new backend operations without destroying the session.
+pub struct UpdatePause(Backend);
+impl Drop for UpdatePause {
+    fn drop(&mut self) {
+        self.0
+            .inner
+            .lifecycle
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .updating = false;
+    }
+}
+
 #[derive(Clone)]
 pub(crate) struct OperationContext {
     backend: Backend,
@@ -135,11 +149,41 @@ impl Backend {
     }
     pub(crate) fn enter(&self) -> Result<OperationGuard, String> {
         let mut state = self.inner.lifecycle.lock().map_err(|e| e.to_string())?;
-        if state.stopping {
-            return Err("Backend is shutting down".into());
+        if state.stopping || state.updating {
+            return Err("Application is restarting or updating".into());
         }
         state.active += 1;
         Ok(OperationGuard(self.clone()))
+    }
+    /// Atomically refuse an update while work is admitted and reject new work until released.
+    pub fn pause_for_update(&self) -> Result<UpdatePause, String> {
+        {
+            let mut state = self.inner.lifecycle.lock().map_err(|e| e.to_string())?;
+            if state.stopping || state.updating || state.active != 0 {
+                return Err("Wait for application work to finish before restarting".into());
+            }
+            state.updating = true;
+        }
+        let pause = UpdatePause(self.clone());
+        if self
+            .inner
+            .codex
+            .reviews
+            .lock()
+            .map_err(|e| e.to_string())?
+            .values()
+            .any(|r| r.active)
+        {
+            return Err("Wait for agent turns to finish before restarting".into());
+        }
+        for project in projects::registry(self)? {
+            if proposals::all(self, &project.id)?.iter().any(|p| {
+                matches!(p.state.as_str(), "running" | "repairing" | "applying")
+            }) {
+                return Err("Wait for agent turns and proposal changes to finish before restarting".into());
+            }
+        }
+        Ok(pause)
     }
     pub(crate) fn prepare_directory(
         &self,
@@ -170,6 +214,13 @@ impl Backend {
     pub fn list_default_projects(&self) -> Result<Vec<discovery::ProjectCandidate>, String> {
         let _operation = self.enter()?;
         discovery::list_default_projects(self.clone())
+    }
+    /// Release idle child processes before an installer may exit the process directly.
+    /// Unlike shutdown, a failed installer handoff can reconnect and continue working.
+    pub async fn cleanup_for_update(&self) {
+        source_mcp::shutdown(self).await;
+        codex::shutdown(self).await;
+        latex::cleanup_all_builds(&self.inner.latex).await;
     }
     /// Idempotent explicit shutdown. Admitted foreground work drains before state is released.
     /// Persistent projects, history, reviews and build artifacts are retained.
@@ -230,6 +281,19 @@ fn test_backend() -> (tempfile::TempDir, Backend) {
 #[cfg(test)]
 mod lifecycle_tests {
     use super::*;
+    #[test]
+    fn update_gate_is_exclusive_and_reversible() {
+        let (_tmp, backend) = test_backend();
+        let operation = backend.enter().unwrap();
+        assert!(backend.pause_for_update().is_err());
+        drop(operation);
+        let pause = backend.pause_for_update().unwrap();
+        assert!(backend.enter().is_err());
+        assert!(backend.pause_for_update().is_err());
+        drop(pause);
+        assert!(backend.enter().is_ok());
+    }
+
     #[tokio::test]
     async fn shutdown_drains_admitted_work_and_rejects_new_work() {
         let (_tmp, backend) = test_backend();

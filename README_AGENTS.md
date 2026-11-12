@@ -297,7 +297,7 @@ For development or running directly from a repository checkout on Ubuntu 26.04 L
    ```sh
    sudo apt install build-essential pkg-config libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libssl-dev
    ```
-2. Install Rust with rustup. This checkout pins Rust 1.88.0.
+2. Install Rust with rustup. This checkout pins Rust 1.90.0.
 3. Clone the repository and start the app:
    ```sh
    git clone https://github.com/beniz/codex-prism.git
@@ -372,3 +372,10 @@ See [the release guide](docs/releases/README.md) for version preparation, taggin
 - [CHANGELOG.md](CHANGELOG.md): authoritative release history and Unreleased changes.
 - [README.md](README.md#acknowledgments): project origins and acknowledgments.
 - [LICENSE](LICENSE): MIT license.
+
+### Application updates
+
+[Updater behaviour, signing keys, and CI upgrade testing](docs/updating.md).
+Native update operations live in the Tauri host. `updater-test` is a disposable
+fixture feature; never enable it in production builds. Release signing keys must
+not be available to PR jobs. Source builds never self-replace.

@@ -1,0 +1,106 @@
+name: Test updater
+on:
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      release_tag:
+        type: string
+        default: ''
+  pull_request:
+    paths:
+      - '.github/workflows/**'
+      - 'apps/desktop/**'
+      - 'crates/prism-core/**'
+      - 'scripts/**'
+      - 'rust-toolchain.toml'
+      - 'pnpm-lock.yaml'
+permissions:
+  contents: read
+jobs:
+  windows-launcher:
+    runs-on: windows-2022
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+          ref: ${{ inputs.release_tag && format('refs/tags/{0}', inputs.release_tag) || github.ref }}
+      - name: Parse scripts and compile the launcher
+        shell: pwsh
+        run: ./scripts/check-updater-scripts.ps1
+      - name: Check non-elevated Windows launcher
+        shell: powershell
+        run: ./scripts/windows-updater-launch.ps1 -SelfTest
+      - name: Upload launcher diagnostics
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: updater-launcher-Windows
+          path: |
+            ${{ runner.temp }}/updater launcher test/launcher.json
+            ${{ runner.temp }}/updater launcher test/error
+            ${{ runner.temp }}/updater launcher test/probe-ok
+          if-no-files-found: warn
+  upgrade:
+    needs: windows-launcher
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+          - os: windows-2022
+          - os: macos-15
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+          ref: ${{ inputs.release_tag && format('refs/tags/{0}', inputs.release_tag) || github.ref }}
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: '22'
+          package-manager-cache: false
+      - name: Install Linux libraries and virtual display
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev librsvg2-bin patchelf squashfs-tools libssl-dev libpng-dev zlib1g-dev file xdg-utils xvfb
+      - name: Install toolchains
+        shell: bash
+        run: |
+          corepack enable
+          rustup toolchain install 1.90.0 --profile minimal
+          corepack pnpm install --frozen-lockfile
+      - name: Check release tooling and CLI argument handling
+        run: corepack pnpm test:release
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          cache-on-failure: true
+          workspaces: |
+            crates/prism-core -> target
+            apps/desktop/src-tauri -> target
+      - name: Signed package upgrade and relaunch
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = Linux ]; then
+            xvfb-run -a node scripts/updater-smoke.mjs
+          else
+            node scripts/updater-smoke.mjs
+          fi
+      - name: Upload smoke diagnostics (never signing keys)
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: updater-smoke-${{ runner.os }}
+          path: |
+            ${{ runner.temp }}/prism-updater-smoke/results.txt
+            ${{ runner.temp }}/prism-updater-smoke/*/started.json
+            ${{ runner.temp }}/prism-updater-smoke/*/error
+            ${{ runner.temp }}/prism-updater-smoke/*/rejected
+            ${{ runner.temp }}/prism-updater-smoke/*/local.json
+            ${{ runner.temp }}/prism-updater-smoke/*/installing
+            ${{ runner.temp }}/prism-updater-smoke/*/launcher.json
+            ${{ runner.temp }}/prism-updater-smoke/*/windows-diagnostics.json
+            ${{ runner.temp }}/prism-updater-smoke/*/installer.log
+          if-no-files-found: warn
