@@ -35,6 +35,7 @@ interface Job {
 }
 const cancelled = () => new DOMException("Cancelled", "AbortError");
 export interface MupdfPool extends MupdfClient {
+  retainWorkers(): () => void;
   clearPageCache(): void;
   promotePage(
     docId: number,
@@ -55,6 +56,7 @@ export function createMupdfPool(
   const renders = new Map<string, Job>();
   const affinity = new Map<string, Slot>();
   const cache = new PageCache();
+  let leases = 0;
   let nextId = 1;
   let cacheEpoch = 0;
   let limit = 2;
@@ -72,7 +74,8 @@ export function createMupdfPool(
     job.args = [];
   }
   function stopIfEmpty() {
-    if (docs.size || queue.length || slots.some((s) => s.busy)) return;
+    if (leases || docs.size || queue.length || slots.some((s) => s.busy))
+      return;
     for (const slot of slots) slot.client.destroy();
     slots.length = 0;
     affinity.clear();
@@ -297,6 +300,17 @@ export function createMupdfPool(
       : Promise.reject(new Error("PDF document is closed"));
   }
   const pool: MupdfPool = {
+    retainWorkers() {
+      leases++;
+      let released = false;
+      return () => {
+        if (!released) {
+          released = true;
+          leases--;
+          stopIfEmpty();
+        }
+      };
+    },
     clearPageCache() {
       cacheEpoch++;
       cache.clear();

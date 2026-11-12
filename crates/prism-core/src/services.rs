@@ -44,6 +44,9 @@ pub(crate) async fn project_service(
         } else { None };
         return Ok(json!(projects::instructions(&app, &project_id, update)?));
     }
+    if operation.starts_with("thumbnail_cache_") {
+        return tokio::task::spawn_blocking(move || crate::project_preview::cache(&app, &project_id, &operation, args)).await.map_err(|e| e.to_string())?;
+    }
     if operation == "project_preview" {
         return tokio::task::spawn_blocking(move || {
             crate::project_preview::discover(&app, &project_id)

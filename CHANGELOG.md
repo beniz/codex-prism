@@ -5,6 +5,8 @@ and detailed release notes are in [docs/releases](docs/releases/README.md).
 
 ## Unreleased
 
+- Persist project PDF thumbnails across restarts and reuse the renderer while browsing projects. Cached cards appear before background PDF checks.
+
 - Explain ongoing agent, proposal, and PDF activity below the chat composer without polling or typing-triggered updates. Keep progress remains tied to its originating chat when switching tabs.
 
 - Speed up switching between chat PDFs with two rendering workers, foreground page priority, and a bounded cache of rendered pages.

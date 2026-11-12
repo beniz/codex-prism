@@ -232,3 +232,17 @@ it("closes a replica whose open finishes after its last read consumer was cancel
   await closing;
   for (const w of workers) expect(w.values.size).toBe(0);
 });
+
+it("retains a worker across thumbnail documents without starting one for cache-only visits", async () => {
+  const release = pool.retainWorkers();
+  expect(workers).toHaveLength(0);
+  const first = await open(1, "cards");
+  await pool.closeDocument(first);
+  expect(workers[0].destroy).not.toHaveBeenCalled();
+  const second = await open(2, "cards");
+  expect(workers).toHaveLength(1);
+  await pool.closeDocument(second);
+  release();
+  release();
+  expect(workers[0].destroy).toHaveBeenCalledTimes(1);
+});

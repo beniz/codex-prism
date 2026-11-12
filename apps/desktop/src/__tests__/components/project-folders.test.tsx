@@ -6,6 +6,8 @@ import { useProjectStore } from "@/stores/project-store";
 import { useAgentSetupStore } from "@/stores/agent-setup-store";
 
 vi.mock("@/lib/project-preview", () => ({
+  loadSavedProjectPreview: async () => null,
+  retainProjectPreview: () => () => {},
   loadProjectPreview: async (path: string) => ({
     kind: "pdf",
     url: `blob:${path}`,
