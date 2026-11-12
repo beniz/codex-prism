@@ -301,7 +301,18 @@ export { listen };
 export { convertFileSrc } from "@tauri-apps/api/core";
 export type { UnlistenFn } from "@tauri-apps/api/event";
 
+export interface ProposalPdfBuild {
+  bytes: number[];
+  artifactId: string;
+  locations: import("@/lib/visual-review").SourceBox[];
+}
 export const proposals = {
+  loadBuild: (p: Proposal, mainFile: string) =>
+    nativeInvoke<ProposalPdfBuild | null>("project_service", {
+      projectId: p.projectId,
+      operation: "proposal_load_build",
+      args: { proposalId: p.id, generation: p.generation, mainFile, side: "result" },
+    }),
   list: (projectId: string) =>
     nativeInvoke<Proposal[]>("project_service", {
       projectId,

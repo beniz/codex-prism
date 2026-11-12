@@ -2,7 +2,12 @@
 use crate::{codex, latex, projects, review_storage, Backend};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::{collections::BTreeMap, fs, path::PathBuf};
+use std::{
+    collections::BTreeMap,
+    fs,
+    path::PathBuf,
+    sync::{Arc, Weak},
+};
 
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -63,6 +68,9 @@ fn capture_variant(app: &Backend, id: &str, main: &str, inputs: &BTreeMap<String
     let bytes = serde_json::to_vec(&manifest).map_err(|e| e.to_string())?;
     let key = projects::revision(&bytes);
     let dir = artifact(app, id, &key)?;
+    let _pin = pin_workspace(app, id)?;
+    let capture_lock = capture_lock(dir.clone())?;
+    let _capture = capture_lock.lock().map_err(|e| e.to_string())?;
     if dir.join("manifest.json").exists() {
         return Ok(key);
     }
@@ -78,9 +86,23 @@ fn capture_variant(app: &Backend, id: &str, main: &str, inputs: &BTreeMap<String
     projects::save_json(&dir.join("manifest.json"), &manifest)?;
     Ok(key)
 }
+// Capturing identical inputs must not truncate files another builder is reading.
+// Other artifacts, including cached reads, never wait for this copy operation.
+static CAPTURE_LOCKS: std::sync::Mutex<BTreeMap<PathBuf, Weak<std::sync::Mutex<()>>>> =
+    std::sync::Mutex::new(BTreeMap::new());
+fn capture_lock(path: PathBuf) -> Result<Arc<std::sync::Mutex<()>>, String> {
+    let mut locks = CAPTURE_LOCKS.lock().map_err(|e| e.to_string())?;
+    locks.retain(|_, lock| lock.strong_count() > 0);
+    if let Some(lock) = locks.get(&path).and_then(Weak::upgrade) {
+        return Ok(lock);
+    }
+    let lock = Arc::new(std::sync::Mutex::new(()));
+    locks.insert(path, Arc::downgrade(&lock));
+    Ok(lock)
+}
 static ACTIVE_BUILDS: std::sync::Mutex<BTreeMap<PathBuf, usize>> =
     std::sync::Mutex::new(BTreeMap::new());
-struct BuildPin(PathBuf);
+pub(crate) struct BuildPin(PathBuf);
 impl BuildPin {
     fn new(path: PathBuf) -> Result<Self, String> {
         *ACTIVE_BUILDS
@@ -103,7 +125,22 @@ impl Drop for BuildPin {
         }
     }
 }
-static BUILD_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+// Weak entries avoid retaining a lock for every historical artifact forever.
+static BUILD_LOCKS: std::sync::Mutex<BTreeMap<PathBuf, Weak<tokio::sync::Mutex<()>>>> =
+    std::sync::Mutex::new(BTreeMap::new());
+fn build_lock(path: PathBuf) -> Result<Arc<tokio::sync::Mutex<()>>, String> {
+    let mut locks = BUILD_LOCKS.lock().map_err(|e| e.to_string())?;
+    locks.retain(|_, lock| lock.strong_count() > 0);
+    if let Some(lock) = locks.get(&path).and_then(Weak::upgrade) {
+        return Ok(lock);
+    }
+    let lock = Arc::new(tokio::sync::Mutex::new(()));
+    locks.insert(path, Arc::downgrade(&lock));
+    Ok(lock)
+}
+pub(crate) fn pin_workspace(app: &Backend, workspace: &str) -> Result<BuildPin, String> {
+    BuildPin::new(directory(app, workspace)?)
+}
 
 struct BuildDirectory(PathBuf);
 impl BuildDirectory {
@@ -118,18 +155,28 @@ impl Drop for BuildDirectory {
 }
 
 async fn build(app: &Backend, project: &str, key: &str) -> Result<(), String> {
+    build_checked(app, project, key, &|| Ok(())).await
+}
+async fn build_checked(
+    app: &Backend,
+    project: &str,
+    key: &str,
+    check: &(dyn Fn() -> Result<(), String> + Sync),
+) -> Result<(), String> {
     let _pin = BuildPin::new(artifact(app, project, key)?)?;
     let mut cancel = app.inner.cancel.subscribe();
     if *cancel.borrow() {
         return Err("Backend is shutting down".into());
     }
+    let lock = build_lock(artifact(app, project, key)?)?;
     let _build_guard = tokio::select! {
-        guard=BUILD_LOCK.lock()=>guard,
+        guard=lock.lock()=>guard,
         _=cancel.changed()=>return Err("Backend is shutting down".into()),
     };
+    check()?;
     let started = std::time::Instant::now();
     let dir = artifact(app, project, key)?;
-    // No builder can own these directories while BUILD_LOCK is held.
+    // Only this artifact is locked; unrelated builds and cache reads proceed.
     if let Ok(entries) = fs::read_dir(&dir) {
         for entry in entries.flatten() {
             if entry.file_name().to_string_lossy().starts_with("build-") {
@@ -160,12 +207,13 @@ async fn build(app: &Backend, project: &str, key: &str) -> Result<(), String> {
     }
     let content =
         fs::read_to_string(work.path().join(&manifest.main)).map_err(|e| e.to_string())?;
-    let pdf = latex::compile_preview(
+    let pdf = latex::compile_preview_checked(
         &app.inner.latex,
         work.path(),
         &manifest.main,
         &content,
         app.inner.cancel.subscribe(),
+        check,
     )
     .await?;
     let stem = std::path::Path::new(&manifest.main)
@@ -183,6 +231,7 @@ async fn build(app: &Backend, project: &str, key: &str) -> Result<(), String> {
         fs::copy(&sync, dir.join("output.synctex.gz")).map_err(|e| e.to_string())?;
         latex::forward_synctex(&text, work.path())
     } else {
+        let _ = fs::remove_file(dir.join("output.synctex.gz"));
         vec![]
     };
     eprintln!(
@@ -278,6 +327,7 @@ pub(crate) async fn service(
     operation: &str,
     args: Value,
 ) -> Result<Value, String> {
+    let _pin = pin_workspace(app, id)?;
     let (r, stale) = {
         let _guard = app.inner.projects.0.lock().map_err(|e| e.to_string())?;
         let path = codex::review_path(app, id)?;
@@ -414,9 +464,13 @@ pub(crate) async fn service(
 /// Serialize with builders and snapshot capture so nothing referenced by a job or
 /// a rollback review is collected. Keep one successful baseline after resolution.
 pub(crate) async fn cleanup(app: &Backend, id: &str) -> Result<(), String> {
-    let _build = BUILD_LOCK.lock().await;
     let _project = app.inner.projects.0.lock().map_err(|e| e.to_string())?;
     let dir = directory(app, id)?;
+    // Hold this guard through deletion so pin registration/capture cannot race it.
+    let active = ACTIVE_BUILDS.lock().map_err(|e| e.to_string())?;
+    if active.contains_key(&dir) {
+        return Ok(());
+    }
     let mut used = std::collections::HashSet::<String>::new();
     fn collect(r: &codex::Review, used: &mut std::collections::HashSet<String>) {
         if let Some(v) = &r.visual {
@@ -437,14 +491,22 @@ pub(crate) async fn cleanup(app: &Backend, id: &str) -> Result<(), String> {
     }
     if let Ok(entries) = fs::read_dir(&dir) {
         for entry in entries.flatten() {
+            if entry.file_name().to_string_lossy().starts_with("result-") {
+                if let Ok(bytes) = fs::read(entry.path()) {
+                    if let Ok(Some(key)) = serde_json::from_slice::<Option<String>>(&bytes) {
+                        used.insert(key);
+                    }
+                }
+            }
+        }
+    }
+    if let Ok(entries) = fs::read_dir(&dir) {
+        for entry in entries.flatten() {
             let name = entry.file_name().to_string_lossy().into_owned();
-            let pinned = ACTIVE_BUILDS
-                .lock()
-                .map_err(|e| e.to_string())?
-                .contains_key(&entry.path());
+            let pinned = active.contains_key(&entry.path());
             if entry.path().is_dir() && !used.contains(&name) && !pinned {
                 let _ = fs::remove_dir_all(entry.path());
-            } else if entry.path().is_dir() {
+            } else if entry.path().is_dir() && !pinned {
                 if let Ok(children) = fs::read_dir(entry.path()) {
                     for child in children.flatten() {
                         if child.file_name().to_string_lossy().starts_with("build-") {
@@ -727,16 +789,111 @@ mod tests {
 
 /// Proposal artifacts are addressed by immutable inputs and owned by a workspace.
 /// They never consult or overwrite the legacy project review.
-pub(crate) async fn proposal_pdf_policy(app: &Backend, workspace: &str, main: &str, files: &BTreeMap<String, Vec<u8>>, incremental: bool) -> Result<Value, String> {
-    let key = if incremental { capture(app, workspace, main, files)? } else { capture_variant(app, workspace, main, files, &format!("full:{}", uuid::Uuid::new_v4()))? };
-    build(app, workspace, &key).await?;
-    let dir = artifact(app, workspace, &key)?;
+static RESULT_INDEX_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+fn result_index(
+    app: &Backend,
+    workspace: &str,
+    main: &str,
+    files: &BTreeMap<String, Vec<u8>>,
+) -> Result<PathBuf, String> {
+    let hashes: BTreeMap<_, _> = files
+        .iter()
+        .map(|(p, b)| (p, projects::revision(b)))
+        .collect();
+    let fingerprint =
+        projects::revision(&serde_json::to_vec(&(main, hashes)).map_err(|e| e.to_string())?);
+    Ok(directory(app, workspace)?.join(format!("result-{fingerprint}.json")))
+}
+pub(crate) fn read_build(app: &Backend, workspace: &str, key: &str) -> Result<Value, String> {
+    let dir = artifact(app, workspace, key)?;
+    // output.pdf is the commit marker, written after all navigation metadata.
+    let bytes = fs::read(dir.join("output.pdf")).map_err(|e| e.to_string())?;
+    if !bytes.starts_with(b"%PDF-") {
+        return Err("Invalid preview PDF".into());
+    }
     let locations: Vec<latex::SourceBox> =
         serde_json::from_slice(&fs::read(dir.join("locations.json")).map_err(|e| e.to_string())?)
             .map_err(|e| e.to_string())?;
-    Ok(
-        json!({"artifactId":key,"bytes":fs::read(dir.join("output.pdf")).map_err(|e|e.to_string())?,"locations":locations}),
-    )
+    Ok(json!({"artifactId":key,"bytes":bytes,"locations":locations}))
+}
+/// Read-only with respect to compilation: even full-build mode can reuse a PDF on navigation.
+pub(crate) fn load_proposal_pdf(
+    app: &Backend,
+    workspace: &str,
+    main: &str,
+    files: &BTreeMap<String, Vec<u8>>,
+) -> Result<Value, String> {
+    let _pin = pin_workspace(app, workspace)?;
+    let index = result_index(app, workspace, main, files)?;
+    let _index = RESULT_INDEX_LOCK.lock().map_err(|e| e.to_string())?;
+    if let Ok(bytes) = fs::read(&index) {
+        if let Ok(key) = serde_json::from_slice::<Option<String>>(&bytes) {
+            return Ok(key
+                .and_then(|key| read_build(app, workspace, &key).ok())
+                .unwrap_or(Value::Null));
+        }
+    }
+    // Upgrade older caches once per immutable input set, including full-build artifacts.
+    let hashes: BTreeMap<_, _> = files
+        .iter()
+        .map(|(p, b)| (p.clone(), projects::revision(b)))
+        .collect();
+    let mut found = None;
+    if let Ok(entries) = fs::read_dir(directory(app, workspace)?) {
+        for entry in entries.flatten() {
+            let Ok(bytes) = fs::read(entry.path().join("manifest.json")) else {
+                continue;
+            };
+            let Ok(manifest) = serde_json::from_slice::<Manifest>(&bytes) else {
+                continue;
+            };
+            if manifest.project == workspace && manifest.main == main && manifest.inputs == hashes {
+                let key = entry.file_name().to_string_lossy().to_string();
+                if let Ok(build) = read_build(app, workspace, &key) {
+                    found = Some((key, build));
+                    break;
+                }
+            }
+        }
+    }
+    fs::create_dir_all(index.parent().ok_or("Invalid build index")?).map_err(|e| e.to_string())?;
+    projects::save_json(&index, &found.as_ref().map(|(key, _)| key))?;
+    Ok(found.map(|(_, build)| build).unwrap_or(Value::Null))
+}
+pub(crate) async fn proposal_pdf_policy(
+    app: &Backend,
+    workspace: &str,
+    main: &str,
+    files: &BTreeMap<String, Vec<u8>>,
+    incremental: bool,
+    check: &(dyn Fn() -> Result<(), String> + Sync),
+) -> Result<Value, String> {
+    let _pin = pin_workspace(app, workspace)?;
+    // Deduplicate full-build requests too, without reusing an artifact on an explicit rebuild.
+    let index = result_index(app, workspace, main, files)?;
+    let previous = fs::read(&index).ok();
+    let request_lock = build_lock(index.clone())?;
+    let mut cancel = app.inner.cancel.subscribe();
+    if *cancel.borrow() {
+        return Err("Backend is shutting down".into());
+    }
+    let _guard = tokio::select! {
+        guard = request_lock.lock() => guard,
+        _ = cancel.changed() => return Err("Backend is shutting down".into()),
+    };
+    check()?;
+    if fs::read(&index).ok() != previous {
+        let cached = load_proposal_pdf(app, workspace, main, files)?;
+        if !cached.is_null() {
+            return Ok(cached);
+        }
+    }
+    let key = if incremental { capture(app, workspace, main, files)? } else { capture_variant(app, workspace, main, files, &format!("full:{}", uuid::Uuid::new_v4()))? };
+    build_checked(app, workspace, &key, check).await?;
+    check()?;
+    let _index = RESULT_INDEX_LOCK.lock().map_err(|e| e.to_string())?;
+    projects::save_json(&index, &Some(&key))?;
+    read_build(app, workspace, &key)
 }
 
 /// Rebase only SyncTeX input records, using native path joins. In particular,
@@ -768,9 +925,19 @@ fn rebase_synctex(data: &str, original: &str, destination: &std::path::Path) -> 
 /// Failure is an optimization miss: the caller will compile normally.
 pub(crate) fn promote_proposal_builds(app: &Backend, workspace: &str, root: &std::path::Path, files: &BTreeMap<String, Vec<u8>>) -> Vec<String> {
     let mut promoted = Vec::new();
-    let Ok(base) = directory(app, workspace) else { return promoted; };
-    let Ok(entries) = fs::read_dir(base) else { return promoted; };
-    let hashes: BTreeMap<_, _> = files.iter().map(|(p,b)| (p.clone(), projects::revision(b))).collect();
+    let Ok(_pin) = pin_workspace(app, workspace) else {
+        return promoted;
+    };
+    let Ok(base) = directory(app, workspace) else {
+        return promoted;
+    };
+    let Ok(entries) = fs::read_dir(base) else {
+        return promoted;
+    };
+    let hashes: BTreeMap<_, _> = files
+        .iter()
+        .map(|(p, b)| (p.clone(), projects::revision(b)))
+        .collect();
     for entry in entries.flatten() {
         let attempt = || -> Result<String, String> {
             let dir = entry.path();
@@ -854,5 +1021,160 @@ mod promotion_tests {
         assert!(!sync.contains("/old/build"));
         fs::remove_file(dir.join("output.pdf")).unwrap();
         assert!(promote_proposal_builds(&app, &workspace, &root, &files).is_empty());
+    }
+}
+
+#[cfg(test)]
+mod concurrent_build_tests {
+    use super::*;
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Condvar, Mutex,
+    };
+    use std::time::Duration;
+
+    fn files(text: &str) -> BTreeMap<String, Vec<u8>> {
+        BTreeMap::from([(
+            "main.tex".into(),
+            format!("\\documentclass{{article}}\n\\begin{{document}}{text}\\end{{document}}")
+                .into_bytes(),
+        )])
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+    async fn independent_artifacts_overlap_with_three_slots_and_cleanup_cannot_remove_active_work()
+    {
+        let (_tmp, app) = crate::test_backend();
+        let workspace = uuid::Uuid::new_v4().to_string();
+        let gate = Arc::new((Mutex::new(false), Condvar::new()));
+        let (entered, received) = std::sync::mpsc::channel();
+        let mut tasks = vec![];
+        let mut keys = vec![];
+        for n in 0..4 {
+            let key = capture(&app, &workspace, "main.tex", &files(&format!("Chat {n}"))).unwrap();
+            keys.push(key.clone());
+            let (app, workspace, gate, entered) = (
+                app.clone(),
+                workspace.clone(),
+                gate.clone(),
+                entered.clone(),
+            );
+            tasks.push(tokio::spawn(async move {
+                let checks = AtomicUsize::new(0);
+                let check = || {
+                    if checks.fetch_add(1, Ordering::SeqCst) == 0 {
+                        return Ok(());
+                    }
+                    // Runs after admission, before spawning TeX. Deterministic, no external executable needed.
+                    entered.send(n).unwrap();
+                    let (lock, wake) = &*gate;
+                    let mut released = lock.lock().unwrap();
+                    while !*released {
+                        released = wake.wait(released).unwrap();
+                    }
+                    Err("Test compiler stopped".to_owned())
+                };
+                build_checked(&app, &workspace, &key, &check).await
+            }));
+        }
+        // Always release the gates before asserting, including on a failed admission check.
+        let (received, count, fourth) = tokio::task::spawn_blocking(move || {
+            let count = (0..3)
+                .filter(|_| received.recv_timeout(Duration::from_secs(5)).is_ok())
+                .count();
+            let fourth = received.recv_timeout(Duration::from_millis(150)).ok();
+            (received, count, fourth)
+        })
+        .await
+        .unwrap();
+        let cached_files = files("Cached result");
+        let cached_key = capture(&app, &workspace, "main.tex", &cached_files).unwrap();
+        let dir = artifact(&app, &workspace, &cached_key).unwrap();
+        fs::write(dir.join("output.pdf"), b"%PDF-cached").unwrap();
+        fs::write(dir.join("locations.json"), b"[]").unwrap();
+        let cached = load_proposal_pdf(&app, &workspace, "main.tex", &cached_files).unwrap();
+        cleanup(&app, &workspace).await.unwrap();
+        let work_survived = keys.iter().all(|key| {
+            fs::read_dir(artifact(&app, &workspace, key).unwrap())
+                .unwrap()
+                .flatten()
+                .any(|entry| entry.file_name().to_string_lossy().starts_with("build-"))
+        });
+        *gate.0.lock().unwrap() = true;
+        gate.1.notify_all();
+        for task in tasks {
+            assert_eq!(task.await.unwrap().unwrap_err(), "Test compiler stopped");
+        }
+        assert_eq!(
+            count, 3,
+            "Independent artifacts must enter compilation concurrently"
+        );
+        assert!(
+            fourth.is_none(),
+            "A fourth compilation must wait for capacity"
+        );
+        assert!(received.recv_timeout(Duration::from_secs(1)).is_ok());
+        assert!(work_survived, "Cleanup deleted active attempt directories");
+        assert_eq!(cached["artifactId"], cached_key);
+        assert_eq!(
+            load_proposal_pdf(&app, &workspace, "main.tex", &cached_files).unwrap()["artifactId"],
+            cached_key
+        );
+    }
+
+    #[tokio::test]
+    async fn full_build_duplicates_share_output_and_persist_for_navigation() {
+        if which::which("pdflatex").is_err() {
+            return;
+        }
+        let (_tmp, app) = crate::test_backend();
+        let workspace = uuid::Uuid::new_v4().to_string();
+        let input = files("Full-build proposal");
+        assert!(load_proposal_pdf(&app, &workspace, "main.tex", &input)
+            .unwrap()
+            .is_null());
+        let check = || Ok(());
+        let (a, b) = tokio::join!(
+            proposal_pdf_policy(&app, &workspace, "main.tex", &input, false, &check),
+            proposal_pdf_policy(&app, &workspace, "main.tex", &input, false, &check),
+        );
+        let a = a.unwrap();
+        assert_eq!(a["artifactId"], b.unwrap()["artifactId"]);
+        let cached = load_proposal_pdf(&app, &workspace, "main.tex", &input).unwrap();
+        assert_eq!(cached, a);
+        let rebuilt = proposal_pdf_policy(&app, &workspace, "main.tex", &input, false, &check)
+            .await
+            .unwrap();
+        assert_ne!(
+            rebuilt["artifactId"], a["artifactId"],
+            "An explicit later full rebuild must run again"
+        );
+        let pin = pin_workspace(&app, &workspace).unwrap();
+        cleanup(&app, &workspace).await.unwrap();
+        assert_eq!(
+            load_proposal_pdf(&app, &workspace, "main.tex", &input).unwrap(),
+            rebuilt
+        );
+        drop(pin);
+    }
+
+    #[tokio::test]
+    async fn obsolete_queued_build_does_not_publish_a_result() {
+        let (_tmp, app) = crate::test_backend();
+        let workspace = uuid::Uuid::new_v4().to_string();
+        let input = files("Obsolete");
+        let checks = AtomicUsize::new(0);
+        let check = || {
+            if checks.fetch_add(1, Ordering::SeqCst) < 2 {
+                Ok(())
+            } else {
+                Err("Stale proposal build".into())
+            }
+        };
+        let result = proposal_pdf_policy(&app, &workspace, "main.tex", &input, true, &check).await;
+        assert_eq!(result.unwrap_err(), "Stale proposal build");
+        assert!(load_proposal_pdf(&app, &workspace, "main.tex", &input)
+            .unwrap()
+            .is_null());
     }
 }

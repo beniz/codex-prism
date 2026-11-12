@@ -8,6 +8,8 @@ import {
 import { useDocumentStore } from "../../src/stores/document-store";
 import { useSettingsStore } from "../../src/stores/settings-store";
 import { proposals } from "../../src/lib/backend";
+const completedBuilds: string[] = [];
+let buildRequests = 0;
 const callbacks = new Map<number, (value: unknown) => void>();
 const listeners = new Map<string, number>();
 async function call(command: string, args: Record<string, unknown> = {}) {
@@ -22,12 +24,15 @@ async function call(command: string, args: Record<string, unknown> = {}) {
     listeners.set(String(args.event), Number(args.handler));
     return 1;
   }
+  const isProposalBuild = command === "project_service" && args.operation === "proposal_compile";
+  if (isProposalBuild) buildRequests++;
   const response = await fetch("http://127.0.0.1:19372", {
     method: "POST",
     body: JSON.stringify({ command, args }),
   });
   const result = await response.json();
   if (result.error) throw new Error(result.error);
+  if (isProposalBuild) completedBuilds.push(String((args.args as any).proposalId));
   if (command === "compile_latex" || command === "load_existing_pdf")
     return new Uint8Array(result.value).buffer;
   return result.value;
@@ -137,6 +142,9 @@ const text = async () =>
           !el.closest(".invisible") && el.textContent?.includes("A passage"),
       ),
   );
+  // Both completed PDFs must already exist before visiting the inactive chat.
+  await wait(() => new Set(completedBuilds).size === 2);
+  const compiledBeforeSwitch = buildRequests;
   useAgentChatStore.getState().setActiveTab(b);
   await wait(
     () =>
@@ -153,6 +161,7 @@ const text = async () =>
       ?.textContent?.includes("Original passage")
   )
     throw new Error("Chat switching changed main source");
+  if (buildRequests !== compiledBeforeSwitch) throw new Error("Switching tabs rebuilt an existing PDF");
   useSettingsStore.setState({ visualChangeReports: true });
   await wait(
     () => !!document.querySelector('[aria-label="Proposal visual report"] img'),
@@ -188,7 +197,7 @@ const text = async () =>
   return {
     ok: true,
     steps:
-      "two running chats → stable main editor and visible PDF → independent chat PDFs → apply A → conflict B → agent repair → apply",
+      "two running chats → visible PDF → both background PDFs built before tab switch → cached independent chat PDFs → apply A → conflict B → agent repair → apply",
     history: await call("git_log"),
   };
 };

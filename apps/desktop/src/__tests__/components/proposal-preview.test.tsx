@@ -3,6 +3,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { beforeEach, afterEach, expect, it, vi } from "vitest";
 import {
   useChatPdf,
+  useChatPdfBuilds,
   clearChatPdfCache,
   safeChatSource,
   chatHeadingLocation,
@@ -36,7 +37,7 @@ vi.mock("@/stores/agent-chat-store", () => ({
   activeProposal: () =>
     chatState.proposals.find((p) => p.id === chatState.activeTabId),
 }));
-vi.mock("@/lib/backend", () => ({ proposals: { operate: vi.fn() } }));
+vi.mock("@/lib/backend", () => ({ proposals: { operate: vi.fn(), loadBuild: vi.fn() } }));
 const proposal: Proposal = {
   id: "a",
   projectId: "project",
@@ -45,7 +46,7 @@ const proposal: Proposal = {
   state: "ready",
   conflicts: [],
   parent: null,
-  changes: [],
+  changes: [{ path: "main.tex", oldContent: "before", newContent: "after", kind: "modified", binary: false }],
 };
 const build = (byte: number) => ({
   bytes: [byte],
@@ -64,8 +65,10 @@ function deferred() {
 let root: Root;
 let host: HTMLDivElement;
 let current: ReturnType<typeof useChatPdf>;
+let mainFile = "main.tex";
 function Viewer() {
-  current = useChatPdf("main.tex");
+  useChatPdfBuilds(mainFile);
+  current = useChatPdf(mainFile);
   return (
     <div>
       {current.label}:{current.artifact?.bytes[0] ?? documentState.mainPdfByte}:{current.error}
@@ -78,6 +81,8 @@ async function render() {
 beforeEach(() => {
   (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
   vi.resetAllMocks();
+  mainFile = "main.tex";
+  vi.mocked(proposals.loadBuild).mockResolvedValue(null);
   clearChatPdfCache();
   documentState.projectId = "project";
   documentState.mainPdfByte = 9;
@@ -260,4 +265,97 @@ it("maps an unchanged heading in edited proposal source and supports repeated ju
     bytes: [...new TextEncoder().encode(source + "\n\\section{Results}")],
   });
   expect(await chatHeadingLocation(artifact, request)).toBeNull();
+});
+
+it("builds an inactive completed chat while the PDF pane is closed", async () => {
+  function Background() { useChatPdfBuilds("main.tex"); return null; }
+  chatState.proposals = [{ ...proposal, state: "running" }, { ...proposal, id: "b", threadId: "b" }];
+  const pending = deferred();
+  vi.mocked(proposals.operate).mockReturnValue(pending.promise);
+  await act(async () => root.render(<Background />));
+  expect(proposals.operate).toHaveBeenCalledTimes(1);
+  expect(vi.mocked(proposals.operate).mock.calls[0][0].id).toBe("b");
+  await act(async () => pending.resolve(build(2)));
+  chatState.activeTabId = "b";
+  await render();
+  expect(host.textContent).toBe("B:2:");
+  expect(proposals.operate).toHaveBeenCalledTimes(1);
+});
+
+it("loads a persisted PDF without compiling even when incremental compilation is disabled", async () => {
+  const { useSettingsStore } = await import("@/stores/settings-store");
+  useSettingsStore.setState({ incrementalCompilation: false });
+  vi.mocked(proposals.loadBuild).mockResolvedValue(build(7));
+  await render();
+  expect(host.textContent).toBe("A:7:");
+  expect(proposals.operate).not.toHaveBeenCalled();
+  vi.mocked(proposals.operate).mockResolvedValue(build(8));
+  await act(async () => current.compile());
+  expect(proposals.operate).toHaveBeenCalledWith(expect.objectContaining({ id: "a" }), "compile",
+    expect.objectContaining({ incremental: false }));
+  useSettingsStore.setState({ incrementalCompilation: true });
+});
+
+it("reports a background failure without retries on tab switches and permits explicit retry", async () => {
+  chatState.proposals.push({ ...proposal, id: "b", threadId: "b" });
+  vi.mocked(proposals.operate).mockImplementation(async (p) => {
+    if (p.id === "b") throw new Error("Broken B");
+    return build(1) as any;
+  });
+  await render();
+  for (const tab of ["b", "a", "b"]) { chatState.activeTabId = tab; await render(); }
+  expect(host.textContent).toContain("Broken B");
+  expect(proposals.operate).toHaveBeenCalledTimes(2);
+  vi.mocked(proposals.operate).mockResolvedValue(build(2));
+  await act(async () => current.compile());
+  expect(host.textContent).toBe("B:2:");
+  expect(proposals.operate).toHaveBeenCalledTimes(3);
+});
+
+it("ignores an old request after the project cache is reset", async () => {
+  const old = deferred();
+  vi.mocked(proposals.loadBuild).mockReturnValueOnce(old.promise);
+  await render();
+  vi.mocked(proposals.operate).mockResolvedValue(build(2));
+  await act(async () => { clearChatPdfCache(); });
+  await act(async () => old.resolve(build(1)));
+  expect(current.artifact?.bytes[0]).toBe(2);
+});
+
+it("reloads an evicted PDF from disk without rebuilding completed chats", async () => {
+  chatState.proposals = Array.from({ length: 12 }, (_, i) => ({ ...proposal, id: i ? `p${i}` : "a" }));
+  vi.mocked(proposals.operate).mockResolvedValue(build(1));
+  await render();
+  expect(proposals.operate).toHaveBeenCalledTimes(12);
+  vi.mocked(proposals.loadBuild).mockResolvedValue(build(8));
+  chatState.activeTabId = "p1";
+  await render();
+  expect(current.artifact?.bytes[0]).toBe(8);
+  expect(proposals.operate).toHaveBeenCalledTimes(12);
+});
+
+it("does not build empty planning proposals and does not compile after a stale cache miss", async () => {
+  chatState.proposals = [{ ...proposal, changes: [] }];
+  await render();
+  expect(proposals.loadBuild).not.toHaveBeenCalled();
+  const pending = deferred();
+  vi.mocked(proposals.loadBuild).mockReturnValue(pending.promise);
+  chatState.proposals = [{ ...proposal }];
+  await render();
+  chatState.proposals = [];
+  await act(async () => pending.resolve(null as any));
+  expect(proposals.operate).not.toHaveBeenCalled();
+});
+
+it("keeps separate cached PDFs for different TeX roots", async () => {
+  vi.mocked(proposals.operate).mockResolvedValueOnce(build(1)).mockResolvedValueOnce(build(2));
+  await render();
+  mainFile = "slides.tex";
+  await render();
+  expect(current.artifact?.main).toBe("slides.tex");
+  expect(current.artifact?.bytes[0]).toBe(2);
+  mainFile = "main.tex";
+  await render();
+  expect(current.artifact?.bytes[0]).toBe(1);
+  expect(proposals.operate).toHaveBeenCalledTimes(2);
 });
