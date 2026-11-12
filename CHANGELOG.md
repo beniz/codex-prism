@@ -5,6 +5,8 @@ and detailed release notes are in [docs/releases](docs/releases/README.md).
 
 ## Unreleased
 
+- Avoid false LaTeX warnings from syntax trees awaiting publication; fix missing-document warnings in included files and show the full document outline across literal `\input`/`\include` files, with continuous slide numbering and navigation to each source. Resolve included files to their owning document before unrelated standalone figures.
+
 - Cancel obsolete PDF preview requests and analyze changed pages in a background worker, keeping the visible PDF usable and preserving the automatic jump to the first change.
 
 - Reduce chat typing latency by avoiding unrelated PDF and review redraws and batching draft autosaves, while retaining immediate text updates and flushing drafts on navigation or close.
