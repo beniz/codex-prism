@@ -3,7 +3,7 @@ import type { SourceBox } from "./visual-review";
 import { reviewBlocks } from "./review-diff";
 
 /** Find the earliest page containing changed source; deletions use adjacent text. */
-export function firstChangedPdfPage(changes: ReviewChange[], locations: SourceBox[]): number | undefined {
+export function firstChangedPdfPage(changes: ReviewChange[], locations: Pick<SourceBox, "file" | "line" | "page">[]): number | undefined {
   let first: number | undefined;
   for (const change of changes) {
     if (change.binary || change.newContent === null) continue;

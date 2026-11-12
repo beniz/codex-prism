@@ -158,3 +158,80 @@ it("accents approvals without changing the approval action or request ownership"
     useAgentSetupStore.setState(setup);
   }
 });
+
+it("shows questions in the composer, retains choices across chats, and submits only explicit answers", async () => {
+  const original = useAgentChatStore.getState();
+  const setup = useAgentSetupStore.getState();
+  const request = {
+    id: 71, method: "item/tool/requestUserInput", params: {
+      threadId: "plan-a", questions: [
+        { id: "scope", question: "Which scope?", options: [{ label: "Overview", description: "Keep it brief" }, { label: "Detailed" }] },
+        { id: "audience", question: "Who is the audience?" },
+      ],
+    },
+  };
+  const other = { ...request, id: 72, params: { ...request.params, threadId: "plan-b" } };
+  let finish!: () => void;
+  const respond = vi.fn(() => new Promise<void>(resolve => { finish = resolve; }));
+  useAgentSetupStore.setState({ status: "ready", checkStatus: vi.fn(async () => {}) });
+  useAgentChatStore.setState({
+    respond, requests: [request, other], activeTabId: "a", pendingAttachments: [],
+    tabs: ["a", "b"].map(id => ({ ...original.tabs[0], id, sessionId: `plan-${id}`, mode: "plan", isStreaming: true, draft: `Draft ${id}`, messages: [] })),
+  });
+  const host = document.createElement("div");
+  document.body.append(host);
+  const root = createRoot(host);
+  try {
+    await act(async () => root.render(<AgentChatDrawer />));
+    const composer = host.querySelector('[data-chat-composer]')!;
+    const forms = Array.from(host.querySelectorAll<HTMLFormElement>('form[aria-label="Plan questions"]'));
+    const form = forms[0];
+    expect(composer.contains(form)).toBe(true);
+    expect(forms[1].closest('[hidden]')).not.toBeNull();
+    expect(host.querySelector('[data-chat-mode="plan"]')?.className).toContain('text-[var(--syntax-special)]');
+    const draft = host.querySelector<HTMLTextAreaElement>('textarea[aria-label="Message Codex"]')!;
+    expect(draft.closest('[hidden]')).not.toBeNull();
+    expect(draft.value).toBe("Draft a");
+    const submit = form.querySelector<HTMLButtonElement>('button[type="submit"]')!;
+    const choice = form.querySelector<HTMLInputElement>('input[value="Overview"]')!;
+    expect(submit.disabled).toBe(true);
+    await act(async () => choice.click());
+    expect(choice.checked).toBe(true);
+    expect(choice.closest('label')?.dataset.selected).toBe("true");
+    expect(choice.closest('label')?.textContent).toContain("Selected");
+    expect(submit.disabled).toBe(true);
+    expect(respond).not.toHaveBeenCalled();
+    await act(async () => useAgentChatStore.setState({ activeTabId: "b" }));
+    expect(form.closest('[hidden]')).not.toBeNull();
+    expect(forms[1].closest('[hidden]')).toBeNull();
+    expect(forms[1].querySelector<HTMLInputElement>('input[value="Overview"]')?.checked).toBe(false);
+    await act(async () => useAgentChatStore.setState({ activeTabId: "a" }));
+    expect(choice.checked).toBe(true);
+    expect(draft.value).toBe("Draft a");
+    const answer = form.querySelector<HTMLTextAreaElement>('textarea')!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(answer, 'Researchers');
+      answer.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    expect(submit.disabled).toBe(false);
+    await act(async () => submit.click());
+    expect(respond).toHaveBeenCalledExactlyOnceWith(request, {
+      answers: { scope: { answers: ["Overview"] }, audience: { answers: ["Researchers"] } },
+    });
+    expect(submit.disabled).toBe(true);
+    await act(async () => submit.click());
+    expect(respond).toHaveBeenCalledTimes(1);
+    await act(async () => { finish(); });
+    // A failed delivery leaves the request and selections available for retry.
+    expect(choice.checked).toBe(true);
+    expect(submit.disabled).toBe(false);
+    await act(async () => useAgentChatStore.setState({ requests: [other] }));
+    expect(draft.closest('[hidden]')).toBeNull();
+    expect(draft.value).toBe("Draft a");
+  } finally {
+    await act(async () => root.unmount());
+    host.remove();
+    useAgentChatStore.setState(original);
+    useAgentSetupStore.setState(setup);
+  }
+});

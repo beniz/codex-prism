@@ -1,6 +1,10 @@
 import { useSettingsStore } from "@/stores/settings-store";
 import { invoke } from "@/lib/backend";
-import { resolveTexRoot, type ProjectFile } from "@/stores/document-store";
+import {
+  resolveTexRoot,
+  useDocumentStore,
+  type ProjectFile,
+} from "@/stores/document-store";
 import { createLogger } from "@/lib/debug/logger";
 
 const log = createLogger("latex");
@@ -84,19 +88,48 @@ export interface SynctexResult {
 
 export async function synctexEdit(
   projectDir: string,
+  mainFile: string,
+  pdf: ArrayBuffer,
   page: number,
   x: number,
   y: number,
 ): Promise<SynctexResult | null> {
   try {
-    const result = await invoke<SynctexResult>("synctex_edit", {
+    const hash = async (bytes: ArrayBuffer) =>
+      Array.from(
+        new Uint8Array(await crypto.subtle.digest("SHA-1", bytes)),
+        (byte) => byte.toString(16).padStart(2, "0"),
+      ).join("");
+    const result = await invoke<
+      (SynctexResult & { sourceRevision: string }) | null
+    >("synctex_edit", {
       projectDir,
+      mainFile,
+      pdfRevision: await hash(pdf),
       page,
       x,
       y,
     });
-    if (result)
-      log.debug(`SyncTeX: page ${page} → ${result.file}:${result.line}`);
+    if (!result) return null;
+    // The editor can contain unsaved changes or a newer accepted proposal.
+    // Never apply an old source line to different text.
+    const state = useDocumentStore.getState();
+    const file = state.files.find((file) => file.relativePath === result.file);
+    if (state.projectRoot !== projectDir || file?.content === undefined)
+      return null;
+    const content = file.content;
+    if (
+      (await hash(new TextEncoder().encode(content).buffer)) !==
+      result.sourceRevision
+    )
+      return null;
+    const current = useDocumentStore.getState();
+    if (
+      current.projectRoot !== projectDir ||
+      current.files.find((f) => f.id === file.id)?.content !== content
+    )
+      return null;
+    log.debug(`SyncTeX: page ${page} → ${result.file}:${result.line}`);
     return result;
   } catch (err) {
     log.debug("SyncTeX lookup failed", { page, error: String(err) });

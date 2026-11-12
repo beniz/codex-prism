@@ -1,4 +1,4 @@
-import { firstChangedPdfPage } from "@/lib/changed-pdf-page";
+import { useFirstChangedPage } from "@/hooks/use-first-changed-page";
 import { useChatPdf, safeChatSource, chatHeadingLocation } from "@/hooks/use-chat-pdf";
 import { ProposalReport } from "../proposal-preview";
 import { usePdfNavigationStore } from "@/stores/pdf-navigation-store";
@@ -114,6 +114,8 @@ export function PdfPreview() {
   const setCompileError = useDocumentStore((s) => s.setCompileError);
   const setIsCompiling = useDocumentStore((s) => s.setIsCompiling);
   const projectRoot = useDocumentStore((s) => s.projectRoot);
+  const projectId = useDocumentStore((s) => s.projectId);
+  const activeChatId = useAgentChatStore(s => s.activeTabId);
   const files = useDocumentStore((s) => s.files);
   const saveAllFiles = useDocumentStore((s) => s.saveAllFiles);
   const setActiveFile = useDocumentStore((s) => s.setActiveFile);
@@ -166,14 +168,10 @@ export function PdfPreview() {
   const mainFile = files.find((f) => f.id === sourceRootFileId)?.relativePath;
   const chatPdf = useChatPdf(mainFile);
   const artifact = chatPdf.artifact;
-  const changedPage = useMemo(() => artifact
-    ? firstChangedPdfPage(artifact.proposal.changes, artifact.build.locations)
-    : undefined, [artifact]);
-  const shownArtifacts = useRef(new Set<string>());
-  const firstDisplay = artifact && !shownArtifacts.current.has(artifact.build.artifactId);
-  useEffect(() => {
-    if (artifact) shownArtifacts.current.add(artifact.build.artifactId);
-  }, [artifact]);
+  const changePageTarget = useFirstChangedPage(artifact, projectId);
+  const shownChanges = useRef(new Set<string>());
+  const markChangeShown = useCallback((key: string) => { shownChanges.current.add(key); }, []);
+  useEffect(() => { shownChanges.current.clear(); }, [projectId]);
   const artifactRef = useRef(artifact);
   artifactRef.current = artifact;
   const pdfData = artifact?.bytes ?? mainPdfData;
@@ -313,8 +311,10 @@ export function PdfPreview() {
   const sourceLocation = artifact ? chatSourceLocation : mainSourceLocation;
   const locateDisplayedSource = useCallback(
     async (page: number, x: number, y: number) => {
-      if (!artifact)
-        return projectRoot ? synctexEdit(projectRoot, page, x, y) : null;
+      if (!artifact) {
+        const bytes = visual.active ? visual.bytes.current : pdfData ? getPdfArrayBuffer(pdfData) : null;
+        return projectRoot && mainFile && bytes ? synctexEdit(projectRoot, mainFile, bytes, page, x, y) : null;
+      }
       const box = artifact.build.locations
         .filter((b) => b.page === page)
         .sort(
@@ -327,44 +327,23 @@ export function PdfPreview() {
       if (!box) return null;
       return safeChatSource(artifact, box).catch(() => null);
     },
-    [artifact, projectRoot],
+    [artifact, projectRoot, mainFile, pdfData, visual.active, visual.bytes.current, navigationChatId],
   );
 
-  const handleTextClick = useCallback(
-    (text: string) => {
-      if (artifact) return;
-      const state = useDocumentStore.getState();
-      const content =
-        state.files.find((file) => file.id === state.activeFileId)?.content ??
-        "";
-      let index = content.indexOf(text);
-      if (index === -1) {
-        const cleanText = text.replace(/[{}\\$]/g, "");
-        if (cleanText.length > 2) index = content.indexOf(cleanText);
-      }
-      if (index === -1 && text.length > 5) {
-        const words = text.split(/\s+/).filter((w) => w.length > 3);
-        for (const word of words) {
-          index = content.indexOf(word);
-          if (index !== -1) break;
-        }
-      }
-      if (index !== -1) requestJumpToPosition(index);
-    },
-    [requestJumpToPosition, artifact],
-  );
+  const sourceLookupRef = useRef(locateDisplayedSource);
+  sourceLookupRef.current = locateDisplayedSource;
+  const sourceClickGeneration = useRef(0);
 
   const handleSynctexClick = useCallback(
     async (page: number, x: number, y: number) => {
       if (!projectRoot) return;
-      const displayed = artifactRef.current;
+      const generation = ++sourceClickGeneration.current;
       const result = await locateDisplayedSource(page, x, y);
-      if (displayed !== artifactRef.current) return;
+      if (generation !== sourceClickGeneration.current || sourceLookupRef.current !== locateDisplayedSource) return;
       if (!result) {
-        if (artifact)
-          toast.info(
-            "This PDF contains unapplied edits. No verified location in the main document is available.",
-          );
+        toast.info(artifact
+          ? "This PDF contains unapplied edits. No verified location in the main document is available."
+          : "No matching source in the current PDF; compile the document and try again.");
         return;
       }
 
@@ -397,7 +376,9 @@ export function PdfPreview() {
       }
 
       if (needsSwitch) {
-        setTimeout(() => requestJumpToPosition(offset), 100);
+        setTimeout(() => {
+          if (generation === sourceClickGeneration.current && sourceLookupRef.current === locateDisplayedSource && useDocumentStore.getState().activeFileId === targetFile.id) requestJumpToPosition(offset);
+        }, 100);
       } else {
         requestJumpToPosition(offset);
       }
@@ -984,7 +965,8 @@ export function PdfPreview() {
                       ? visual.bytes.current!
                       : getPdfArrayBuffer(data)
                   }
-                  pageOnLoad={isActive && firstDisplay ? changedPage : undefined}
+                  changePageTarget={isActive && changePageTarget && !shownChanges.current.has(changePageTarget.key) ? changePageTarget : undefined}
+                  onChangePageShown={markChangeShown}
                   sourceLocation={isActive ? sourceLocation : null}
                   selectedRegion={
                     isActive && visual.active
@@ -1022,11 +1004,12 @@ export function PdfPreview() {
                   }
                   scale={scale}
                   rootFileId={rootId}
+                  documentScope={projectId ?? projectRoot ?? ""}
+                  ownerId={JSON.stringify([projectId, isActive ? activeChatId : rootId, mainFile])}
                   isActive={isActive}
                   onError={isActive ? setPdfError : undefined}
                   onLoadSuccess={isActive ? handleLoadSuccess : undefined}
                   onScaleChange={isActive ? handleScaleChange : undefined}
-                  onTextClick={isActive ? handleTextClick : undefined}
                   onSynctexClick={isActive ? handleSynctexClick : undefined}
                   onTextSelect={isActive ? handleTextSelect : undefined}
                   onFirstPageSize={isActive ? handleFirstPageSize : undefined}

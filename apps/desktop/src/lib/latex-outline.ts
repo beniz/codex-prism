@@ -1,3 +1,5 @@
+import { resolveTexInclude, stripTexComments, texFileIndex, texIncludes, type TexSourceFile } from "./latex-project";
+
 export interface TocItem {
   level: number;
   title: string;
@@ -10,16 +12,7 @@ export interface TocItem {
 export function parseTableOfContents(content: string): TocItem[] {
   const levels = ["part", "chapter", "section", "subsection", "subsubsection"];
   const counters = [0, 0, 0, 0, 0];
-  const lines = content.split("\n").map((line) => {
-    // A percent sign is escaped only after an odd number of backslashes.
-    for (let i = 0; i < line.length; i++) {
-      if (line[i] !== "%") continue;
-      let backslashes = 0;
-      for (let j = i - 1; j >= 0 && line[j] === "\\"; j--) backslashes++;
-      if (backslashes % 2 === 0) return line.slice(0, i);
-    }
-    return line;
-  });
+  const lines = stripTexComments(content).split("\n");
   const hasChapters = lines.some((line) =>
     /\\chapter\*?\s*(?:\[[^\]]*\]\s*)?\{/.test(line),
   );
@@ -137,4 +130,54 @@ function frameOutline(source: string): TocItem[] {
     frames.lastIndex = environment ? ending!.index + ending![0].length : first!.end;
   }
   return result;
+}
+
+export interface ProjectTocItem extends TocItem {
+  fileId: string;
+}
+
+/** Expand loaded literal includes in document order, preserving source locations.
+ * No disk scans or TeX evaluation run on the editor's typing path.
+ */
+export function parseProjectTableOfContents(
+  files: readonly TexSourceFile[],
+  rootId: string,
+): ProjectTocItem[] {
+  const root = files.find((file) => file.id === rootId);
+  if (!root || root.type !== "tex") return [];
+  const index = texFileIndex(files);
+  const lines: string[] = [];
+  const locations: { fileId: string; line: number }[] = [];
+  const ancestors = new Set<string>();
+  // Bound malformed/cyclic or exponentially repeated includes while editing.
+  let remaining = 1000;
+  function expand(file: TexSourceFile) {
+    if (ancestors.has(file.id) || remaining-- <= 0 || ancestors.size >= 100) return;
+    ancestors.add(file.id);
+    const source = stripTexComments(file.content ?? "");
+    let sourceLine = 1;
+    const append = (text: string) => {
+      const pieces = text.split("\n");
+      pieces.forEach((piece, offset) => {
+        lines.push(piece);
+        locations.push({ fileId: file.id, line: sourceLine + offset });
+      });
+      sourceLine += pieces.length - 1;
+    };
+    let at = 0;
+    for (const match of texIncludes(source)) {
+      append(source.slice(at, match.index));
+      const child = resolveTexInclude(match[1] ?? match[2], root!, index);
+      if (child) expand(child);
+      sourceLine += match[0].split("\n").length - 1;
+      at = match.index! + match[0].length;
+    }
+    append(source.slice(at));
+    ancestors.delete(file.id);
+  }
+  expand(root);
+  return parseTableOfContents(lines.join("\n")).map((item) => ({
+    ...item,
+    ...locations[item.line - 1],
+  }));
 }
