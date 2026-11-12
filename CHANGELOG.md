@@ -5,6 +5,12 @@ and detailed release notes are in [docs/releases](docs/releases/README.md).
 
 ## Unreleased
 
+- Show a consistent loading message while preparing chat history instead of briefly displaying an unformatted final message.
+
+- Switching chat tabs jumps directly to the latest messages without animated scrolling. Keep large recent conversations mounted and load restored histories from their latest page instead of replaying old messages.
+
+- Retain recent chat transcripts for faster tab switching, defer cold transcript formatting, and queue tab-selection persistence outside the click path.
+
 - Stage project opening: display source and existing PDFs early, restore the active chat first, report loading phases, and recover from opening errors with Retry.
 
 - Show the workspace immediately while opening projects, load TeX sources with bounded concurrency, defer ancillary files and images, and avoid duplicate history loading.

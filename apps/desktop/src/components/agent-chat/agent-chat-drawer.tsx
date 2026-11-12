@@ -2,7 +2,7 @@ import { ActivityLine } from "./activity-line";
 import { QuestionRequest } from "./question-request";
 import { SourceCompletion } from "./source-completion";
 import { listContinuation } from "@/lib/composer-lists";
-import { ChatHistory } from "./chat-history";
+import { ChatPanes } from "./chat-panes";
 import { ActivityLabel } from "./activity-label";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
@@ -135,14 +135,8 @@ export function AgentChatDrawer({
   const reportError = (e: unknown) =>
     useAgentChatStore.setState({ error: String(e) });
   useEffect(() => {
-    const el = viewport.current;
-    if (el && followMessages.current) el.scrollTop = el.scrollHeight;
-  }, [t.messages, s.requests, open]);
-  useEffect(() => {
     promptHistory.current = null;
     followMessages.current = true;
-    const el = viewport.current;
-    if (el) el.scrollTop = el.scrollHeight;
   }, [t.id]);
   useEffect(() => {
     void ensureAgentEvents().catch(reportError);
@@ -451,7 +445,7 @@ export function AgentChatDrawer({
               followMessages.current =
                 el.scrollHeight - el.scrollTop - el.clientHeight < 48;
             }}
-            className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 py-3"
+            className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-4 py-3"
           >
             {!s.restoringChats && !t.messages.length && (
               <div className="flex h-full min-h-16 flex-col items-center justify-center gap-2 text-center">
@@ -470,7 +464,7 @@ export function AgentChatDrawer({
                 Restoring conversations…
               </p>
             )}
-            <ChatHistory key={t.id} messages={t.messages} viewport={viewport} />
+            <ChatPanes key={s.projectId ?? ""} tabs={s.tabs} activeId={t.id} />
             {!t.isStreaming && !t.error && t.mode === "plan" && t.messages.some((m) => m.type === "proposedPlan" && m.status === "completed") && [...t.messages].reverse().find((m) => m.type === "userMessage" || m.type === "proposedPlan")?.status === "completed" && (
               <div className="flex gap-2" role="group" aria-label="Plan actions">
                 <Button onClick={() => {

@@ -1000,7 +1000,7 @@ useAgentChatStore.subscribe((state, previous) => {
   // A pending draft belongs to its old project even after navigation.
   if (ownerChanged) tryFlushQueuedChatTabs();
   const metadataChanged = ownerChanged || state.restoringChats !== previous.restoringChats ||
-    state.activeTabId !== previous.activeTabId || state.selectedModel !== previous.selectedModel ||
+    state.selectedModel !== previous.selectedModel ||
     state.effortLevel !== previous.effortLevel || state.tabs.length !== previous.tabs.length ||
     state.tabs.some((t, i) => {
       const old = previous.tabs[i];
@@ -1010,7 +1010,7 @@ useAgentChatStore.subscribe((state, previous) => {
     try { persistChatTabs(); } catch { /* Automatic persistence is best effort. */ }
     return;
   }
-  if (state.tabs === previous.tabs || !state.tabs.some((t, i) => savedDraft(t) !== savedDraft(previous.tabs[i]))) return;
+  if (state.activeTabId === previous.activeTabId && (state.tabs === previous.tabs || !state.tabs.some((t, i) => savedDraft(t) !== savedDraft(previous.tabs[i])))) return;
   const snapshot = chatTabsSnapshot(state);
   if (!snapshot) return;
   queuedTabs = snapshot;

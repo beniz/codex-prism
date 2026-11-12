@@ -1,4 +1,5 @@
-import { memo, useEffect, useState, type ReactNode } from "react";
+import { TranscriptActivity } from "./transcript-activity";
+import { memo, useContext, useEffect, useState, type ReactNode } from "react";
 
 const MAX_HIGHLIGHT_LENGTH = 20_000;
 let modulePromise:
@@ -22,13 +23,15 @@ export const ChatCode = memo(function ChatCode({
   language?: string;
   className?: string;
 }) {
+  const active = useContext(TranscriptActivity);
   const [highlighted, setHighlighted] = useState<{
     code: string;
     language: string;
     nodes: ReactNode;
   }>();
   useEffect(() => {
-    if (!language || code.length > MAX_HIGHLIGHT_LENGTH) return;
+    if (highlighted?.code === code && highlighted.language === language) return;
+    if (!active || !language || code.length > MAX_HIGHLIGHT_LENGTH) return;
     let cancelled = false;
     const timer = window.setTimeout(() => {
       void loadHighlighter()
@@ -48,7 +51,7 @@ export const ChatCode = memo(function ChatCode({
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [code, language]);
+  }, [code, language, active, highlighted]);
   return (
     <code
       className={[language ? "chat-code" : "", className]
