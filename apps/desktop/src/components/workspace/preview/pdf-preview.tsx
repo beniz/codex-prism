@@ -115,6 +115,7 @@ export function PdfPreview() {
   const setIsCompiling = useDocumentStore((s) => s.setIsCompiling);
   const projectRoot = useDocumentStore((s) => s.projectRoot);
   const projectId = useDocumentStore((s) => s.projectId);
+  const activeChatId = useAgentChatStore(s => s.activeTabId);
   const files = useDocumentStore((s) => s.files);
   const saveAllFiles = useDocumentStore((s) => s.saveAllFiles);
   const setActiveFile = useDocumentStore((s) => s.setActiveFile);
@@ -1003,6 +1004,8 @@ export function PdfPreview() {
                   }
                   scale={scale}
                   rootFileId={rootId}
+                  documentScope={projectId ?? projectRoot ?? ""}
+                  ownerId={JSON.stringify([projectId, isActive ? activeChatId : rootId, mainFile])}
                   isActive={isActive}
                   onError={isActive ? setPdfError : undefined}
                   onLoadSuccess={isActive ? handleLoadSuccess : undefined}

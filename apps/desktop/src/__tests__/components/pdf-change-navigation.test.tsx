@@ -19,7 +19,7 @@ const bytes = new Uint8Array([37, 80, 68, 70, 45]).buffer;
 const loaded = {
   docId: 1,
   pageSizes: Array.from({ length: 3 }, () => ({ width: 100, height: 200 })),
-  cacheHit: true,
+  cacheHit: true, release: () => {},
 };
 let root: Root, host: HTMLDivElement;
 let props: Parameters<typeof PdfViewer>[0];

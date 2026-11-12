@@ -1,3 +1,4 @@
+import { createMupdfPool } from "./mupdf-pool";
 import type { SourceBox, Region } from "../visual-review";
 import type {
   StructuredTextData,
@@ -10,9 +11,11 @@ import { createLogger } from "@/lib/debug/logger";
 const log = createLogger("mupdf-worker");
 export interface RequestOptions {
   signal?: AbortSignal;
+  priority?: "foreground" | "background";
+  ownerId?: string;
 }
 export interface MupdfClient {
-  openDocument(buffer: ArrayBuffer, magic?: string): Promise<number>;
+  openDocument(buffer: ArrayBuffer, magic?: string, options?: RequestOptions): Promise<number>;
   closeDocument(docId: number): Promise<void>;
   countPages(docId: number, options?: RequestOptions): Promise<number>;
   getPageSize(
@@ -65,7 +68,7 @@ interface Request {
 const TIMEOUT_MS = 30_000;
 
 /** Keep waiting work here: messages already posted to synchronous WASM cannot be cancelled. */
-export function createMupdfClient(): MupdfClient {
+export function createMupdfClient(onFatal?: (error: Error) => void): MupdfClient {
   const worker = new Worker(new URL("./mupdf-worker.ts", import.meta.url), {
     type: "module",
   });
@@ -80,7 +83,7 @@ export function createMupdfClient(): MupdfClient {
     TIMEOUT_MS,
   );
 
-  function fail(error: Error) {
+  function fail(error: Error, notify = true) {
     if (failed) return;
     failed = error;
     clearTimeout(initializationTimer);
@@ -90,7 +93,10 @@ export function createMupdfClient(): MupdfClient {
     active = undefined;
     for (const request of queue.splice(0)) request.finish(error);
     // Do not replace this client: cached document IDs belong to this worker.
-    log.error("Worker unavailable", { error: String(error) });
+    if (notify) {
+      log.error("Worker unavailable", { error: String(error) });
+      onFatal?.(error);
+    }
   }
 
   function dispatch() {
@@ -197,10 +203,10 @@ export function createMupdfClient(): MupdfClient {
       call("reviewRegions", [docId, boxes], options),
     reviewCrop: (docId, region, options) =>
       call("reviewCrop", [docId, region], options),
-    destroy: () => fail(new Error("MuPDF worker was closed")),
+    destroy: () => fail(new Error("MuPDF worker was closed"), false),
   };
 }
-let instance: MupdfClient | null = null;
-export function getMupdfClient(): MupdfClient {
-  return (instance ??= createMupdfClient());
+let instance: ReturnType<typeof createMupdfPool> | null = null;
+export function getMupdfClient() {
+  return (instance ??= createMupdfPool(createMupdfClient));
 }

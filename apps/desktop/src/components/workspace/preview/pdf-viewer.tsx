@@ -12,6 +12,7 @@ import { open as shellOpen } from "@tauri-apps/plugin-shell";
 import { ask } from "@/lib/backend/desktop-host";
 import {
   getCachedDocument,
+  type DocCacheResult,
   getOrOpenDocument,
 } from "@/lib/mupdf/pdf-doc-cache";
 import { LOCAL_ZOOM_SHORTCUTS_ATTR } from "@/lib/app-zoom";
@@ -211,6 +212,8 @@ interface PdfViewerProps {
   scale: number;
   /** Root file ID for scroll position caching across file switches. */
   rootFileId?: string;
+  ownerId?: string;
+  documentScope?: string;
   /** Whether this viewer is currently the active/visible one (for keep-alive). */
   isActive?: boolean;
   onError?: (error: string) => void;
@@ -238,6 +241,8 @@ export const PdfViewer = memo(function PdfViewer({
   renderOverlay,
   scale,
   rootFileId,
+  ownerId = rootFileId,
+  documentScope = "",
   isActive = true,
   onError,
   onLoadSuccess,
@@ -256,13 +261,16 @@ export const PdfViewer = memo(function PdfViewer({
   const contentRef = useRef<HTMLDivElement>(null);
 
   const [pageSizes, setPageSizes] = useState<PageSize[]>([]);
-  const [visiblePages, setVisiblePages] = useState<Set<number>>(new Set());
+  const [viewportPages, setViewportPages] = useState({ docId: 0, pages: new Set<number>() });
+  const [visiblePages, setVisiblePages] = useState({ docId: 0, pages: new Set<number>() });
   const [loading, setLoading] = useState(true);
   const docIdRef = useRef(0);
+  const documentLease = useRef<DocCacheResult | undefined>(undefined);
+  const takeLease = (lease: DocCacheResult) => { documentLease.current?.release(); documentLease.current = lease; };
   const loadGenRef = useRef(0);
   const [loadedDocument, setLoadedDocument] = useState<{ data: ArrayBuffer; artifactId?: string }>();
   const appliedChange = useRef<string | undefined>(undefined);
-  useEffect(() => () => { loadGenRef.current++; }, []);
+  useEffect(() => () => { loadGenRef.current++; documentLease.current?.release(); }, []);
 
   const scaleRef = useRef(scale);
   scaleRef.current = scale;
@@ -452,8 +460,9 @@ export const PdfViewer = memo(function PdfViewer({
     }
 
     // Fast path: synchronous cache check — avoids async gap, state churn, and re-renders
-    const syncResult = getCachedDocument(pdfData, artifactId);
+    const syncResult = getCachedDocument(pdfData, artifactId, documentScope);
     if (syncResult && syncResult.docId === docIdRef.current) {
+      takeLease(syncResult);
       // Same document already displayed — only restore scroll position on file switch
       setLoadedDocument({ data, artifactId });
       isFirstLoad.current = false;
@@ -501,6 +510,7 @@ export const PdfViewer = memo(function PdfViewer({
 
     // Synchronous cache hit for a different doc (file switch to cached PDF)
     if (syncResult) {
+      takeLease(syncResult);
       docIdRef.current = syncResult.docId;
       setLoadedDocument({ data, artifactId });
       setPageSizes(syncResult.pageSizes);
@@ -525,11 +535,15 @@ export const PdfViewer = memo(function PdfViewer({
 
     (async () => {
       try {
-        const { docId, pageSizes: sizes } = await getOrOpenDocument(
+        const acquired = await getOrOpenDocument(
           pdfData,
           artifactId,
+          documentScope,
+          { ownerId, priority: isActive ? "foreground" : "background" },
         );
-        if (gen !== loadGenRef.current) return;
+        if (gen !== loadGenRef.current) { acquired.release(); return; }
+        takeLease(acquired);
+        const { docId, pageSizes: sizes } = acquired;
 
         docIdRef.current = docId;
         setLoadedDocument({ data, artifactId });
@@ -553,7 +567,7 @@ export const PdfViewer = memo(function PdfViewer({
         onError?.(err instanceof Error ? err.message : String(err));
       }
     })();
-  }, [data, artifactId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [data, artifactId, documentScope]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Analysis can finish after loading and after user scrolling. Its owner explicitly
   // requests one jump; never apply it to an inactive or different PDF revision.
@@ -617,10 +631,11 @@ export const PdfViewer = memo(function PdfViewer({
     const container = containerRef.current;
     if (!container) return;
 
+    const observerDocId = docIdRef.current;
     const observer = new IntersectionObserver(
       (entries) => {
         setVisiblePages((prev) => {
-          const next = new Set(prev);
+          const next = new Set(prev.docId === observerDocId ? prev.pages : []);
           for (const entry of entries) {
             const el = entry.target as HTMLElement;
             const pageNum = parseInt(
@@ -634,7 +649,7 @@ export const PdfViewer = memo(function PdfViewer({
               next.delete(pageNum);
             }
           }
-          return next;
+          return { docId: observerDocId, pages: next };
         });
       },
       {
@@ -643,10 +658,19 @@ export const PdfViewer = memo(function PdfViewer({
       },
     );
 
+    const viewportObserver = new IntersectionObserver(entries => {
+      setViewportPages(previous => {
+        const next = new Set(previous.docId === observerDocId ? previous.pages : []);
+        for (const entry of entries) {
+          const page = Number((entry.target as HTMLElement).dataset.pageNumber);
+          if (entry.isIntersecting) next.add(page); else next.delete(page);
+        }
+        return { docId: observerDocId, pages: next };
+      });
+    }, { root: container });
     const pages = container.querySelectorAll(".mupdf-page");
-    pages.forEach((p) => observer.observe(p));
-
-    return () => observer.disconnect();
+    pages.forEach(p => { observer.observe(p); viewportObserver.observe(p); });
+    return () => { observer.disconnect(); viewportObserver.disconnect(); };
   }, [pageSizes, isActive, focusGen]);
 
   // Report container dimensions to parent for fit-to-width/height
@@ -1274,14 +1298,16 @@ export const PdfViewer = memo(function PdfViewer({
           <MupdfPage
             key={i}
             overlay={
-              visiblePages.has(i + 1) ? renderOverlay?.(i + 1) : undefined
+              visiblePages.docId === docIdRef.current && visiblePages.pages.has(i + 1) ? renderOverlay?.(i + 1) : undefined
             }
             docId={docIdRef.current}
             pageIndex={i}
             scale={scale}
             pageWidth={size.width}
             pageHeight={size.height}
-            isVisible={isActive && visiblePages.has(i + 1)}
+            isVisible={isActive && visiblePages.docId === docIdRef.current && visiblePages.pages.has(i + 1)}
+            ownerId={ownerId}
+            priority={isActive && viewportPages.docId === docIdRef.current && viewportPages.pages.has(i + 1) ? "foreground" : "background"}
           />
         ))}
       </div>

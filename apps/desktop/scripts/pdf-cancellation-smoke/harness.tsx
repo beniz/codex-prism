@@ -106,12 +106,12 @@ createRoot(document.getElementById("root")!).render(<App />);
     .catch((e) => e.name);
   // Allow preceding viewer jobs to drain and the heavy request to start.
   await until(() =>
-    dispatched.some((m) => m[0] === "drawPage" && m[2][0] === heavy),
+    dispatched.some((m) => m[0] === "drawPage" && m[2][2] === 110),
   );
   const cancelled = Array.from({ length: 100 }, () => {
     const abort = new AbortController();
     const promise = client
-      .drawPage(heavy, 0, 72, { signal: abort.signal })
+      .drawPage(heavy, 0, 109, { signal: abort.signal })
       .catch((e) => e.name);
     abort.abort();
     return promise;
@@ -125,7 +125,7 @@ createRoot(document.getElementById("root")!).render(<App />);
     throw new Error("Cancellation lost");
   await mandatory;
   const draws = dispatched.filter(
-    (m) => m[0] === "drawPage" && m[2][0] === heavy,
+    (m) => m[0] === "drawPage" && [109, 110].includes(m[2][2]),
   ).length;
   if (draws !== 1)
     throw new Error(`Obsolete requests reached worker: ${draws}`);

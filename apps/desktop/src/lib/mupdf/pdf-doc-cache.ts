@@ -1,158 +1,170 @@
-import { getMupdfClient } from "./mupdf-client";
-import { createLogger } from "@/lib/debug/logger";
+import { getMupdfClient, type RequestOptions } from "./mupdf-client";
 import type { PageSize } from "./types";
-
-const log = createLogger("pdf-doc-cache");
 
 interface CachedDoc {
   docId: number;
   pageSizes: PageSize[];
-  lastAccess: number;
+  refs: number;
+  retired: boolean;
+  close(): Promise<void>;
 }
-
-const MAX_OPEN_DOCS = 5;
-const cache = new Map<string, CachedDoc>();
-let epoch = 0;
-const opening = new Map<string, Promise<DocCacheResult>>();
-
-/** Create a fast fingerprint from PDF bytes (length + sampled bytes). */
-function computeFingerprint(data: Uint8Array): string {
-  const len = data.length;
-  if (len < 16) return `${len}:${Array.from(data).join(",")}`;
-  // Sample: length + first 8 bytes + middle 8 bytes + last 8 bytes
-  const first = Array.from(data.subarray(0, 8));
-  const mid = Array.from(
-    data.subarray(Math.floor(len / 2) - 4, Math.floor(len / 2) + 4),
-  );
-  const last = Array.from(data.subarray(len - 8));
-  return `${len}:${first.join(",")}|${mid.join(",")}|${last.join(",")}`;
-}
-
-async function evictOldest(): Promise<void> {
-  if (cache.size < MAX_OPEN_DOCS) return;
-
-  let oldestKey: string | null = null;
-  let oldestAccess = Infinity;
-  for (const [key, entry] of cache) {
-    if (entry.lastAccess < oldestAccess) {
-      oldestAccess = entry.lastAccess;
-      oldestKey = key;
-    }
-  }
-  if (oldestKey) {
-    const entry = cache.get(oldestKey)!;
-    cache.delete(oldestKey);
-    log.debug(`Evicted doc ${entry.docId} (cache size was ${cache.size + 1})`);
-    await getMupdfClient()
-      .closeDocument(entry.docId)
-      .catch(() => {});
-  }
-}
-
 export interface DocCacheResult {
   docId: number;
   pageSizes: PageSize[];
   cacheHit: boolean;
+  /** Each acquisition owns one reference, including cache hits. */
+  release(): void;
 }
-
-/**
- * Synchronous cache lookup — returns the cached result if the PDF is already open,
- * or null on cache miss. Use this to skip the async path on file switch.
- */
+const cache = new Map<string, CachedDoc>();
+const opening = new Map<string, Promise<CachedDoc>>();
+const hashes = new WeakMap<
+  ArrayBufferLike,
+  Map<string, string | Promise<string>>
+>();
+let epoch = 0;
+function hashSlot(data: Uint8Array) {
+  let map = hashes.get(data.buffer);
+  if (!map) {
+    map = new Map();
+    hashes.set(data.buffer, map);
+  }
+  return { map, range: `${data.byteOffset}:${data.byteLength}` };
+}
+function knownKey(
+  data: Uint8Array,
+  artifactId?: string,
+  scope = "",
+): string | undefined {
+  if (artifactId) return JSON.stringify([scope, "artifact", artifactId]);
+  const { map, range } = hashSlot(data);
+  const hash = map.get(range);
+  return typeof hash === "string"
+    ? JSON.stringify([scope, "sha256", hash])
+    : undefined;
+}
+async function identity(data: Uint8Array, artifactId?: string, scope = "") {
+  const known = knownKey(data, artifactId, scope);
+  if (known) return known;
+  const { map, range } = hashSlot(data);
+  let hash = map.get(range);
+  if (!hash) {
+    const promise = crypto.subtle
+      .digest("SHA-256", data.slice().buffer)
+      .then((bytes) => {
+        const value = Array.from(new Uint8Array(bytes), (b) =>
+          b.toString(16).padStart(2, "0"),
+        ).join("");
+        map.set(range, value);
+        return value;
+      })
+      .catch((error) => {
+        map.delete(range);
+        throw error;
+      });
+    map.set(range, promise);
+    hash = promise;
+  }
+  return JSON.stringify([scope, "sha256", await hash]);
+}
+function retire(entry: CachedDoc) {
+  if (entry.retired) return;
+  entry.retired = true;
+  if (!entry.refs) void entry.close().catch(() => {});
+}
+function trim() {
+  while (cache.size > 5) {
+    const victim = [...cache].find(([, entry]) => !entry.refs);
+    if (!victim) return; // Mounted viewers own leases; never evict their documents.
+    cache.delete(victim[0]);
+    retire(victim[1]);
+  }
+}
+function lease(entry: CachedDoc, cacheHit: boolean): DocCacheResult {
+  entry.refs++;
+  let released = false;
+  return {
+    docId: entry.docId,
+    pageSizes: entry.pageSizes,
+    cacheHit,
+    release() {
+      if (released) return;
+      released = true;
+      entry.refs--;
+      if (entry.retired && !entry.refs) void entry.close().catch(() => {});
+      trim();
+    },
+  };
+}
 export function getCachedDocument(
   data: Uint8Array,
   artifactId?: string,
+  scope = "",
 ): DocCacheResult | null {
-  const fingerprint = artifactId ?? computeFingerprint(data);
-  const cached = cache.get(fingerprint);
-  if (cached) {
-    cached.lastAccess = Date.now();
-    return { docId: cached.docId, pageSizes: cached.pageSizes, cacheHit: true };
-  }
-  return null;
+  const key = knownKey(data, artifactId, scope);
+  const entry = key ? cache.get(key) : undefined;
+  if (!entry || entry.retired) return null;
+  cache.delete(key!);
+  cache.set(key!, entry);
+  return lease(entry, true);
 }
-
-/**
- * Get or open a MuPDF document, using the LRU cache.
- * Returns the docId and pageSizes. If the same PDF bytes were already open,
- * reuses the existing document (cache hit).
- */
 export async function getOrOpenDocument(
   data: Uint8Array,
   artifactId?: string,
+  scope = "",
+  options?: RequestOptions,
 ): Promise<DocCacheResult> {
-  // Reuse synchronous lookup to avoid duplicating fingerprint + cache logic
-  const hit = getCachedDocument(data, artifactId);
+  const startedEpoch = epoch;
+  const key = await identity(data, artifactId, scope);
+  if (startedEpoch !== epoch) throw new DOMException("Cancelled", "AbortError");
+  const hit = getCachedDocument(data, artifactId, scope);
   if (hit) return hit;
-
-  const fingerprint = artifactId ?? computeFingerprint(data);
-  const pending = opening.get(fingerprint);
-  if (pending) return pending;
-  const task = (async () => {
-    // Cache miss — evict if needed, then open
-    const startedEpoch = epoch;
-    await evictOldest();
-    if (startedEpoch !== epoch)
-      throw new DOMException("Cancelled", "AbortError");
-
-    log.debug(
-      `Cache miss, opening document (${(data.byteLength / 1024).toFixed(0)} KB)`,
-    );
-    const client = getMupdfClient();
-    // Always copy — the original buffer may not be transferable (e.g., from Tauri),
-    // and transfer detaches the ArrayBuffer which would corrupt the pdfCache reference.
-    const buffer = data.buffer.slice(
-      data.byteOffset,
-      data.byteOffset + data.byteLength,
-    ) as ArrayBuffer;
-    const docId = await client.openDocument(buffer);
-    let pageSizes: PageSize[];
-    try {
-      if (startedEpoch !== epoch)
-        throw new DOMException("Cancelled", "AbortError");
-      pageSizes = await client.getAllPageSizes(docId);
-      if (startedEpoch !== epoch)
-        throw new DOMException("Cancelled", "AbortError");
-    } catch (error) {
-      await client.closeDocument(docId).catch(() => {});
-      throw error;
-    }
-
-    cache.set(fingerprint, {
-      docId,
-      pageSizes,
-      lastAccess: Date.now(),
-    });
-
-    log.info(
-      `Opened doc ${docId}: ${pageSizes.length} pages, cache size=${cache.size}`,
-    );
-    return { docId, pageSizes, cacheHit: false };
-  })();
-  opening.set(fingerprint, task);
+  let pending = opening.get(key);
+  if (!pending) {
+    pending = (async () => {
+      const client = getMupdfClient();
+      const docId = await client.openDocument(
+        data.slice().buffer,
+        undefined,
+        options,
+      );
+      try {
+        if (startedEpoch !== epoch)
+          throw new DOMException("Cancelled", "AbortError");
+        const pageSizes = await client.getAllPageSizes(docId, options);
+        if (startedEpoch !== epoch)
+          throw new DOMException("Cancelled", "AbortError");
+        const entry: CachedDoc = {
+          docId,
+          pageSizes,
+          refs: 0,
+          retired: false,
+          close: () => client.closeDocument(docId),
+        };
+        cache.set(key, entry);
+        return entry;
+      } catch (error) {
+        await client.closeDocument(docId).catch(() => {});
+        throw error;
+      }
+    })();
+    opening.set(key, pending);
+  }
   try {
-    return await task;
+    const entry = await pending;
+    if (startedEpoch !== epoch || entry.retired)
+      throw new DOMException("Cancelled", "AbortError");
+    const result = lease(entry, false);
+    trim();
+    return result;
   } finally {
-    if (opening.get(fingerprint) === task) opening.delete(fingerprint);
+    if (opening.get(key) === pending) opening.delete(key);
   }
 }
-
-/** Close all cached documents (e.g., on project close). */
 export async function clearDocCache(): Promise<void> {
   epoch++;
   opening.clear();
+  getMupdfClient().clearPageCache?.();
   const entries = [...cache.values()];
-  const count = entries.length;
   cache.clear();
-  if (count === 0) {
-    log.info("Cleared doc cache (0 documents closed)");
-    return;
-  }
-
-  const client = getMupdfClient();
-  const closePromises = entries.map((entry) =>
-    client.closeDocument(entry.docId).catch(() => {}),
-  );
-  await Promise.all(closePromises);
-  log.info(`Cleared doc cache (${count} documents closed)`);
+  for (const entry of entries) retire(entry);
 }

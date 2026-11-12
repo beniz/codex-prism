@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, memo } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, memo } from "react";
 import { getMupdfClient } from "@/lib/mupdf/mupdf-client";
 import { createLogger } from "@/lib/debug/logger";
 import { APP_VISIBILITY_RESTORED } from "@/lib/debug/log-store";
@@ -14,6 +14,8 @@ interface MupdfPageProps {
   pageWidth: number;
   pageHeight: number;
   isVisible: boolean;
+  ownerId?: string;
+  priority?: "foreground" | "background";
   overlay?: React.ReactNode;
 }
 
@@ -24,33 +26,74 @@ export const MupdfPage = memo(function MupdfPage({
   pageWidth,
   pageHeight,
   isVisible,
+  ownerId,
+  priority = "foreground",
   overlay,
 }: MupdfPageProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [textLayer, setTextLayer] = useState<{ docId: number; pageIndex: number; data: StructuredTextData }>();
-  const [linkLayer, setLinkLayer] = useState<{ docId: number; pageIndex: number; data: LinkData[] }>();
-  const textData = textLayer?.docId === docId && textLayer.pageIndex === pageIndex ? textLayer.data : null;
-  const links = linkLayer?.docId === docId && linkLayer.pageIndex === pageIndex ? linkLayer.data : [];
-  const [renderScale, setRenderScale] = useState(scale);
-  const [pixelRatio, setPixelRatio] = useState(() => window.devicePixelRatio || 1);
+  const [textLayer, setTextLayer] = useState<{
+    docId: number;
+    pageIndex: number;
+    data: StructuredTextData;
+  }>();
+  const [linkLayer, setLinkLayer] = useState<{
+    docId: number;
+    pageIndex: number;
+    data: LinkData[];
+  }>();
+  const textData =
+    textLayer?.docId === docId && textLayer.pageIndex === pageIndex
+      ? textLayer.data
+      : null;
+  const links =
+    linkLayer?.docId === docId && linkLayer.pageIndex === pageIndex
+      ? linkLayer.data
+      : [];
+  const [renderResolution, setRenderResolution] = useState({
+    docId,
+    pageIndex,
+    scale,
+  });
+  // A different PDF must never inherit the preceding document's debounced zoom.
+  const renderScale =
+    renderResolution.docId === docId && renderResolution.pageIndex === pageIndex
+      ? renderResolution.scale
+      : scale;
+  const [pixelRatio, setPixelRatio] = useState(
+    () => window.devicePixelRatio || 1,
+  );
   const [restoreGeneration, setRestoreGeneration] = useState(0);
+  const [renderError, setRenderError] = useState<string>();
   const renderGenRef = useRef(0);
 
   const cssW = pageWidth * scale;
   const cssH = pageHeight * scale;
 
   useEffect(() => {
-    setRenderScale(scale);
+    setRenderResolution((current) =>
+      current.docId === docId &&
+      current.pageIndex === pageIndex &&
+      current.scale === scale
+        ? current
+        : { docId, pageIndex, scale },
+    );
   }, [docId, pageIndex]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!isVisible || docId <= 0) return;
     const timeout = window.setTimeout(
-      () => setRenderScale(scale),
+      () =>
+        setRenderResolution((current) =>
+          current.docId === docId &&
+          current.pageIndex === pageIndex &&
+          current.scale === scale
+            ? current
+            : { docId, pageIndex, scale },
+        ),
       RENDER_SCALE_DEBOUNCE_MS,
     );
     return () => window.clearTimeout(timeout);
-  }, [docId, isVisible, scale]);
+  }, [docId, pageIndex, isVisible, scale]);
 
   // Display density can change without a CSS resize (monitor changes or
   // compositor restoration). Re-arm the media query for each new density.
@@ -70,10 +113,31 @@ export const MupdfPage = memo(function MupdfPage({
     };
   }, [pixelRatio]);
 
+  // Restore matching pixels before paint without waiting for either worker.
+  useLayoutEffect(() => {
+    if (!isVisible || docId <= 0) return;
+    const cached = getMupdfClient().peekPage?.(
+      docId,
+      pageIndex,
+      renderScale * 72 * pixelRatio,
+    );
+    const canvas = canvasRef.current;
+    if (cached && canvas) {
+      canvas.width = cached.width;
+      canvas.height = cached.height;
+      canvas.getContext("2d")!.putImageData(cached, 0, 0);
+    }
+  }, [docId, pageIndex, renderScale, pixelRatio, isVisible, restoreGeneration]);
+  useEffect(() => {
+    if (isVisible)
+      getMupdfClient().promotePage?.(docId, pageIndex, ownerId, priority);
+  }, [docId, pageIndex, ownerId, priority, isVisible]);
+
   // Each effect owns its request. The shared client drops aborted queued work.
   useEffect(() => {
     const abort = new AbortController();
     const gen = ++renderGenRef.current;
+    setRenderError(undefined);
     if (!isVisible || docId <= 0) {
       if (canvasRef.current) {
         canvasRef.current.width = 0;
@@ -82,7 +146,20 @@ export const MupdfPage = memo(function MupdfPage({
       return;
     }
     const current = () => !abort.signal.aborted && gen === renderGenRef.current;
-    void getMupdfClient().drawPage(docId, pageIndex, renderScale * 72 * pixelRatio, { signal: abort.signal })
+    if (
+      getMupdfClient().peekPage?.(
+        docId,
+        pageIndex,
+        renderScale * 72 * pixelRatio,
+      )
+    )
+      return;
+    void getMupdfClient()
+      .drawPage(docId, pageIndex, renderScale * 72 * pixelRatio, {
+        signal: abort.signal,
+        ownerId,
+        priority,
+      })
       .then(async (imageData) => {
         if (!current()) return;
         const bitmap = await createImageBitmap(imageData);
@@ -92,13 +169,29 @@ export const MupdfPage = memo(function MupdfPage({
           canvas.width = imageData.width;
           canvas.height = imageData.height;
           canvas.getContext("2d")!.drawImage(bitmap, 0, 0);
-        } finally { bitmap.close(); }
+        } finally {
+          bitmap.close();
+        }
       })
       .catch((err) => {
-        if (current()) log.error(`Render error page ${pageIndex}`, { error: String(err) });
+        if (current()) {
+          log.error(`Render error page ${pageIndex}`, { error: String(err) });
+          setRenderError(err instanceof Error ? err.message : String(err));
+        }
       });
-    return () => { abort.abort(); renderGenRef.current++; };
-  }, [docId, pageIndex, renderScale, pixelRatio, isVisible, restoreGeneration]);
+    return () => {
+      abort.abort();
+      renderGenRef.current++;
+    };
+  }, [
+    docId,
+    pageIndex,
+    renderScale,
+    pixelRatio,
+    isVisible,
+    restoreGeneration,
+    ownerId,
+  ]);
 
   // Text and link layers do not need to be refetched for every zoom change.
   useEffect(() => {
@@ -107,26 +200,36 @@ export const MupdfPage = memo(function MupdfPage({
 
     const client = getMupdfClient();
 
-    client
-      .getPageText(docId, pageIndex, { signal: abort.signal })
-      .then((data) => {
-        if (abort.signal.aborted) return;
-        setTextLayer({ docId, pageIndex, data });
-      })
-      .catch(() => {});
+    if (!textData)
+      client
+        .getPageText(docId, pageIndex, {
+          signal: abort.signal,
+          ownerId,
+          priority,
+        })
+        .then((data) => {
+          if (abort.signal.aborted) return;
+          setTextLayer({ docId, pageIndex, data });
+        })
+        .catch(() => {});
 
-    client
-      .getPageLinks(docId, pageIndex, { signal: abort.signal })
-      .then((data) => {
-        if (abort.signal.aborted) return;
-        setLinkLayer({ docId, pageIndex, data });
-      })
-      .catch(() => {});
+    if (!(linkLayer?.docId === docId && linkLayer.pageIndex === pageIndex))
+      client
+        .getPageLinks(docId, pageIndex, {
+          signal: abort.signal,
+          ownerId,
+          priority,
+        })
+        .then((data) => {
+          if (abort.signal.aborted) return;
+          setLinkLayer({ docId, pageIndex, data });
+        })
+        .catch(() => {});
 
     return () => {
       abort.abort();
     };
-  }, [docId, pageIndex, isVisible]);
+  }, [docId, pageIndex, isVisible, ownerId]);
 
   // A compositor-restored canvas can be nonblank but stale or blurry.
   // Redraw visible pages instead of relying on an alpha-only blank check.
@@ -137,7 +240,10 @@ export const MupdfPage = memo(function MupdfPage({
     };
     window.addEventListener(APP_VISIBILITY_RESTORED, handleVisibilityRestored);
     return () =>
-      window.removeEventListener(APP_VISIBILITY_RESTORED, handleVisibilityRestored);
+      window.removeEventListener(
+        APP_VISIBILITY_RESTORED,
+        handleVisibilityRestored,
+      );
   }, [docId, isVisible]);
 
   return (
@@ -152,6 +258,14 @@ export const MupdfPage = memo(function MupdfPage({
       />
 
       {overlay}
+      {renderError && isVisible && (
+        <div
+          role="status"
+          className="absolute top-2 right-2 left-2 z-10 rounded bg-background/95 p-2 text-destructive text-xs shadow"
+        >
+          Could not render this page: {renderError}
+        </div>
+      )}
       {/* Text layer for selection */}
       {textData && (
         <svg
