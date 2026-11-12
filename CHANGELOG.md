@@ -5,6 +5,8 @@ and detailed release notes are in [docs/releases](docs/releases/README.md).
 
 ## Unreleased
 
+- Check for new releases every 12 hours and show an update indicator beside the version. Official AppImage, macOS, and Windows packages support signed downloads and a guarded restart; Debian installations detect externally installed upgrades, and source builds show update instructions.
+
 - Distinguish agent commands, file/image access, research, progress, approvals, and outcomes with small coloured icons and labels. Expanded commands use shell syntax highlighting.
 
 - Use a restrained light/dark syntax palette in the LaTeX and BibTeX editor, with matching language-aware highlighting for chat code blocks. Streamed text remains immediately visible.

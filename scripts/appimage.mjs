@@ -2,13 +2,13 @@
 import { execFileSync } from "node:child_process";
 import { createReadStream, createWriteStream } from "node:fs";
 import { chmod, copyFile, lstat, mkdtemp, open, readFile, readdir, realpath, rename, rm } from "node:fs/promises";
-import { dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { pipeline } from "node:stream/promises";
 
 async function internalFile(dir, name) {
   const file = await realpath(join(dir, name));
   const rel = relative(await realpath(dir), file);
-  if (isAbsolute(rel) || rel === ".." || rel.startsWith("../"))
+  if (isAbsolute(rel) || rel === ".." || rel.startsWith(`..${sep}`))
     throw new Error(`AppDir entry escapes its directory: ${name}`);
   if (!(await lstat(file)).isFile()) throw new Error(`Not a file: ${name}`);
   return file;

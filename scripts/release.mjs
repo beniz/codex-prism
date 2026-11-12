@@ -1,3 +1,4 @@
+import { signArtifact, verifySignedFile } from "./updater-artifacts.mjs";
 import { repairAppImage } from "./appimage.mjs";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -133,13 +134,18 @@ export async function collect(cwd = root) {
     const name = `codex-prism-${version}-${platform}.${extension}`;
     const destination = join(dir, name);
     await copyFile(matches[0], destination);
+    if (extension === "AppImage" && process.env.PRISM_OFFICIAL_BUILD === "1") {
+      await verifySignedFile(matches[0], process.env.PRISM_UPDATE_PUBLIC_KEY);
+      await copyFile(`${matches[0]}.sig`, `${destination}.sig`);
+      artifacts.push({ name: `${name}.sig`, size: (await stat(`${destination}.sig`)).size, sha256: await hash(`${destination}.sig`) });
+    }
     artifacts.push({
       name,
       size: (await stat(destination)).size,
       sha256: await hash(destination),
     });
   }
-  let notes = `# codex-prism v${version}\n\nUbuntu 26.04 LTS x86_64 desktop release.\n\nInstall the .deb on an Ubuntu 26.04 system, or make the AppImage executable and run it.\n\nRequires the Codex CLI installed separately and authenticated with codex login, and system TeX Live for compilation. Automatic updates are not enabled.\n`;
+  let notes = `# codex-prism v${version}\n\nUbuntu 26.04 LTS x86_64 desktop release.\n\nInstall the .deb on an Ubuntu 26.04 system, or make the AppImage executable and run it.\n\nRequires the Codex CLI installed separately and authenticated with codex login, and system TeX Live for compilation. Official AppImage releases support signed in-app updates; Debian packages are updated through apt or dpkg.\n`;
   try {
     notes = await readFile(join(cwd, "docs/releases", `${version}.md`), "utf8");
   } catch (error) {
@@ -244,6 +250,10 @@ async function main() {
     const images = (await filesBelow(bundle)).filter((file) => file.endsWith(".AppImage"));
     if (images.length !== 1) throw new Error("Expected exactly one AppImage to normalize");
     await repairAppImage(images[0]);
+    if (process.env.PRISM_OFFICIAL_BUILD === "1") {
+      signArtifact(images[0]);
+      await verifySignedFile(images[0], process.env.PRISM_UPDATE_PUBLIC_KEY);
+    }
     console.log(`Release files: ${await collect()}`);
   } else
     console.log(

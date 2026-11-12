@@ -11,6 +11,8 @@ import { basename, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { check, root, validateVersion } from "./release.mjs";
 
+import { verifySignedFile } from "./updater-artifacts.mjs";
+
 const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
 const packages = [
   ["codex-prism-linux-x64", ".deb", "linux-x86_64.deb"],
@@ -29,7 +31,11 @@ async function filesBelow(directory) {
   return files;
 }
 
-export async function assemble(input, output, { version, commit, notes }) {
+export async function assemble(
+  input,
+  output,
+  { version, commit, notes, publicKey = process.env.PRISM_UPDATE_PUBLIC_KEY },
+) {
   validateVersion(version);
   // Validate every platform before staging a release with missing packages.
   const selected = [];
@@ -45,6 +51,30 @@ export async function assemble(input, output, { version, commit, notes }) {
       );
     selected.push([matches[0], `codex-prism-${version}-${suffix}`]);
   }
+  if (!publicKey)
+    throw new Error("Release assembly requires PRISM_UPDATE_PUBLIC_KEY");
+  const macFiles = await filesBelow(join(input, "codex-prism-macos-arm64"));
+  const archives = macFiles.filter((path) => path.endsWith(".app.tar.gz"));
+  if (archives.length !== 1)
+    throw new Error("Expected one macOS updater archive");
+  selected.push([archives[0], `codex-prism-${version}-macos-arm64.app.tar.gz`]);
+  const platforms = {};
+  for (const [source, name] of [...selected]) {
+    const target = name.endsWith(".AppImage")
+      ? "linux-x86_64"
+      : name.endsWith("-setup.exe")
+        ? "windows-x86_64"
+        : name.endsWith(".app.tar.gz")
+          ? "darwin-aarch64"
+          : null;
+    if (!target) continue;
+    const signature = await verifySignedFile(source, publicKey);
+    platforms[target] = {
+      signature,
+      url: `https://github.com/beniz/codex-prism/releases/download/v${version}/${name}`,
+    };
+    selected.push([`${source}.sig`, `${name}.sig`]);
+  }
   await mkdir(output, { recursive: true });
   const artifacts = [];
   for (const [source, name] of selected) {
@@ -52,6 +82,13 @@ export async function assemble(input, output, { version, commit, notes }) {
     await copyFile(source, join(output, name));
     artifacts.push({ name, size: bytes.length, sha256: sha256(bytes) });
   }
+  const latest = `${JSON.stringify({ version, notes, platforms }, null, 2)}\n`;
+  await writeFile(join(output, "latest.json"), latest);
+  artifacts.push({
+    name: "latest.json",
+    size: Buffer.byteLength(latest),
+    sha256: sha256(latest),
+  });
   await writeFile(join(output, "RELEASE_NOTES.md"), notes);
   artifacts.push({
     name: "RELEASE_NOTES.md",
@@ -171,7 +208,7 @@ if (
     notes =
       `# codex-prism ${tag}\n\n` +
       "Packages for Ubuntu 26.04 x86_64 (.deb/AppImage), Windows 10/11 x64 (setup.exe), and macOS Apple Silicon (.dmg).\n\n" +
-      "Windows setup provisions prerequisites. Linux and macOS require Codex and TeX installed separately. Windows packages are unsigned; macOS packages are ad-hoc signed and not notarized. Automatic updates are not enabled.\n";
+      "Windows setup provisions prerequisites. Linux and macOS require Codex and TeX installed separately. Windows packages are unsigned; macOS packages are ad-hoc signed and not notarized. Signed in-app updates are available for AppImage, Windows and macOS. Debian updates are installed externally.\n";
   }
   const files = await assemble(resolve(input), resolve(output), {
     version,

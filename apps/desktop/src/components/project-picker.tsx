@@ -1,3 +1,4 @@
+import { UpdateSettings, UpdateIndicator } from "@/components/app-updates";
 import {
   loadProjectPreview,
   type ProjectPreviewData,
@@ -926,6 +927,9 @@ function EnvironmentStatus({ appVersion }: { appVersion: string }) {
           detail={appVersion ? `v${appVersion}` : "Checking..."}
         />
       </div>
+
+      <UpdateIndicator />
+      <UpdateSettings />
 
       {showSkillsOnboarding && OnboardingComponent && (
         <OnboardingComponent

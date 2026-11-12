@@ -64,7 +64,7 @@ WebView2's bootstrapper may have its own requirements.
 ## Build
 
 Install Node.js 22 with Corepack, Git, the Visual Studio C++ desktop build tools
-and Windows SDK, and Rust (the checkout pins 1.88.0). WebView2 is required to run.
+and Windows SDK, and Rust (the checkout pins 1.90.0). WebView2 is required to run.
 From PowerShell in the checkout:
 
 ```powershell

@@ -2,6 +2,12 @@
 ; reported as a successful installation. Run as the installing user, not SYSTEM.
 !define PRISM_PREREQUISITES "${__FILEDIR__}\prerequisites.ps1"
 !macro NSIS_HOOK_PREINSTALL
+  ${GetParameters} $R0
+  ClearErrors
+  ${GetOptions} $R0 "/PRISMUPDATE" $R1
+  ${IfNot} ${Errors}
+    IfFileExists "$INSTDIR\codex-prism.exe" prism_update_skip_prerequisites 0
+  ${EndIf}
   InitPluginsDir
   File /oname=$PLUGINSDIR\prerequisites.ps1 "${PRISM_PREREQUISITES}"
   DetailPrint "Checking Codex, LaTeX and PDF tools (downloads may take several minutes)..."
@@ -16,4 +22,5 @@
     SetErrorLevel 1
     Abort
   ${EndIf}
+prism_update_skip_prerequisites:
 !macroend

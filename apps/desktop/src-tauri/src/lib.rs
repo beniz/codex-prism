@@ -1,5 +1,6 @@
 #![recursion_limit = "512"]
 
+mod updates;
 mod backend_host;
 mod codex;
 mod latex;
@@ -431,15 +432,24 @@ async fn read_clipboard_file_paths() -> Result<Vec<String>, String> {
 pub fn run() {
     #[allow(clippy::expect_used)]
     let app = tauri::Builder::default()
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .manage(updates::Updates::default())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_shell::init())
         .setup(|app| {
-            let config = prism_core::BackendConfig {
+            #[allow(unused_mut)]
+            let mut config = prism_core::BackendConfig {
                 data_dir: app.path().app_data_dir()?,
                 home_dir: dirs::home_dir().ok_or("Cannot determine home directory")?,
                 temp_dir: std::env::temp_dir(),
             };
+            #[cfg(feature = "updater-test")]
+            if let Ok(root) = std::env::var("PRISM_TEST_ROOT") {
+                config.data_dir = std::path::PathBuf::from(&root).join("data");
+                config.home_dir = std::path::PathBuf::from(&root).join("home");
+                config.temp_dir = std::path::PathBuf::from(&root).join("tmp");
+            }
             let backend = prism_core::Backend::with_directory_preparer(
                 config,
                 std::sync::Arc::new(backend_host::DesktopEvents::for_app(app.handle().clone())),
@@ -447,6 +457,10 @@ pub fn run() {
             )
             .map_err(std::io::Error::other)?;
             app.manage(backend);
+            #[cfg(feature = "updater-test")]
+            if updates::start_test(app.handle()) {
+                return Ok(());
+            }
             // Safety net: force-show the main window after a timeout if the
             // frontend JS never calls `getCurrentWindow().show()`.
             // This prevents the window from staying permanently hidden when
@@ -466,6 +480,11 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            updates::update_check,
+            updates::update_local_status,
+            updates::update_download,
+            updates::update_install,
+            updates::update_restart_local,
             create_new_window,
             set_native_window_theme,
             allow_project_directory,
