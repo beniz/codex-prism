@@ -65,21 +65,24 @@ it("coalesces zoom renders, rejects obsolete results and releases offscreen canv
       queries[queries.length - 1].dispatchEvent(new Event("change"));
       window.dispatchEvent(new Event(APP_VISIBILITY_RESTORED));
     });
-    expect(client.drawPage).toHaveBeenCalledTimes(1);
-    await act(async () => replies[0]({ width: 100, height: 200 } as ImageData));
+    const latest = replies.length - 1;
+    expect(latest).toBeGreaterThan(0);
+    for (const call of client.drawPage.mock.calls.slice(0, -1)) expect(call[3].signal.aborted).toBe(true);
+    await act(async () => {
+      for (const reply of replies.slice(0, -1)) reply({ width: 100, height: 200 } as ImageData);
+    });
     expect(drawImage).not.toHaveBeenCalled();
-    expect(client.drawPage).toHaveBeenCalledTimes(2);
-    expect(client.drawPage).toHaveBeenLastCalledWith(1, 0, 4 * 72 * 2);
-    await act(async () => replies[1]({ width: 100, height: 200 } as ImageData));
+    expect(client.drawPage).toHaveBeenLastCalledWith(1, 0, 4 * 72 * 2, expect.objectContaining({ signal: expect.any(AbortSignal) }));
+    await act(async () => replies[latest]({ width: 100, height: 200 } as ImageData));
     expect(host.querySelector("canvas")!.width).toBe(100);
     expect(drawImage).toHaveBeenCalledTimes(1);
     await render({ isVisible: false });
     expect(host.querySelector("canvas")!.width).toBe(0);
     expect(host.querySelector("canvas")!.height).toBe(0);
     await render({ isVisible: true });
-    expect(client.drawPage).toHaveBeenCalledTimes(3);
+    expect(client.drawPage).toHaveBeenCalledTimes(latest + 2);
     await render({ isVisible: false });
-    await act(async () => replies[2]({ width: 100, height: 200 } as ImageData));
+    await act(async () => replies[latest + 1]({ width: 100, height: 200 } as ImageData));
     expect(host.querySelector("canvas")!.width).toBe(0);
   } finally {
     await act(async () => root.unmount());
@@ -105,7 +108,7 @@ it.each(["density", "resize", "focus", "restore"])(
     };
     try {
       await act(async () => root.render(<MupdfPage {...props} />));
-      expect(client.drawPage).toHaveBeenLastCalledWith(1, 0, 72);
+      expect(client.drawPage).toHaveBeenLastCalledWith(1, 0, 72, expect.objectContaining({ signal: expect.any(AbortSignal) }));
       await act(async () => {
         vi.stubGlobal("devicePixelRatio", 2);
         if (trigger === "density") queries[queries.length - 1].dispatchEvent(new Event("change"));
@@ -114,14 +117,14 @@ it.each(["density", "resize", "focus", "restore"])(
         ));
       });
       expect(client.drawPage).toHaveBeenCalledTimes(2);
-      expect(client.drawPage).toHaveBeenLastCalledWith(1, 0, 144);
+      expect(client.drawPage).toHaveBeenLastCalledWith(1, 0, 144, expect.objectContaining({ signal: expect.any(AbortSignal) }));
       expect(client.getPageText).toHaveBeenCalledTimes(1);
       expect(client.getPageLinks).toHaveBeenCalledTimes(1);
       await act(async () => {
         vi.stubGlobal("devicePixelRatio", 1.5);
         queries[queries.length - 1].dispatchEvent(new Event("change"));
       });
-      expect(client.drawPage).toHaveBeenLastCalledWith(1, 0, 108);
+      expect(client.drawPage).toHaveBeenLastCalledWith(1, 0, 108, expect.objectContaining({ signal: expect.any(AbortSignal) }));
       const count = client.drawPage.mock.calls.length;
       await act(async () => window.dispatchEvent(new Event("resize")));
       expect(client.drawPage).toHaveBeenCalledTimes(count);
@@ -135,3 +138,19 @@ it.each(["density", "resize", "focus", "restore"])(
     }
   },
 );
+
+it("closes a bitmap completed after unmount without painting it", async () => {
+  (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
+  let finish!: (bitmap: ImageBitmap) => void;
+  const bitmap = { close: vi.fn() } as unknown as ImageBitmap;
+  vi.stubGlobal("createImageBitmap", vi.fn(() => new Promise(resolve => { finish = resolve; })));
+  const drawImage = vi.fn();
+  vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({ drawImage } as any);
+  client.drawPage.mockResolvedValue({ width: 100, height: 200 });
+  const root = createRoot(document.createElement("div"));
+  await act(async () => root.render(<MupdfPage docId={1} pageIndex={0} scale={1} pageWidth={100} pageHeight={200} isVisible />));
+  await act(async () => root.unmount());
+  await act(async () => finish(bitmap));
+  expect(bitmap.close).toHaveBeenCalledTimes(1);
+  expect(drawImage).not.toHaveBeenCalled();
+});

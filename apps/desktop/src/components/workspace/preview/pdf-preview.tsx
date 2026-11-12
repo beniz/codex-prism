@@ -1,4 +1,4 @@
-import { firstChangedPdfPage } from "@/lib/changed-pdf-page";
+import { useFirstChangedPage } from "@/hooks/use-first-changed-page";
 import { useChatPdf, safeChatSource, chatHeadingLocation } from "@/hooks/use-chat-pdf";
 import { ProposalReport } from "../proposal-preview";
 import { usePdfNavigationStore } from "@/stores/pdf-navigation-store";
@@ -114,6 +114,7 @@ export function PdfPreview() {
   const setCompileError = useDocumentStore((s) => s.setCompileError);
   const setIsCompiling = useDocumentStore((s) => s.setIsCompiling);
   const projectRoot = useDocumentStore((s) => s.projectRoot);
+  const projectId = useDocumentStore((s) => s.projectId);
   const files = useDocumentStore((s) => s.files);
   const saveAllFiles = useDocumentStore((s) => s.saveAllFiles);
   const setActiveFile = useDocumentStore((s) => s.setActiveFile);
@@ -166,14 +167,10 @@ export function PdfPreview() {
   const mainFile = files.find((f) => f.id === sourceRootFileId)?.relativePath;
   const chatPdf = useChatPdf(mainFile);
   const artifact = chatPdf.artifact;
-  const changedPage = useMemo(() => artifact
-    ? firstChangedPdfPage(artifact.proposal.changes, artifact.build.locations)
-    : undefined, [artifact]);
-  const shownArtifacts = useRef(new Set<string>());
-  const firstDisplay = artifact && !shownArtifacts.current.has(artifact.build.artifactId);
-  useEffect(() => {
-    if (artifact) shownArtifacts.current.add(artifact.build.artifactId);
-  }, [artifact]);
+  const changePageTarget = useFirstChangedPage(artifact, projectId);
+  const shownChanges = useRef(new Set<string>());
+  const markChangeShown = useCallback((key: string) => { shownChanges.current.add(key); }, []);
+  useEffect(() => { shownChanges.current.clear(); }, [projectId]);
   const artifactRef = useRef(artifact);
   artifactRef.current = artifact;
   const pdfData = artifact?.bytes ?? mainPdfData;
@@ -967,7 +964,8 @@ export function PdfPreview() {
                       ? visual.bytes.current!
                       : getPdfArrayBuffer(data)
                   }
-                  pageOnLoad={isActive && firstDisplay ? changedPage : undefined}
+                  changePageTarget={isActive && changePageTarget && !shownChanges.current.has(changePageTarget.key) ? changePageTarget : undefined}
+                  onChangePageShown={markChangeShown}
                   sourceLocation={isActive ? sourceLocation : null}
                   selectedRegion={
                     isActive && visual.active

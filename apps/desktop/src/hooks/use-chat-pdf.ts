@@ -1,3 +1,4 @@
+import { clearFirstChangedPageCache } from "./use-first-changed-page";
 import { useSettingsStore } from "@/stores/settings-store";
 import { matchSourceLine } from "@/lib/source-line-match";
 import { useEffect, useSyncExternalStore } from "react";
@@ -34,6 +35,7 @@ const artifactKey = (p: Proposal, main: string) => JSON.stringify([p.projectId, 
 const jobKey = (p: Proposal, main: string) => JSON.stringify([p.projectId, p.id, p.generation, main]);
 const eligible = (p: Proposal) => ["ready", "conflicts", "interrupted"].includes(p.state);
 export function clearChatPdfCache() {
+  clearFirstChangedPageCache();
   epoch++;
   artifacts.clear();
   jobs.clear();

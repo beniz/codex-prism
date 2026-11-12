@@ -40,6 +40,10 @@ export function useVisualReview(main?: string, allowed = true) {
   useEffect(() => {
     const abort = new AbortController();
     let opened: number[] = [];
+    let closeDocument: ((id: number) => Promise<void>) | undefined;
+    const closeOpened = () => {
+      for (const id of opened.splice(0)) void closeDocument?.(id).catch(() => {});
+    };
     bytes.current = null;
     docs.current = null;
     setItems([]);
@@ -70,6 +74,7 @@ export function useVisualReview(main?: string, allowed = true) {
         return;
       }
       const client = getMupdfClient();
+      closeDocument = client.closeDocument;
       const started = performance.now();
       const m = await visualBackend.report(project);
       if (abort.signal.aborted) return;
@@ -81,11 +86,11 @@ export function useVisualReview(main?: string, allowed = true) {
       if (abort.signal.aborted) return;
       const before = await client.openDocument(beforeBytes);
       opened.push(before);
+      if (abort.signal.aborted) { closeOpened(); return; }
       const after = await client.openDocument(afterBytes.slice(0));
       opened.push(after);
       if (abort.signal.aborted) {
-        for (const id of opened) void client.closeDocument(id);
-        opened = [];
+        closeOpened();
         return;
       }
       const mappingStarted = performance.now();
@@ -130,6 +135,7 @@ export function useVisualReview(main?: string, allowed = true) {
                     change.path,
                     range,
                   ),
+                  { signal: abort.signal },
                 )
               : [];
           const old = await locate(m.before, before, block.before);
@@ -198,6 +204,7 @@ export function useVisualReview(main?: string, allowed = true) {
       });
     }
     void prepare().catch((e) => {
+      closeOpened();
       if (!abort.signal.aborted)
         setMetadata({ state: "unavailable", error: String(e) });
     });
@@ -205,8 +212,7 @@ export function useVisualReview(main?: string, allowed = true) {
       abort.abort();
       bytes.current = null;
       docs.current = null;
-      for (const id of opened) void getMupdfClient().closeDocument(id);
-      opened = [];
+      closeOpened();
     };
   }, [
     enabled,
