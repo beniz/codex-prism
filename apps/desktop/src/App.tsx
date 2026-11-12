@@ -15,6 +15,13 @@ import { ErrorFallback } from "@/components/error-fallback";
 import { createLogger } from "@/lib/debug/logger";
 import { EnvironmentOnboarding } from "@/components/environment-onboarding";
 
+import {
+  restoreUpdateSession,
+  startUpdateChecks,
+  useUpdateStore,
+} from "@/stores/update-store";
+import { UpdateDialog } from "@/components/app-updates";
+
 const log = createLogger("app");
 
 const LazyDebugPage = lazy(() =>
@@ -108,6 +115,21 @@ export function App({ onReady }: { onReady?: () => void }) {
   const projectRoot = useDocumentStore((s) => s.projectRoot);
   const [showDebug, setShowDebug] = useState(false);
 
+  const updating = useUpdateStore((s) => s.phase === "installing");
+  useEffect(() => {
+    void restoreUpdateSession();
+    return startUpdateChecks();
+  }, []);
+  useEffect(() => {
+    if (!updating) return;
+    const block = (event: KeyboardEvent) => {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+    };
+    window.addEventListener("keydown", block, true);
+    return () => window.removeEventListener("keydown", block, true);
+  }, [updating]);
+
   // Register global keyboard shortcuts (Cmd+S, Cmd+N) at the app level
   useKeyboardShortcuts();
 
@@ -145,44 +167,58 @@ export function App({ onReady }: { onReady?: () => void }) {
       <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
         <TooltipProvider>
           <NativeWindowThemeBridge />
-          {/* Global macOS titlebar drag region — sits above all content */}
-          <div
-            data-tauri-drag-region
-            className="fixed inset-x-0 top-0 z-[9999] h-[var(--titlebar-height)]"
-          />
-          {projectRoot ? <WorkspaceWithAgent /> : <ProjectPicker />}
-          <EnvironmentOnboarding />
-          {showDebug && (
-            <div className="fixed inset-0 z-[9998] flex items-end justify-center">
-              <div
-                className="absolute inset-0 bg-black/20"
-                onClick={() => setShowDebug(false)}
-              />
-              <div className="relative h-[60vh] w-full border-border border-t bg-background shadow-lg">
-                <div className="flex h-8 items-center justify-between border-border border-b bg-muted/50 px-3">
-                  <span className="font-medium text-xs">Debug Panel</span>
-                  <button
-                    className="text-muted-foreground text-xs hover:text-foreground"
-                    onClick={() => setShowDebug(false)}
-                  >
-                    Close (Ctrl+Shift+D)
-                  </button>
-                </div>
-                <div className="h-[calc(60vh-2rem)] overflow-auto">
-                  <Suspense
-                    fallback={
-                      <div className="p-4 text-muted-foreground text-sm">
-                        Loading...
-                      </div>
-                    }
-                  >
-                    <LazyDebugPage />
-                  </Suspense>
-                </div>
-              </div>
+          <UpdateDialog />
+          {updating && (
+            <div
+              className="fixed inset-0 z-[100] cursor-wait bg-background/60"
+              role="status"
+              aria-live="polite"
+            >
+              <p className="m-8 rounded bg-background p-4">
+                Saving and updating codex-prism…
+              </p>
             </div>
           )}
-          <Toaster />
+          <div className="contents" inert={updating}>
+            {/* Global macOS titlebar drag region — sits above all content */}
+            <div
+              data-tauri-drag-region
+              className="fixed inset-x-0 top-0 z-[9999] h-[var(--titlebar-height)]"
+            />
+            {projectRoot ? <WorkspaceWithAgent /> : <ProjectPicker />}
+            <EnvironmentOnboarding />
+            {showDebug && (
+              <div className="fixed inset-0 z-[9998] flex items-end justify-center">
+                <div
+                  className="absolute inset-0 bg-black/20"
+                  onClick={() => setShowDebug(false)}
+                />
+                <div className="relative h-[60vh] w-full border-border border-t bg-background shadow-lg">
+                  <div className="flex h-8 items-center justify-between border-border border-b bg-muted/50 px-3">
+                    <span className="font-medium text-xs">Debug Panel</span>
+                    <button
+                      className="text-muted-foreground text-xs hover:text-foreground"
+                      onClick={() => setShowDebug(false)}
+                    >
+                      Close (Ctrl+Shift+D)
+                    </button>
+                  </div>
+                  <div className="h-[calc(60vh-2rem)] overflow-auto">
+                    <Suspense
+                      fallback={
+                        <div className="p-4 text-muted-foreground text-sm">
+                          Loading...
+                        </div>
+                      }
+                    >
+                      <LazyDebugPage />
+                    </Suspense>
+                  </div>
+                </div>
+              </div>
+            )}
+            <Toaster />
+          </div>
         </TooltipProvider>
       </ThemeProvider>
     </ErrorBoundary>

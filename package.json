@@ -21,7 +21,7 @@
     "release:prepare": "node scripts/release.mjs prepare",
     "release:check": "node scripts/release.mjs check",
     "release:build": "node scripts/release.mjs build",
-    "test:release": "node --test scripts/release.test.mjs scripts/github-release.test.mjs"
+    "test:release": "node --test scripts/release.test.mjs scripts/github-release.test.mjs scripts/tauri-cli.test.mjs"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.3.13",

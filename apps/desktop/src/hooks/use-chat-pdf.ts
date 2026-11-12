@@ -27,6 +27,8 @@ const subscribe = (listener: () => void) => {
 };
 const snapshot = () => revision;
 function notify() { revision++; listeners.forEach((listener) => listener()); }
+export function useChatPdfBusy() { useBuildRevision(); return hasChatPdfWork(); }
+export function hasChatPdfWork() { return [...jobs.values()].some(job => job.busy); }
 function useBuildRevision() { return useSyncExternalStore(subscribe, snapshot); }
 const artifactKey = (p: Proposal, main: string) => JSON.stringify([p.projectId, p.id, main]);
 const jobKey = (p: Proposal, main: string) => JSON.stringify([p.projectId, p.id, p.generation, main]);
