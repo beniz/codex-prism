@@ -1,5 +1,5 @@
 import { sourcePromptText, sourceRequest } from "@/lib/source-completion";
-import { readChatTabs, writeChatTabs } from "@/lib/chat-tabs";
+import { readChatTabs, writeChatTabs, type SavedChatTabs } from "@/lib/chat-tabs";
 import { toast } from "sonner";
 import { coalescedRefresh } from "@/lib/coalesced-refresh";
 import { create } from "zustand";
@@ -895,19 +895,74 @@ export function activeProposal(
   );
 }
 
-// Persist tab identity, drafts and project model preferences; Codex remains the source of message history.
-export function persistChatTabs() {
-  const state = useAgentChatStore.getState();
-  if (!state.activeProjectPath || !state.projectId || state.restoringChats) return;
-  writeChatTabs(state.activeProjectPath, {
+// Drafts remain synchronous in memory. Defer only browser storage: writing it in
+// an input handler blocks text painting, and streaming messages need no save.
+let queuedTabs: { root: string; saved: SavedChatTabs } | null = null;
+let draftSaveTimer: ReturnType<typeof setTimeout> | undefined;
+let draftMaxWaitTimer: ReturnType<typeof setTimeout> | undefined;
+const savedDraft = (t: TabState) => t.draft || t.submittedDraft || "";
+function chatTabsSnapshot(state: ChatState) {
+  if (!state.activeProjectPath || !state.projectId || state.restoringChats) return null;
+  return {
+    root: state.activeProjectPath,
+    saved: {
       activeTabId: state.activeTabId,
       selectedModel: state.selectedModel,
       effortLevel: state.effortLevel,
-      tabs: state.tabs.map(({ id, title, sessionId, draft, submittedDraft, mode }) => ({
-        id, title, sessionId, draft: draft || submittedDraft || "", mode,
+      tabs: state.tabs.map(t => ({
+        id: t.id, title: t.title, sessionId: t.sessionId, draft: savedDraft(t), mode: t.mode,
       })),
-    });
+    },
+  };
 }
-useAgentChatStore.subscribe(() => {
-  try { persistChatTabs(); } catch { /* Automatic persistence may fail; explicit update saves must report it. */ }
+function clearDraftSaveTimers() {
+  clearTimeout(draftSaveTimer);
+  clearTimeout(draftMaxWaitTimer);
+  draftSaveTimer = draftMaxWaitTimer = undefined;
+}
+function flushQueuedChatTabs() {
+  clearDraftSaveTimers();
+  const queued = queuedTabs;
+  queuedTabs = null;
+  if (queued) writeChatTabs(queued.root, queued.saved);
+}
+function tryFlushQueuedChatTabs() {
+  try { flushQueuedChatTabs(); } catch { /* Explicit saves report storage failures. */ }
+}
+// Called before installing an update as well as by normal identity/preferences saves.
+export function persistChatTabs() {
+  clearDraftSaveTimers();
+  queuedTabs = chatTabsSnapshot(useAgentChatStore.getState()) ?? queuedTabs;
+  flushQueuedChatTabs();
+}
+useAgentChatStore.subscribe((state, previous) => {
+  const ownerChanged = state.activeProjectPath !== previous.activeProjectPath || state.projectId !== previous.projectId;
+  // A pending draft belongs to its old project even after navigation.
+  if (ownerChanged) tryFlushQueuedChatTabs();
+  const metadataChanged = ownerChanged || state.restoringChats !== previous.restoringChats ||
+    state.activeTabId !== previous.activeTabId || state.selectedModel !== previous.selectedModel ||
+    state.effortLevel !== previous.effortLevel || state.tabs.length !== previous.tabs.length ||
+    state.tabs.some((t, i) => {
+      const old = previous.tabs[i];
+      return t.id !== old.id || t.title !== old.title || t.sessionId !== old.sessionId || t.mode !== old.mode || t.submittedDraft !== old.submittedDraft;
+    });
+  if (metadataChanged) {
+    try { persistChatTabs(); } catch { /* Automatic persistence is best effort. */ }
+    return;
+  }
+  if (state.tabs === previous.tabs || !state.tabs.some((t, i) => savedDraft(t) !== savedDraft(previous.tabs[i]))) return;
+  const snapshot = chatTabsSnapshot(state);
+  if (!snapshot) return;
+  queuedTabs = snapshot;
+  clearTimeout(draftSaveTimer);
+  draftSaveTimer = setTimeout(tryFlushQueuedChatTabs, 250);
+  // Keep autosaving during continuous typing, without doing work on every key.
+  draftMaxWaitTimer ??= setTimeout(tryFlushQueuedChatTabs, 1000);
 });
+if (typeof window !== "undefined") {
+  window.addEventListener("pagehide", tryFlushQueuedChatTabs);
+  window.addEventListener("beforeunload", tryFlushQueuedChatTabs);
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "hidden") tryFlushQueuedChatTabs();
+  });
+}

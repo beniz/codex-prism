@@ -8,15 +8,15 @@ import { useAgentChatStore } from "@/stores/agent-chat-store";
 import { proposals, type Proposal } from "@/lib/backend";
 
 export function PendingChatWork() {
-  const state = useAgentChatStore();
-  if (!state.proposals.length) return null;
+  const pending = useAgentChatStore(s => s.proposals);
+  if (!pending.length) return null;
   return (
     <div className="flex flex-wrap items-center gap-3 border-b px-3 py-2 text-xs">
       <span>
-        {state.proposals.filter((p) => p.state !== "original").length}{" "}
+        {pending.filter((p) => p.state !== "original").length}{" "}
         unresolved proposals
       </span>
-      {state.proposals
+      {pending
         .filter((p) => !p.threadId && p.chatId)
         .map((orphan) => (
           <button
@@ -25,7 +25,7 @@ export function PendingChatWork() {
             className="underline"
             onClick={() => {
               const id = orphan.chatId!;
-              if (!state.tabs.some((t) => t.id === id))
+              if (!useAgentChatStore.getState().tabs.some((t) => t.id === id))
                 useAgentChatStore.setState((s) => ({
                   tabs: [
                     ...s.tabs,

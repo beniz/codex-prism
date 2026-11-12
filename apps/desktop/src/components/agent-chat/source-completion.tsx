@@ -54,7 +54,7 @@ export function SourceCompletion({ projectId, chatId, draft, input, change }: { 
   useEffect(() => {
     const field = input.current;
     const token = field && field.selectionStart === field.selectionEnd ? mentionAt(draft, field.selectionStart) : null;
-    if (!projectId || !token || composing.current || dismissed.current === draft || document.activeElement !== field) { setVisible(false); return; }
+    if (!projectId || !token || composing.current || dismissed.current === draft || document.activeElement !== field) { if (latest.current.visible) setVisible(false); return; }
     let alive = true;
     setVisible(true); setChoices([]); setIndex(0); setMessage("Loading sources…");
     const timer = setTimeout(() => { void (async () => {

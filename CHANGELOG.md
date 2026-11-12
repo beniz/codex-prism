@@ -5,6 +5,8 @@ and detailed release notes are in [docs/releases](docs/releases/README.md).
 
 ## Unreleased
 
+- Reduce chat typing latency by avoiding unrelated PDF and review redraws and batching draft autosaves, while retaining immediate text updates and flushing drafts on navigation or close.
+
 - Highlight Plan mode and show agent questions in the chat composer, with explicit selected-answer colours, a separate submit action, and selections preserved when switching chats.
 
 - Fix PDF-to-LaTeX navigation for included files and cached PDFs. Remove ambiguous word-based jumps and verify source lines against the displayed build.

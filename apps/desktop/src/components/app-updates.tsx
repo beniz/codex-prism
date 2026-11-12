@@ -65,7 +65,7 @@ export function UpdateSettings() {
 export function UpdateDialog() {
   const state = useUpdateStore();
   // Subscribe to readiness changes while the panel is open; native gate rechecks all projects.
-  useAgentChatStore((s) => s.tabs);
+  useAgentChatStore((s) => s.tabs.some(t => t.isStreaming));
   useAgentChatStore((s) => s.proposals);
   useDocumentStore((s) => s.isCompiling);
   useDocumentStore((s) => s.isSaving);
