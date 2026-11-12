@@ -5,6 +5,8 @@ and detailed release notes are in [docs/releases](docs/releases/README.md).
 
 ## Unreleased
 
+- Stage project opening: display source and existing PDFs early, restore the active chat first, report loading phases, and recover from opening errors with Retry.
+
 - Show the workspace immediately while opening projects, load TeX sources with bounded concurrency, defer ancillary files and images, and avoid duplicate history loading.
 
 - Persist project PDF thumbnails across restarts and reuse the renderer while browsing projects. Cached cards appear before background PDF checks.

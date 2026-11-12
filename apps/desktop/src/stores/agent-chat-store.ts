@@ -34,6 +34,7 @@ export interface ChatItem {
   activity?: Record<string, any>;
 }
 export interface TabState {
+  restoring?: boolean;
   mode?: "plan" | "default";
   id: string;
   title: string;
@@ -278,36 +279,42 @@ export const useAgentChatStore = create<ChatState>((set, get) => ({
           id: crypto.randomUUID(), title: sessions[0].title,
           sessionId: sessions[0].id, draft: "",
         }] : []);
-        const restored = await Promise.all(candidates
-          .filter((t) => !t.sessionId || sessions.some((s) => s.id === t.sessionId))
-          .map(async (savedTab): Promise<TabState> => {
-            const t = { ...tab(), ...savedTab, projectPath: root };
-            if (t.sessionId) {
-              try {
-                const result = await backend.agent.thread(p.id, t.sessionId, "read");
-                t.messages = (result.thread?.turns ?? []).flatMap((turn: any) =>
-                  (turn.items ?? []).map((item: any) => { const mapped = toItem(item); return mapped.type === "proposedPlan" ? { ...mapped, status: turn.status } : mapped; }));
-              } catch (e) {
-                t.error = `Could not restore conversation: ${String(e)}`;
-              }
-            }
-            return t;
-          }));
         if (generation !== projectGeneration) return;
+        const restored = candidates
+          .filter(t => !t.sessionId || sessions.some(s => s.id === t.sessionId))
+          .map(savedTab => ({ ...tab(), ...savedTab, projectPath: root, restoring: !!savedTab.sessionId }));
         const tabs = restored.length ? restored : [t];
-        const active = tabs.find((t) => t.id === saved?.activeTabId) ?? tabs[0];
-        set({ tabs, activeTabId: active.id, projectId: p.id,
-          error: active.error });
+        const active = tabs.find(t => t.id === saved?.activeTabId) ?? tabs[0];
+        set({ tabs, activeTabId: active.id, projectId: p.id });
+        // Recover ownership before enabling any new editing or agent work.
         await get().refreshReview();
         if (generation !== projectGeneration) return;
-        set((s) => {
-          const tabs = s.tabs.map((t) => {
-            const pending = s.proposals.find((p) =>
-              p.threadId === t.sessionId && ["running", "repairing"].includes(p.state));
-            return pending ? { ...t, isStreaming: true, turnId: pending.turnId ?? null } : t;
-          });
-          return { tabs, restoringChats: false, isStreaming: !!tabs.find((t) => t.id === s.activeTabId)?.isStreaming };
-        });
+        set(s => ({ tabs: s.tabs.map(t => {
+          const pending = s.proposals.find(p => p.threadId === t.sessionId && ["running", "repairing"].includes(p.state));
+          return pending ? { ...t, isStreaming: true, turnId: pending.turnId ?? null } : t;
+        }) }));
+        const restore = async (target: TabState) => {
+          if (generation !== projectGeneration || !get().tabs.some(t => t.id === target.id)) return;
+          let messages: ChatItem[] = [], error: string | null = null;
+          if (target.sessionId) try {
+            const result = await backend.agent.thread(p.id, target.sessionId, "read");
+            messages = (result.thread?.turns ?? []).flatMap((turn: any) =>
+              (turn.items ?? []).map((item: any) => { const mapped = toItem(item); return mapped.type === "proposedPlan" ? { ...mapped, status: turn.status } : mapped; }));
+          } catch (e) { error = `Could not restore conversation: ${String(e)}`; }
+          if (generation !== projectGeneration) return;
+          set(s => ({ error: s.activeTabId === target.id ? error : s.error,
+            tabs: s.tabs.map(t => t.id === target.id
+            ? { ...t, messages: [...new Map([...messages, ...t.messages].map(item => [item.id, item])).values()], error, restoring: false } : t) }));
+        };
+        await restore(active);
+        if (generation !== projectGeneration) return;
+        set(s => ({ restoringChats: false, isStreaming: !!s.tabs.find(t => t.id === s.activeTabId)?.isStreaming }));
+        const remaining = tabs.filter(t => t.id !== active.id);
+        while (remaining.length && generation === projectGeneration) {
+          // A newly selected tab moves ahead of other queued transcripts.
+          remaining.sort((a, b) => Number(b.id === get().activeTabId) - Number(a.id === get().activeTabId));
+          await Promise.all(remaining.splice(0, 2).map(restore));
+        }
       } catch (e) {
         if (generation === projectGeneration)
           set({ restoringChats: false, error: `Could not restore chats: ${String(e)}` });
@@ -467,7 +474,7 @@ export const useAgentChatStore = create<ChatState>((set, get) => ({
   sendPrompt: async (prompt, context) => {
     const state = get();
     const t = state.tabs.find((t) => t.id === state.activeTabId);
-    if (state.restoringChats || !t || submissions.has(t.id)) return;
+    if (state.restoringChats || !t || t.restoring || submissions.has(t.id)) return;
     const generation = projectGeneration;
     const activity = beginActivity({ projectPath: state.activeProjectPath, chatId: t.id }, "preparing");
     const clearedDraft = t.draft === prompt && prompt.length > 0;

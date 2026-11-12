@@ -1,3 +1,4 @@
+import { beginActivity } from "./activity-store";
 import { toast } from "sonner";
 import { create } from "zustand";
 import { invoke, listen, backend } from "@/lib/backend";
@@ -121,6 +122,7 @@ export const useHistoryStore = create<HistoryState>()((set, get) => ({
     if (get().projectRoot !== root) return;
     const current = generation;
     const ticket = ++request;
+    const activity = beginActivity({ projectPath: root }, "history", { group: "build" });
     set({ isLoading: true });
     try {
       const [snapshots, status] = await Promise.all([
@@ -148,6 +150,7 @@ export const useHistoryStore = create<HistoryState>()((set, get) => ({
       if (current === generation && ticket === request)
         set({ error: String(e) });
     } finally {
+      activity.finish();
       if (current === generation && ticket === request)
         set({ isLoading: false });
     }

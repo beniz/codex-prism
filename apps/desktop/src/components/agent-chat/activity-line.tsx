@@ -31,7 +31,7 @@ export const ActivityLine = memo(function ActivityLine({
         activeId: s.activeTabId,
         error: tab?.error || s.error,
         streaming: !!tab?.isStreaming,
-        restoring: s.restoringChats,
+        restoring: s.restoringChats || !!tab?.restoring,
         legacy: !s.review.active && s.review.changes.length > 0,
         waiting: requests.some((r) => r.method === "item/tool/requestUserInput")
           ? "answer"
@@ -48,7 +48,7 @@ export const ActivityLine = memo(function ActivityLine({
   );
   const operations = useActivityStore((s) => s.operations);
   const setup = useAgentSetupStore((s) => s.status);
-  const opening = useDocumentStore((s) => !!s.projectRoot && !s.initialized);
+  const opening = useDocumentStore((s) => s.openingPhase);
   const compiling = useDocumentStore((s) => s.isCompiling);
   const saving = useDocumentStore((s) => s.isSaving);
   const compileError = useDocumentStore((s) => s.compileError);
@@ -101,7 +101,7 @@ export const ActivityLine = memo(function ActivityLine({
         : "Waiting for approval";
     tone = "waiting";
   } else if (opening) {
-    text = "Opening project — reading document files…";
+    text = opening === "registering" ? "Opening project…" : opening === "scanning" ? "Discovering project files…" : "Reading document sources…";
     tone = "busy";
   } else if (
     operation &&
@@ -156,6 +156,12 @@ export const ActivityLine = memo(function ActivityLine({
   }
   if (otherChats.size)
     text += ` · ${otherChats.size} other ${otherChats.size === 1 ? "chat active" : "chats active"}`;
+  if (!detail && tone === "busy") {
+    const pending = [...new Set(current.map(o => activityLabels[o.kind]))];
+    if (chat.restoring) pending.push("Restoring conversations…");
+    if (compiling) pending.push("Preparing PDF…");
+    detail = [text, ...pending.filter(label => label !== text)].join("\n");
+  }
   const Icon =
     tone === "busy"
       ? Loader2Icon

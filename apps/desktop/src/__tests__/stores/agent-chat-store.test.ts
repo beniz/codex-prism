@@ -662,6 +662,22 @@ describe("project chat restoration", () => {
     expect(restored.tabs.every((t) => !t.isStreaming && t.turnId === null)).toBe(true);
     expect(backend.agent.send).not.toHaveBeenCalled();
   });
+  it("makes the active conversation usable while background history is delayed", async () => {
+    writeChatTabs("/priority", { activeTabId: "active", tabs: [
+      { id: "background", sessionId: "thread1", title: "Background", draft: "" },
+      { id: "active", sessionId: "thread2", title: "Active", draft: "" },
+    ] });
+    let finish!: (value: any) => void;
+    vi.mocked(backend.agent.thread).mockImplementation(async (_p, id) =>
+      id === "thread1" ? await new Promise(resolve => { finish = resolve; })
+        : { thread: { turns: [] } });
+    useAgentChatStore.getState().resetForProject("/priority");
+    await waitForRestore();
+    expect(vi.mocked(backend.agent.thread).mock.calls[0][1]).toBe("thread2");
+    expect(useAgentChatStore.getState().tabs.find(t => t.id === "background")?.restoring).toBe(true);
+    finish({ thread: { turns: [] } });
+    await vi.waitFor(() => expect(useAgentChatStore.getState().tabs.every(t => !t.restoring)).toBe(true));
+  });
   it("opens the newest saved conversation for projects without tab metadata", async () => {
     useAgentChatStore.getState().resetForProject("/older-project");
     await waitForRestore();

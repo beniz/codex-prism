@@ -71,7 +71,7 @@ export function AgentChatDrawer({
     createTab: useAgentChatStore((state) => state.createTab),
     effortLevel: useAgentChatStore((state) => state.effortLevel),
     error: useAgentChatStore((state) => state.error),
-    restoringChats: useAgentChatStore((state) => state.restoringChats),
+    restoringChats: useAgentChatStore((state) => state.restoringChats || !!state.tabs.find(t => t.id === state.activeTabId)?.restoring),
     isStreaming: useAgentChatStore((state) => state.isStreaming),
     locked: useAgentChatStore((state) => state.locked),
     pendingAttachments: useAgentChatStore(

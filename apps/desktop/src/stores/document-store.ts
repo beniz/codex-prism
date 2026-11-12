@@ -1,4 +1,4 @@
-import { resolveTexRoot } from "@/lib/latex-project";
+import { resolveTexRoot, stripTexComments } from "@/lib/latex-project";
 export { resolveTexRoot } from "@/lib/latex-project";
 import { clearChatPdfCache } from "@/hooks/use-chat-pdf";
 import { toast } from "sonner";
@@ -94,6 +94,10 @@ interface DocumentState {
   pendingRecompile: boolean;
   isSaving: boolean;
   initialized: boolean;
+  openingPhase: "registering" | "scanning" | "sources" | null;
+  previewReady: boolean;
+  openingError: string | null;
+  openingGeneration: number;
   /** Incremented on every file content change; used to skip no-op recompiles. */
   contentGeneration: number;
   /** Per-root-file cache: rootFileId → compile error message. */
@@ -283,103 +287,83 @@ export const useDocumentStore = create<DocumentState>()((set, get) => ({
   pendingRecompile: false,
   isSaving: false,
   initialized: false,
+  openingPhase: null,
+  previewReady: false,
+  openingError: null,
+  openingGeneration: 0,
   contentGeneration: 0,
   compileErrorCache: new Map(),
   lastCompiledGenerations: new Map(),
 
   openProject: async (rootPath: string, preferredMainFile?: string) => {
-    log.info(`Opening project: ${rootPath}`);
+    const started = performance.now();
     const generation = ++openingGeneration;
     const current = () => generation === openingGeneration;
+    const mark = (stage: string) => log.info("Project opening", { stage, elapsedMs: Math.round(performance.now() - started) });
     clearPdfBytesCache();
-    set({ projectRoot: rootPath, projectId: null, files: [], folders: [],
-      activeFileId: "", initialized: false, compileError: null });
+    set({ openingGeneration: generation, projectRoot: rootPath, projectId: null, files: [], folders: [],
+      activeFileId: "", initialized: false, openingError: null, openingPhase: "registering", previewReady: false,
+      compileError: null, isCompiling: false, pendingRecompile: false,
+      pdfRevision: 0, compileErrorCache: new Map(), lastCompiledGenerations: new Map(),
+      cursorPosition: 0, selectionRange: null });
+    mark("workspace");
     try {
-    const project = await backend.projects.register(rootPath);
-    if (!current()) return;
-    set({ projectId: project.id });
-    await invoke("allow_project_directory", { rootPath });
-    const { files: fsFiles, folders: fsFolders } =
-      await scanProjectFolder(rootPath);
-    if (!current()) return;
-    const projectFiles: ProjectFile[] = [];
-    // Bound native reads; prioritize TeX sources before ancillary files.
-    const ordered = [...fsFiles].sort((a, b) => Number(b.type === "tex") - Number(a.type === "tex"));
-    let next = 0;
-    await Promise.all(Array.from({ length: Math.min(4, ordered.length) }, async () => {
-      while (next < ordered.length && current()) {
-      const f = ordered[next++];
-      const pf: ProjectFile = {
-        id: f.relativePath,
-        name: f.relativePath.split(/[/\\]/).pop() || f.relativePath,
-        relativePath: f.relativePath,
-        ref: f.ref,
-        type: f.type,
-        isDirty: false,
-        fileSize: f.fileSize,
-        diskToken: f.diskToken,
-      };
-
-      // Load content for text-based files (skip large non-essential files)
-      if (
-        f.type === "tex"
-      ) {
-        const isLargeNonEssential = false;
-        if (!isLargeNonEssential) {
-          try {
-            pf.content = await readTexFileContent(f.ref);
-          } catch {
-            pf.content = "";
-            pf.diskToken = undefined;
-          }
+      const project = await backend.projects.register(rootPath);
+      if (!current()) return;
+      set({ projectId: project.id, openingPhase: "scanning" });
+      await invoke("allow_project_directory", { rootPath });
+      if (!current()) return;
+      const { files: scanned, folders } = await scanProjectFolder(rootPath);
+      if (!current()) return;
+      const files: ProjectFile[] = scanned.map(f => ({
+        id: f.relativePath, name: f.relativePath.split(/[/\\]/).pop() || f.relativePath,
+        relativePath: f.relativePath, ref: f.ref, type: f.type, isDirty: false,
+        fileSize: f.fileSize, diskToken: f.diskToken,
+      }));
+      const main = files.find(f => f.relativePath === preferredMainFile && f.type === "tex")
+        ?? files.find(f => f.name === "main.tex" || f.name === "document.tex")
+        ?? files.find(f => f.type === "tex");
+      set({ files, folders, activeFileId: main?.id ?? files[0]?.id ?? "", openingPhase: "sources" });
+      mark("metadata");
+      const read = async (file: ProjectFile) => {
+        if (!current()) return;
+        try {
+          const content = await readTexFileContent(file.ref);
+          return { ...file, content };
+        } catch (error) {
+          log.warn("Could not load source", { path: file.relativePath, error: String(error) });
+          return file; // Unreadable is not an empty source; allow a later retry.
         }
-        // Large "other" files: content stays undefined, loaded on-demand via loadFileContent
+      };
+      const publish = (loaded: (ProjectFile | undefined)[]) => {
+        if (!current()) return;
+        const updates = new Map(loaded.filter((f): f is ProjectFile => !!f).map(f => [f.id, f]));
+        set(state => ({ files: state.files.map(f =>
+          !f.isDirty && f.content === undefined ? (updates.get(f.id) ?? f) : f) }));
+      };
+      if (main) {
+        publish([await read(main)]);
+        if (!current()) return;
+        // A standalone source has an unambiguous root; fragments wait for discovery.
+        const source = get().files.find(f => f.id === main.id);
+        if (source?.content && /\\documentclass[\s{[]/.test(stripTexComments(source.content)) &&
+            resolveTexRoot(main.id, get().files) === main.id) set({ previewReady: true });
+        mark("active source");
+        await new Promise(resolve => setTimeout(resolve, 0));
       }
-
-      // PDF files are loaded on-demand via readFile in InlinePdfContent
-
-      projectFiles.push(pf);
+      const remaining = files.filter(f => f.type === "tex" && f.id !== main?.id);
+      for (let i = 0; i < remaining.length && current(); i += 4) {
+        publish(await Promise.all(remaining.slice(i, i + 4).map(read)));
+        await new Promise(resolve => setTimeout(resolve, 0));
       }
-    }));
-    if (!current()) return;
-    const fileOrder = new Map(fsFiles.map((f, i) => [f.relativePath, i]));
-    projectFiles.sort((a, b) => fileOrder.get(a.id)! - fileOrder.get(b.id)!);
-
-    // Find the main tex file
-    const mainTex =
-      projectFiles.find(
-        (f) => f.relativePath === preferredMainFile && f.type === "tex",
-      ) ||
-      projectFiles.find(
-        (f) => f.name === "main.tex" || f.name === "document.tex",
-      ) ||
-      projectFiles.find((f) => f.type === "tex");
-
-    clearPdfBytesCache();
-    set({
-      projectRoot: rootPath,
-      files: projectFiles,
-      folders: fsFolders,
-      activeFileId: mainTex?.id || projectFiles[0]?.id || "",
-      pdfRevision: 0,
-      compileError: null,
-      compileErrorCache: new Map(),
-      lastCompiledGenerations: new Map(),
-      initialized: true,
-      cursorPosition: 0,
-      selectionRange: null,
-    });
-
-    // Initialize history system early so snapshots work before the panel is opened
-    const historyStore = useHistoryStore.getState();
-    historyStore
-      .init(rootPath)
-
-      .catch((err) => {
-        log.error("Failed to initialize history", { error: String(err) });
-      });
+      if (!current()) return;
+      set({ initialized: true, openingPhase: null, previewReady: true });
+      mark("sources ready");
+      void useHistoryStore.getState().init(rootPath).catch(error =>
+        log.error("Failed to initialize history", { error: String(error) }));
     } catch (error) {
-      if (current()) set({ projectRoot: null, projectId: null, files: [], folders: [], initialized: false });
+      if (current()) set({ openingError: String(error),
+        initialized: false, openingPhase: null, previewReady: false });
       throw error;
     }
   },
@@ -444,6 +428,7 @@ export const useDocumentStore = create<DocumentState>()((set, get) => ({
 
   closeProject: () => {
     openingGeneration++;
+    set({ openingGeneration, openingPhase: null, previewReady: false, openingError: null });
     log.info("Closing project");
     if (autoSaveTimer) {
       clearTimeout(autoSaveTimer);
@@ -1192,6 +1177,7 @@ export const useDocumentStore = create<DocumentState>()((set, get) => ({
   setContent: (content) => {
     if (!get().initialized || useAgentChatStore.getState().locked) return;
     const state = get();
+    if (state.files.find(f => f.id === state.activeFileId)?.content === undefined) return;
     set({
       files: state.files.map((f) =>
         f.id === state.activeFileId ? { ...f, content, isDirty: true } : f,

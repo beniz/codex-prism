@@ -20,6 +20,7 @@ export const activityLabels = {
   updatingPdf: "Updating PDF…",
   preparingPdf: "Preparing PDF…",
   restoring: "Restoring conversations…",
+  history: "Loading history…",
 } as const;
 export type ActivityKind = keyof typeof activityLabels;
 export interface ActivityOwner {
