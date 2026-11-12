@@ -26,8 +26,10 @@ export function DataSources({ projectId }: { projectId: string }) {
   }, [projectId]);
   return <section className="border-t border-sidebar-border text-xs" aria-label="Data sources">
     <div className="relative flex h-8 shrink-0 items-center justify-center gap-2 px-9">
-      <DatabaseIcon className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
-      <span className="truncate font-medium text-xs">Data sources</span>
+      <button type="button" className="flex h-full min-w-0 items-center justify-center gap-2 rounded-md px-2 hover:bg-sidebar-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => openSourceSettings(projectId)} title="Project settings" aria-label="Open project settings for data sources">
+        <DatabaseIcon className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+        <span className="truncate font-medium text-xs">Data sources</span>
+      </button>
       <button className="absolute right-1 rounded-md p-1.5 text-muted-foreground hover:bg-sidebar-accent hover:text-foreground" aria-label="Refresh data sources" title="Refresh data sources" onClick={() => window.dispatchEvent(new Event("prism-sources-changed"))}>
         <RefreshCwIcon className="size-3.5" aria-hidden="true" />
       </button>
