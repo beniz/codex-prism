@@ -86,29 +86,29 @@ async function ensureBuild(p: Proposal, main: string, force = false, foreground 
 
 /** Mounted at workspace level: closing the PDF pane or selecting another tab does not stop builds. */
 export function useChatPdfBuilds(main: string | undefined) {
-  const chat = useAgentChatStore();
+  const pending = useAgentChatStore(s => s.proposals);
   const project = useDocumentStore((s) => s.projectId);
   useEffect(() => {
     for (const [key, artifact] of artifacts) {
-      if (artifact.proposal.projectId !== project || !chat.proposals.some((p) =>
+      if (artifact.proposal.projectId !== project || !pending.some((p) =>
         p.id === artifact.proposal.id || p.parent === artifact.proposal.id)) artifacts.delete(key);
     }
     for (const key of jobs.keys()) {
       const [owner, id, generation] = JSON.parse(key) as [string, string, number];
-      if (owner !== project || !chat.proposals.some((p) => p.id === id && p.generation === generation)) jobs.delete(key);
+      if (owner !== project || !pending.some((p) => p.id === id && p.generation === generation)) jobs.delete(key);
     }
     if (!main) return;
-    for (const p of chat.proposals) {
+    for (const p of pending) {
       if (p.projectId === project && eligible(p) && p.changes.length > 0) void ensureBuild(p, main);
     }
-  }, [project, main, chat.proposals]);
+  }, [project, main, pending]);
 }
 
 /** Selects one chat's PDF without owning background compilation. */
 export function useChatPdf(main: string | undefined) {
-  const chat = useAgentChatStore();
+  const proposal = useAgentChatStore(activeProposal);
+  const title = useAgentChatStore(s => s.tabs.find(t => t.id === s.activeTabId)?.title ?? "Chat");
   const project = useDocumentStore((s) => s.projectId);
-  const proposal = activeProposal(chat);
   const p = proposal?.projectId === project ? proposal : undefined;
   const version = useBuildRevision();
   const key = p && main ? artifactKey(p, main) : undefined;
@@ -124,7 +124,7 @@ export function useChatPdf(main: string | undefined) {
   const artifact = (key ? artifacts.get(key) : undefined) ??
     (p?.parent && main ? artifacts.get(artifactKey({ ...p, id: p.parent }, main)) : undefined);
   const current = !!artifact && artifact.proposal.id === p?.id && artifact.proposal.generation === p?.generation;
-  const label = artifact ? (chat.tabs.find((t) => t.id === chat.activeTabId)?.title ?? "Chat") : "Main document";
+  const label = artifact ? title : "Main document";
   return {
     proposal: p, artifact, current, label, key,
     compile: () => p && main && eligible(p) ? ensureBuild(p, main, true, true) : Promise.resolve(),

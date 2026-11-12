@@ -31,7 +31,7 @@ vi.mock("@/stores/document-store", () => ({
   }),
 }));
 vi.mock("@/stores/agent-chat-store", () => ({
-  useAgentChatStore: Object.assign(() => chatState, {
+  useAgentChatStore: Object.assign((selector: any) => selector(chatState), {
     getState: () => chatState,
   }),
   activeProposal: () =>
