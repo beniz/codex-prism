@@ -5,6 +5,7 @@ and detailed release notes are in [docs/releases](docs/releases/README.md).
 
 ## Unreleased
 
+- Give review instructions a wider dialog and a multiline field that grows with the text.
 - Add a unified GitHub/Gitea connection flow, API-based contributor identity, optional native credential storage, and independent HTTPS/SSH Git transport.
 - Synchronize connected repository-root projects after explicit Save or Keep, with offline/error status, isolated merges, and agent proposals for conflict resolution. Autosave remains local.
 - Add on-demand manuscript reviews on local branches/worktrees, with saved findings, proposed edits, ordinary diff/PDF review, and Keep acceptance. Review branches remain local.

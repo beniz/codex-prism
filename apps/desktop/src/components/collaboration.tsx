@@ -2,6 +2,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Dialog,
   DialogContent,
@@ -460,7 +461,14 @@ export function ConnectSharedProject({
   );
 }
 
+function resizeReviewInstructions(input: HTMLTextAreaElement | null) {
+  if (!input) return;
+  input.style.height = "auto";
+  input.style.height = `${input.scrollHeight + input.offsetHeight - input.clientHeight}px`;
+}
+
 export function CollaborationPanel({ projectId }: { projectId: string }) {
+  const reviewInstructionsId = useId();
   const [status, setStatus] = useState<CollaborationStatus>({
     connected: false,
   });
@@ -738,7 +746,7 @@ export function CollaborationPanel({ projectId }: { projectId: string }) {
         </DialogContent>
       </Dialog>
       <Dialog open={reviewOpen} onOpenChange={setReviewOpen}>
-        <DialogContent>
+        <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-2xl">
           <DialogHeader>
             <DialogTitle>Request review</DialogTitle>
             <DialogDescription>
@@ -746,10 +754,20 @@ export function CollaborationPanel({ projectId }: { projectId: string }) {
               branch. Keep accepts them into your manuscript.
             </DialogDescription>
           </DialogHeader>
-          <Input
+          <label htmlFor={reviewInstructionsId} className="font-medium text-sm">
+            Review instructions (optional)
+          </label>
+          <Textarea
+            id={reviewInstructionsId}
+            ref={resizeReviewInstructions}
+            rows={5}
+            className="max-h-[45vh] min-h-32 resize-none overflow-y-auto [field-sizing:fixed]"
             value={scope}
-            onChange={(e) => setScope(e.target.value)}
-            placeholder="Optional focus: argument, clarity, supporting evidence…"
+            onChange={(e) => {
+              setScope(e.target.value);
+              resizeReviewInstructions(e.currentTarget);
+            }}
+            placeholder="Describe what the reviewer should focus on, any constraints, and the improvements you would like suggested…"
           />
           <Button
             disabled={busy}
