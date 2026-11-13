@@ -5,6 +5,7 @@ and detailed release notes are in [docs/releases](docs/releases/README.md).
 
 ## Unreleased
 
+- Open reviewer findings in closable tabs beside the PDF, with readable Markdown, highlighted source references and quotes, tables, and equations for pending and saved reviews.
 - Mark reviewer chat tabs with a persistent purple dot and Review label, alongside the orange indicator for pending changes.
 - Give review instructions a wider dialog and a multiline field that grows with the text.
 - Add a unified GitHub/Gitea connection flow, API-based contributor identity, optional native credential storage, and independent HTTPS/SSH Git transport.

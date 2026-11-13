@@ -3,10 +3,47 @@ import { createRoot } from "react-dom/client";
 import "../../src/styles/globals.css";
 import { useDocumentStore } from "../../src/stores/document-store";
 import { useAgentChatStore } from "../../src/stores/agent-chat-store";
+import { useReviewFindingsStore } from "../../src/stores/review-findings-store";
+import { ReviewFindingsTabs } from "../../src/components/workspace/preview/review-findings";
+const report = `# Manuscript review
+
+## Overall assessment
+The argument is promising. **Clarify the experimental comparison** before drawing a general conclusion.
+
+## Major findings
+### 1. Distinguish evidence from interpretation
+**Source:** \`main.tex:120–135\`
+
+> Our approach consistently outperforms every baseline.
+
+The current results support a narrower claim:
+1. Name the evaluated instances and baselines.
+2. Report uncertainty alongside the mean.
+
+**Suggested revision:** Limit the claim to the reported experiments.
+
+## Minor findings
+- Define $n$ before introducing the complexity bound $O(n^2)$.
+- Use consistent terminology in the abstract and conclusion.
+
+| Priority | Location | Action |
+| --- | --- | --- |
+| Major | Results | Qualify the comparison |
+| Minor | Abstract | Define the terminology |
+
+## Recommended next steps
+- [ ] Check the evidence supporting each comparison.
+- [ ] Reconcile definitions across sections.
+
+[Supporting reference](https://example.test/paper)
+![An illustration](https://example.test/do-not-fetch.png)
+`;
 const calls: { operation: string; projectId: string | null; args: any }[] = [];
 let opened = "";
 let submitted = "";
 let callback = 0;
+let delayReport = false;
+let finishReport: ((value: { report: string }) => void) | undefined;
 (window as any).__TAURI_INTERNALS__ = {
   metadata: {
     currentWindow: { label: "main" },
@@ -53,7 +90,13 @@ let callback = 0;
           },
         ];
       case "report":
-        return { report: "A finding with source context" };
+        if (delayReport) {
+          delayReport = false;
+          return new Promise((resolve) => {
+            finishReport = resolve;
+          });
+        }
+        return { report };
       default:
         return null;
     }
@@ -95,13 +138,19 @@ function button(label: string) {
 }
 async function click(label: string) {
   await wait(() => !!button(label) && !button(label)!.disabled);
+  if (button(label)!.getAttribute("role") === "tab") {
+    button(label)!.dispatchEvent(
+      new MouseEvent("mousedown", { bubbles: true, button: 0 }),
+    );
+  }
   button(label)!.click();
   await pause();
 }
 async function field(label: string, value: string) {
-  const input = [...document.querySelectorAll("label")]
-    .find((l) => l.textContent?.trim().startsWith(label))
-    ?.querySelector("input");
+  const fieldLabel = [...document.querySelectorAll("label")].find((l) =>
+    l.textContent?.trim().startsWith(label),
+  );
+  const input = fieldLabel?.control;
   if (!input) throw new Error(`Missing field ${label}`);
   Object.getOwnPropertyDescriptor(
     HTMLInputElement.prototype,
@@ -150,15 +199,102 @@ async function field(label: string, value: string) {
   await click("Connect");
   await wait(() => calls.filter((c) => c.operation === "connect").length === 2);
   useDocumentStore.setState({ projectId: "existing", files: [] });
-  root.render(<CollaborationPanel projectId="existing" />);
+  root.render(
+    <div style={{ display: "flex", height: "100vh" }}>
+      <aside style={{ width: 280 }}>
+        <CollaborationPanel projectId="existing" />
+      </aside>
+      <main style={{ flex: 1, minWidth: 0 }}>
+        <ReviewFindingsTabs>
+          <div data-pdf-fixture>PDF remains available</div>
+        </ReviewFindingsTabs>
+      </main>
+    </div>,
+  );
   await click("Request review");
   await click("Start review");
   await wait(() => submitted === "Review the argument");
+  const pdf = document.querySelector("[data-pdf-fixture]");
   await click("View saved reviews");
   await click("Clarity · abcdef12");
-  await wait(() =>
-    document.body.innerText.includes("A finding with source context"),
-  );
+  await wait(() => !!document.querySelector(".review-findings-markdown h2"));
+  const article = document.querySelector(
+    'article[aria-label="Reviewer findings"]',
+  )!;
+  if (
+    !article.querySelector("blockquote") ||
+    !article.querySelector("table") ||
+    !article.querySelector(".katex") ||
+    !article.querySelector("strong") ||
+    !article.querySelector("code")
+  )
+    throw new Error("Findings formatting missing");
+  if (article.querySelector("img"))
+    throw new Error("Report loads external images");
+  if (article.closest('[role="dialog"]'))
+    throw new Error("Findings still in a modal");
+  if (pdf !== document.querySelector("[data-pdf-fixture]"))
+    throw new Error("PDF was remounted");
+  await click("PDF");
+  if (!document.querySelector("[data-pdf-fixture]")?.checkVisibility())
+    throw new Error("PDF not visible on switch");
+  await click("Findings · Clarity");
+  await click("View saved reviews");
+  await click("Clarity · abcdef12");
+  if (useReviewFindingsStore.getState().tabs.length !== 1)
+    throw new Error("Duplicate report tab");
+  document
+    .querySelector<HTMLButtonElement>('[aria-label="Close findings: Clarity"]')!
+    .click();
+  await pause();
+  if (!document.querySelector("[data-pdf-fixture]")?.checkVisibility())
+    throw new Error("Closing findings did not restore PDF");
+  useAgentChatStore.setState({
+    proposals: [
+      {
+        id: "pending",
+        projectId: "existing",
+        chatId: useAgentChatStore.getState().activeTabId,
+        origin: "reviewer",
+        state: "ready",
+        generation: 1,
+        conflicts: [],
+        parent: null,
+        changes: [
+          {
+            path: ".prism-collab/reviews/pending/report.md",
+            kind: "added",
+            binary: false,
+            newContent: report,
+          },
+        ],
+      },
+    ],
+  });
+  const chat = useAgentChatStore.getState().activeTabId;
+  await click("View reviewer findings");
+  await wait(() => useReviewFindingsStore.getState().tabs.length === 1);
+  if (useAgentChatStore.getState().activeTabId !== chat)
+    throw new Error("Reading findings switched chats");
+  if (!document.body.innerText.includes("Pending review"))
+    throw new Error("Missing pending status");
+  useDocumentStore.setState({ projectId: "other" });
+  await pause();
+  if (document.body.innerText.includes("Manuscript review"))
+    throw new Error("Report leaked into another project");
+  useDocumentStore.setState({ projectId: "existing" });
+  delayReport = true;
+  await click("View reviewer findings");
+  await wait(() => !!finishReport);
+  const previousTabs = useReviewFindingsStore.getState().tabs;
+  useDocumentStore.setState({ projectId: "other" });
+  finishReport!({ report: "This late report belongs to the old project" });
+  await pause();
+  if (useReviewFindingsStore.getState().tabs !== previousTabs)
+    throw new Error("Late report changed findings after navigation");
+  useDocumentStore.setState({ projectId: "existing" });
+  await click("View saved reviews");
+  await click("Clarity · abcdef12");
   return {
     ok: true,
     checks: [
@@ -169,6 +305,12 @@ async function field(label: string, value: string) {
       "existing identity preserved",
       "review routing",
       "saved findings",
+      "formatted Markdown and math",
+      "PDF stays mounted across tab switches",
+      "close and reopen findings",
+      "pending findings preserve chat selection",
+      "project isolation",
+      "late report ignored after project navigation",
     ],
   };
 };

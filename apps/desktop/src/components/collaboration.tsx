@@ -20,6 +20,10 @@ import {
 import { useDocumentStore } from "@/stores/document-store";
 import { useAgentChatStore } from "@/stores/agent-chat-store";
 import { useHistoryStore } from "@/stores/history-store";
+import {
+  useReviewFindingsStore,
+  type ReviewFindings,
+} from "@/stores/review-findings-store";
 import { listen } from "@/lib/backend";
 import { HistoryPanel } from "@/components/workspace/history-panel";
 
@@ -475,7 +479,35 @@ export function CollaborationPanel({ projectId }: { projectId: string }) {
   const [busy, setBusy] = useState(false);
   const [reviewOpen, setReviewOpen] = useState(false);
   const [scope, setScope] = useState("");
-  const [report, setReport] = useState<string | null>(null);
+  const findingsRequest = useRef(0);
+  useEffect(() => {
+    return () => {
+      findingsRequest.current++;
+    };
+  }, [projectId]);
+  const openFindings = async (
+    findings: Omit<ReviewFindings, "report">,
+    args: { proposalId: string } | { reviewId: string },
+  ) => {
+    const ticket = ++findingsRequest.current;
+    const generation = useDocumentStore.getState().openingGeneration;
+    const value = await collaboration<{ report: string }>(
+      projectId,
+      "report",
+      args,
+    );
+    const doc = useDocumentStore.getState();
+    if (
+      ticket !== findingsRequest.current ||
+      doc.projectId !== projectId ||
+      doc.openingGeneration !== generation
+    )
+      return;
+    useReviewFindingsStore
+      .getState()
+      .open(projectId, { ...findings, report: value.report });
+    setSavedReviews(null);
+  };
   const [historyOpen, setHistoryOpen] = useState(false);
   const [savedReviews, setSavedReviews] = useState<
     | {
@@ -667,15 +699,16 @@ export function CollaborationPanel({ projectId }: { projectId: string }) {
               const path = p.changes.find((c) =>
                 c.path.endsWith("/report.md"),
               )?.path;
-              if (path) {
-                const value = await collaboration<{ report: string }>(
-                  projectId,
-                  "report",
+              if (path)
+                await openFindings(
+                  {
+                    id: `proposal:${p.id}`,
+                    title: "Pending review",
+                    status: "pending",
+                  },
                   { proposalId: p.id },
                 );
-                setReport(value.report);
-              }
-              if (p.chatId) useAgentChatStore.getState().setActiveTab(p.chatId);
+              else toast.info("The reviewer has not written findings yet.");
             })
           }
         >
@@ -724,17 +757,17 @@ export function CollaborationPanel({ projectId }: { projectId: string }) {
               variant="outline"
               disabled={busy || review.schemaVersion !== 1}
               onClick={() =>
-                run(async () => {
-                  const value = await collaboration<{ report: string }>(
-                    projectId,
-                    "report",
+                run(() =>
+                  openFindings(
+                    {
+                      id: `review:${review.id}`,
+                      title: review.scope || "General scientific review",
+                      status: "saved",
+                      reviewedCommit: review.reviewedCommit,
+                    },
                     { reviewId: review.id },
-                  );
-                  if (useDocumentStore.getState().projectId !== projectId)
-                    return;
-                  setSavedReviews(null);
-                  setReport(value.report);
-                })
+                  ),
+                )
               }
             >
               {review.schemaVersion === 1
@@ -796,22 +829,6 @@ export function CollaborationPanel({ projectId }: { projectId: string }) {
           >
             Start review
           </Button>
-        </DialogContent>
-      </Dialog>
-      <Dialog
-        open={report !== null}
-        onOpenChange={(v) => {
-          if (!v) setReport(null);
-        }}
-      >
-        <DialogContent className="max-h-[85vh] overflow-auto">
-          <DialogHeader>
-            <DialogTitle>Reviewer findings</DialogTitle>
-            <DialogDescription>
-              Findings refer to the revision reviewed by the agent.
-            </DialogDescription>
-          </DialogHeader>
-          <pre className="whitespace-pre-wrap text-sm">{report}</pre>
         </DialogContent>
       </Dialog>
       <Dialog open={historyOpen} onOpenChange={setHistoryOpen}>
