@@ -161,13 +161,21 @@ export const useAgentChatStore = create<ChatState>((set, get) => ({
     const activity = beginActivity({ projectPath: state.activeProjectPath, chatId: owner?.id,
       proposalId: p.id, generation: p.generation }, action, { projectWide: action === "apply" });
     const generation = projectGeneration;
-    set(s => ({ error: null, tabs: s.tabs.map(t => t.id === owner?.id ? { ...t, error: null } : t) }));
+    let checkpointToShare: string | null = null;
+    set((s) => ({
+      error: null,
+      tabs: s.tabs.map((t) => (t.id === owner?.id ? { ...t, error: null } : t)),
+    }));
     try {
       const result = await proposals.operate(p, action);
       if (generation !== projectGeneration) return;
       activity.update("refreshing");
       await get().refreshReview();
       if (generation !== projectGeneration) return;
+      if (result?.reviewAgain)
+        toast.info(
+          "The manuscript changed. Review the updated proposal before Keep.",
+        );
       if (result?.historyWarning)
         toast.warning(
           `Changes applied, but history could not be saved: ${result.historyWarning}`,
@@ -187,9 +195,14 @@ export const useAgentChatStore = create<ChatState>((set, get) => ({
       if (
         action === "apply" &&
         !result?.conflicts?.length &&
+        !result?.reviewAgain &&
         get().projectId === p.projectId
       ) {
         const doc = useDocumentStore.getState();
+        if (!result?.historyWarning) checkpointToShare = p.projectId;
+        // Report-only reviews allow manual editing while pending. Their Keep
+        // must not reload and replace an unsaved editor buffer.
+        if (result?.sourceChanged === false) return;
         await doc.refreshFiles();
         const { compileLatex, loadExistingPdf, resolveCompileTarget, formatCompileError } =
           await import("@/lib/latex-compiler");
@@ -220,11 +233,20 @@ export const useAgentChatStore = create<ChatState>((set, get) => ({
         }
       }
     } catch (e) {
-      if (generation === projectGeneration) set(s => ({
-        error: !owner || s.activeTabId === owner.id ? String(e) : s.error,
-        tabs: s.tabs.map(t => t.id === owner?.id ? { ...t, error: String(e) } : t),
-      }));
-    } finally { activity.finish(); }
+      if (generation === projectGeneration)
+        set((s) => ({
+          error: !owner || s.activeTabId === owner.id ? String(e) : s.error,
+          tabs: s.tabs.map((t) =>
+            t.id === owner?.id ? { ...t, error: String(e) } : t,
+          ),
+        }));
+    } finally {
+      activity.finish();
+      if (checkpointToShare) {
+        const { shareCheckpoint } = await import("@/lib/collaboration");
+        shareCheckpoint(checkpointToShare);
+      }
+    }
   },
   review: { active: false, changes: [] },
   locked: false,
@@ -372,7 +394,7 @@ export const useAgentChatStore = create<ChatState>((set, get) => ({
         locked:
           review.active ||
           review.changes.length > 0 ||
-          pending.length > 0 ||
+          pending.some((p) => p.blocksEditing !== false) ||
           s.tabs.some((t) => t.isStreaming),
       }));
     });
@@ -388,7 +410,7 @@ export const useAgentChatStore = create<ChatState>((set, get) => ({
         locked:
           review.active ||
           review.changes.length > 0 ||
-          get().proposals.length > 0 ||
+          get().proposals.some((p) => p.blocksEditing !== false) ||
           get().tabs.some((t) => t.isStreaming),
         error: null,
       });

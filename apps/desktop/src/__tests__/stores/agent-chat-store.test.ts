@@ -1078,3 +1078,39 @@ it("clears prompt preparation after validation failure and stopping after a fail
   expect(useAgentChatStore.getState().tabs[0].isStreaming).toBe(true);
   expect(useAgentChatStore.getState().error).toContain("Stop request failed");
 });
+
+it("keeps a report-only review without reloading an unsaved manuscript buffer", async () => {
+  const refreshFiles = vi.fn();
+  const buffer = {
+    id: "main.tex",
+    content: "Unsaved manual paragraph",
+    isDirty: true,
+  };
+  vi.mocked(useDocumentStore.getState).mockReturnValue({
+    ...useDocumentStore.getState(),
+    files: [buffer],
+    refreshFiles,
+  } as any);
+  useAgentChatStore.setState({
+    proposals: [
+      {
+        id: "report",
+        projectId: "p1",
+        chatId: "tab1",
+        state: "ready",
+        generation: 1,
+        origin: "reviewer",
+        blocksEditing: false,
+      },
+    ] as any,
+  });
+  vi.mocked(proposals.operate).mockResolvedValueOnce({
+    conflicts: [],
+    sourceChanged: false,
+  });
+  await useAgentChatStore.getState().decideProposal("apply");
+  expect(refreshFiles).not.toHaveBeenCalled();
+  expect(compileLatex).not.toHaveBeenCalled();
+  expect(buffer.content).toBe("Unsaved manual paragraph");
+  expect(useAgentChatStore.getState().error).toBeNull();
+});

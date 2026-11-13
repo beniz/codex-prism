@@ -2,6 +2,15 @@ use crate::Backend;
 use crate::{codex, latex, projects, services, skills, uv};
 use serde_json::Value;
 impl Backend {
+    pub async fn collaboration(
+        &self,
+        project_id: Option<String>,
+        operation: String,
+        args: Value,
+    ) -> Result<Value, String> {
+        let _operation = self.enter()?;
+        crate::collaboration::service(self.clone(), project_id, &operation, args).await
+    }
     pub fn template_list(&self) -> Result<crate::templates::TemplateLibrary, String> {
         let _operation = self.enter()?;
         crate::templates::list(self)

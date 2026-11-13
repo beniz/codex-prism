@@ -5,6 +5,10 @@ and detailed release notes are in [docs/releases](docs/releases/README.md).
 
 ## Unreleased
 
+- Add a unified GitHub/Gitea connection flow, API-based contributor identity, optional native credential storage, and independent HTTPS/SSH Git transport.
+- Synchronize connected repository-root projects after explicit Save or Keep, with offline/error status, isolated merges, and agent proposals for conflict resolution. Autosave remains local.
+- Add on-demand manuscript reviews on local branches/worktrees, with saved findings, proposed edits, ordinary diff/PDF review, and Keep acceptance. Review branches remain local.
+
 ## 1.7.1
 
 - Announce newer releases every 12 hours and link to manual downloads. Defer updater signing and in-app installation; release packages require no updater keys.

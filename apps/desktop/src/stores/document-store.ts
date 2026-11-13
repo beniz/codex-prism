@@ -1,3 +1,4 @@
+import { useCollaborationLock } from "@/lib/collaboration";
 import { resolveTexRoot, stripTexComments } from "@/lib/latex-project";
 export { resolveTexRoot } from "@/lib/latex-project";
 import { clearChatPdfCache } from "@/hooks/use-chat-pdf";
@@ -649,6 +650,11 @@ export const useDocumentStore = create<DocumentState>()((set, get) => ({
   },
 
   updateFileContent: (id, content) => {
+    if (
+      get().projectId &&
+      useCollaborationLock.getState().projectId === get().projectId
+    )
+      return;
     if (useAgentChatStore.getState().locked) return;
     set((state) => ({
       files: state.files.map((f) =>
@@ -730,6 +736,11 @@ export const useDocumentStore = create<DocumentState>()((set, get) => ({
   setCursorPosition: (position) => set({ cursorPosition: position }),
 
   insertAtCursor: (text) => {
+    if (
+      get().projectId &&
+      useCollaborationLock.getState().projectId === get().projectId
+    )
+      return;
     if (useAgentChatStore.getState().locked) return;
     const state = get();
     const activeFile = getActiveFile(state);
@@ -752,6 +763,11 @@ export const useDocumentStore = create<DocumentState>()((set, get) => ({
   },
 
   replaceSelection: (start, end, text) => {
+    if (
+      get().projectId &&
+      useCollaborationLock.getState().projectId === get().projectId
+    )
+      return;
     if (useAgentChatStore.getState().locked) return;
     const state = get();
     const activeFile = getActiveFile(state);
@@ -772,6 +788,11 @@ export const useDocumentStore = create<DocumentState>()((set, get) => ({
   },
 
   findAndReplace: (find, replace) => {
+    if (
+      get().projectId &&
+      useCollaborationLock.getState().projectId === get().projectId
+    )
+      return false;
     if (useAgentChatStore.getState().locked) return false;
     const state = get();
     const activeFile = getActiveFile(state);
@@ -839,6 +860,8 @@ export const useDocumentStore = create<DocumentState>()((set, get) => ({
         await useHistoryStore
           .getState()
           .createSnapshot(state.projectRoot, "docs(history): save document");
+        const { shareCheckpoint } = await import("@/lib/collaboration");
+        shareCheckpoint(state.projectId);
       } catch (error) {
         toast.warning(
           `File saved, but history could not be saved: ${String(error)}`,

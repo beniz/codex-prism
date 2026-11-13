@@ -1,3 +1,4 @@
+import { useCollaborationLock } from "@/lib/collaboration";
 import { usePdfNavigationStore } from "@/stores/pdf-navigation-store";
 import { usePreviewStore } from "@/stores/preview-store";
 import { activeProposal } from "@/stores/agent-chat-store";
@@ -657,7 +658,10 @@ export function LatexEditor() {
         EditorState.transactionFilter.of((tr) =>
           tr.docChanged &&
           !tr.annotation(backendReload) &&
-          useAgentChatStore.getState().locked
+          (useAgentChatStore.getState().locked ||
+            (useCollaborationLock.getState().projectId !== null &&
+              useCollaborationLock.getState().projectId ===
+                useDocumentStore.getState().projectId))
             ? []
             : tr,
         ),

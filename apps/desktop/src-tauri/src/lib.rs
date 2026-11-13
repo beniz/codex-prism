@@ -456,6 +456,8 @@ pub fn run() {
                 std::sync::Arc::new(backend_host::DesktopDirectoryPreparer),
             )
             .map_err(std::io::Error::other)?;
+            backend.set_git_askpass(std::env::current_exe()?);
+            backend.set_credential_store(std::sync::Arc::new(backend_host::DesktopCredentialStore));
             app.manage(backend);
             #[cfg(feature = "updater-test")]
             if updates::start_test(app.handle()) {
@@ -495,6 +497,7 @@ pub fn run() {
             read_clipboard_file_paths,
             latex::detect_texlive,
             services::project_service,
+            services::collaboration,
             templates::template_list,
             templates::template_preview,
             templates::template_create_project,

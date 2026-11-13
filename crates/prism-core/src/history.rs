@@ -15,6 +15,9 @@ pub struct SnapshotInfo {
     pub id: String,
     pub message: String,
     pub timestamp: i64,
+    pub author_name: String,
+    pub author_email: String,
+    pub parent_ids: Vec<String>,
     pub labels: Vec<String>,
     pub changed_files: Vec<String>,
 }
@@ -172,6 +175,9 @@ pub(crate) fn history_list(
             id: oid.to_string(),
             message,
             timestamp,
+            author_name: commit.author().name().unwrap_or("").into(),
+            author_email: commit.author().email().unwrap_or("").into(),
+            parent_ids: commit.parent_ids().map(|id| id.to_string()).collect(),
             labels,
             changed_files,
         });
