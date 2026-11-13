@@ -112,6 +112,19 @@ describe("application updates", () => {
     await useUpdateStore.getState().download();
     expect(updates.download).not.toHaveBeenCalled();
   });
+  it("announces manual updates without downloading or restarting", async () => {
+    vi.mocked(updates.check).mockResolvedValue({
+      ...status,
+      canInstall: false,
+    });
+    await useUpdateStore.getState().check(true);
+    expect(useUpdateStore.getState().status?.availableVersion).toBe("1.8.0");
+    await useUpdateStore.getState().download();
+    await useUpdateStore.getState().install();
+    expect(updates.download).not.toHaveBeenCalled();
+    expect(updates.install).not.toHaveBeenCalled();
+    expect(updates.restartLocal).not.toHaveBeenCalled();
+  });
   it("blocks installation while another chat runs", async () => {
     useUpdateStore.setState({ status: { ...status, ready: true } });
     useAgentChatStore.setState({

@@ -11,6 +11,10 @@ on:
       PRISM_UPDATE_PUBLIC_KEY:
         required: false
     inputs:
+      signed_updates:
+        description: Build signed in-app updater artifacts
+        type: boolean
+        default: false
       release_tag:
         description: Release tag to build (empty for a test build)
         type: string
@@ -26,10 +30,11 @@ jobs:
     container: ubuntu:26.04
     timeout-minutes: 60
     env:
+      PRISM_MANUAL_RELEASE: ${{ !inputs.signed_updates && '1' || '0' }}
       PRISM_OFFICIAL_BUILD: ${{ inputs.release_tag != '' && '1' || '0' }}
-      PRISM_UPDATE_PUBLIC_KEY: ${{ inputs.release_tag != '' && secrets.PRISM_UPDATE_PUBLIC_KEY || '' }}
-      TAURI_SIGNING_PRIVATE_KEY: ${{ inputs.release_tag != '' && secrets.TAURI_SIGNING_PRIVATE_KEY || '' }}
-      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ inputs.release_tag != '' && secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD || '' }}
+      PRISM_UPDATE_PUBLIC_KEY: ${{ inputs.release_tag != '' && inputs.signed_updates && secrets.PRISM_UPDATE_PUBLIC_KEY || '' }}
+      TAURI_SIGNING_PRIVATE_KEY: ${{ inputs.release_tag != '' && inputs.signed_updates && secrets.TAURI_SIGNING_PRIVATE_KEY || '' }}
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ inputs.release_tag != '' && inputs.signed_updates && secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD || '' }}
       CARGO_HOME: /opt/cargo
       RUSTUP_HOME: /opt/rustup
       CARGO_TERM_COLOR: always
@@ -71,7 +76,7 @@ jobs:
             crates/prism-core -> target
             apps/desktop/src-tauri -> target
       - name: Require release signing keys
-        if: inputs.release_tag != ''
+        if: inputs.release_tag != '' && inputs.signed_updates
         shell: bash
         run: |
           test -n "$TAURI_SIGNING_PRIVATE_KEY"

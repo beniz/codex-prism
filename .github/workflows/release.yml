@@ -45,18 +45,21 @@ jobs:
     uses: ./.github/workflows/build-linux.yml
     secrets: inherit
     with:
+      signed_updates: false
       release_tag: ${{ needs.validate.outputs.tag }}
   windows:
     needs: validate
     uses: ./.github/workflows/build-windows.yml
     secrets: inherit
     with:
+      signed_updates: false
       release_tag: ${{ needs.validate.outputs.tag }}
   macos:
     needs: validate
     uses: ./.github/workflows/build-macos.yml
     secrets: inherit
     with:
+      signed_updates: false
       release_tag: ${{ needs.validate.outputs.tag }}
   updater-tests:
     needs: validate
@@ -87,5 +90,6 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           RELEASE_TAG: ${{ needs.validate.outputs.tag }}
+          PRISM_MANUAL_RELEASE: '1'
           PRISM_UPDATE_PUBLIC_KEY: ${{ secrets.PRISM_UPDATE_PUBLIC_KEY }}
         run: node scripts/github-release.mjs "$RELEASE_TAG" release-artifacts dist/github-release

@@ -10,6 +10,11 @@ if (process.platform === "win32") {
   args.push("--config", "src-tauri/tauri.windows.conf.json");
 }
 
+if (env.PRISM_MANUAL_RELEASE === "1") {
+  delete env.TAURI_SIGNING_PRIVATE_KEY;
+  delete env.TAURI_SIGNING_PRIVATE_KEY_PASSWORD;
+  delete env.PRISM_UPDATE_PUBLIC_KEY;
+}
 const signedConfig = env.TAURI_SIGNING_PRIVATE_KEY ? updaterConfig() : null;
 if (signedConfig) args.push("--config", signedConfig);
 if (!env.TAURI_SIGNING_PRIVATE_KEY) {

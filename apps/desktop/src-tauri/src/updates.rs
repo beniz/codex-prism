@@ -151,7 +151,9 @@ fn parse_deb_version(metadata: &str) -> Option<String> {
 #[tauri::command]
 pub async fn update_local_status(app: tauri::AppHandle) -> Result<Status, String> {
     let mut status = base_status(&app);
-    if status.installation == "deb" {
+    if status.installation == "deb"
+        && (!env!("PRISM_UPDATE_PUBLIC_KEY").is_empty() || cfg!(feature = "updater-test"))
+    {
         status.installed_version = installed_deb_version()
             .await
             .filter(|v| newer(v, &status.running_version));

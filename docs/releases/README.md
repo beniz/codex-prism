@@ -10,9 +10,9 @@ The workflow validates the tag against the package, Cargo and Tauri versions, th
 | Windows 10/11 x64 | `-setup.exe` | GitHub `windows-2022` runner |
 | macOS Apple Silicon | `.dmg` | GitHub `macos-15` runner |
 
-After all builds and tests pass, one publishing job creates a **draft GitHub release** containing all four packages, the macOS updater archive, updater signatures, `latest.json`, `SHA256SUMS`, `RELEASE_NOTES.md`, and `release.json` with the source commit and artifact hashes. It uses the workflow's built-in `GITHUB_TOKEN`; no separate publishing token is required. Configure the updater signing secrets described below before releasing. Build jobs have read-only repository permissions; only the publishing job can write releases.
+After all builds and tests pass, one publishing job creates a **draft GitHub release** containing all four packages, the notification-only `latest.json`, `SHA256SUMS`, `RELEASE_NOTES.md`, and `release.json` with the source commit and artifact hashes. It uses the workflow's built-in `GITHUB_TOKEN`; no separate publishing token is required. Updater signing is postponed; the workflow explicitly selects manual installation. Build jobs have read-only repository permissions; only the publishing job can write releases.
 
-Windows packages are unsigned. macOS packages are ad-hoc signed, not Apple-notarized. Linux packages target Ubuntu 26.04 and are not promised to work on older distributions. Signed application updates are available for AppImage, Windows and macOS installations; Debian packages remain externally managed.
+Windows packages are unsigned. macOS packages are ad-hoc signed, not Apple-notarized. Linux packages target Ubuntu 26.04 and are not promised to work on older distributions. The app announces new releases; all packages are installed manually.
 
 ## Prepare a release
 
@@ -67,14 +67,18 @@ corepack pnpm install --frozen-lockfile
 corepack pnpm release:build
 ```
 
-Artifacts go to `dist/releases/v<version>/`. Packaging embeds a portable PNG `.DirIcon` and validates the AppImage after extraction into a separate directory, before generating checksums. AppImage filenames omit `linux` to follow catalog conventions. Official updater signing happens after this normalization.
+Artifacts go to `dist/releases/v<version>/`. Packaging embeds a portable PNG `.DirIcon` and validates the AppImage after extraction into a separate directory, before generating checksums. AppImage filenames omit `linux` to follow catalog conventions. When enabled, updater signing happens after this normalization.
 
 Local `release:build` can build an uncommitted checkout for testing. The `codex-prism` symlink in `~/.local/bin` continues launching the repository checkout; remove or rename it if an installed package should take precedence.
 
-## Signed updates
+## Application update notifications
 
-See [application updates and signing setup](../updating.md). Official releases now
-require updater signing secrets, verified updater artifacts and `latest.json`, and
-a passing three-platform `Test updater` workflow before draft assembly. The first
-updater-enabled version requires a manual installation. Publish the complete draft
-only after verifying all assets; do not publish or retarget an incomplete feed.
+See [application updates and future signing setup](../updating.md). Releases
+currently use explicit manual-install mode: no signing secrets or updater
+payloads are required. `latest.json` announces the version with no installable
+platforms. The app links users to release downloads.
+
+The three-platform `Test updater` workflow still checks the retained signed
+updater implementation with disposable keys. Production signing can be enabled
+later through the documented workflow settings and secrets. The first signed
+updater-enabled version must be installed manually.

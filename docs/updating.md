@@ -5,11 +5,10 @@ Download icon beside the version opens release information. Settings → Environ
 → Application updates provides a manual check and the automatic-check preference.
 Checks do not download or install anything automatically.
 
-AppImage, Windows setup and macOS application installations can download a signed
-update, then **Restart and update**. Wait for agents, builds and saves to finish.
-Pending proposals do not need to be kept or discarded. Dirty files and chat drafts
-are saved first; a save failure prevents restart. Save and close other application
-windows before restarting so their unsaved editor state is not lost.
+Updates are currently **notification-only** on every platform. Use **Open release
+downloads**, install the appropriate package manually, then quit and relaunch the
+app. It does not download packages, install them, or restart itself. Updater
+signing and in-app installation are postponed.
 
 For `.deb` installations, download the package and install it yourself:
 
@@ -20,9 +19,7 @@ sudo dpkg -i ./codex-prism-VERSION-linux-x86_64.deb
 ```
 
 Prism does not configure an APT repository. If your administrator provides one,
-use its update instructions. Return to the app after installation: it detects the
-new installed version on focus or when opening the update panel, then offers a
-restart. Prism never asks for sudo credentials or invokes apt/dpkg installation.
+use its update instructions. Quit and relaunch the app after installation. Prism never asks for sudo credentials or invokes apt/dpkg installation.
 
 Source builds show release notes and source build instructions. Save/commit your
 local work before updating your checkout; rebuild and relaunch using
@@ -35,9 +32,9 @@ not gain an updater retroactively. Failed checks stay quiet until you open the
 update panel; manual retry is always available. Missing platform assets never
 trigger a substitute platform download.
 
-## Release signing setup
+## Future signed updates
 
-Generate a dedicated updater key once, on a trusted machine:
+When enabling in-app installation, generate a dedicated updater key once, on a trusted machine:
 
 ```sh
 corepack pnpm --filter @codex-prism/desktop tauri signer generate -w /secure/path/prism-updater.key
@@ -50,7 +47,14 @@ GitHub Actions secrets:
 - `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`: its password (empty if deliberately unencrypted).
 - `PRISM_UPDATE_PUBLIC_KEY`: contents of the corresponding `.pub` file.
 
-Release jobs require these keys and embed only the public key. They sign final
+The release workflow currently passes `signed_updates: false` to each package
+job and `PRISM_MANUAL_RELEASE=1` to assembly. It publishes four packages and a
+notification-only `latest.json` with an empty `platforms` map. No keys are needed.
+
+To enable signed updates later, set all three package jobs to `signed_updates:
+true` and remove `PRISM_MANUAL_RELEASE` from the assembly step. Signed jobs
+require the keys and embed only the public key. There is no automatic fallback
+from a signed release to an unsigned one. They sign final
 payload bytes, including AppImages after icon normalization. Release assembly
 verifies payload signatures and writes `latest.json`, signatures, checksums, and
 source provenance before creating a draft. Publish only after the updater matrix

@@ -65,7 +65,7 @@ export function UpdateSettings() {
 export function UpdateDialog() {
   const state = useUpdateStore();
   // Subscribe to readiness changes while the panel is open; native gate rechecks all projects.
-  useAgentChatStore((s) => s.tabs.some(t => t.isStreaming));
+  useAgentChatStore((s) => s.tabs.some((t) => t.isStreaming));
   useAgentChatStore((s) => s.proposals);
   useDocumentStore((s) => s.isCompiling);
   useDocumentStore((s) => s.isSaving);
@@ -109,7 +109,9 @@ export function UpdateDialog() {
         )}
         {status?.availableVersion && (
           <Button variant="link" onClick={() => external(status.releaseUrl)}>
-            Read release notes
+            {status.canInstall
+              ? "Read release notes"
+              : "Open release downloads"}
           </Button>
         )}
         {status?.installation === "deb" &&
@@ -125,8 +127,8 @@ export function UpdateDialog() {
               </pre>
               <p>
                 You can also use dpkg. If your administrator configured an APT
-                repository, update through that repository. Return here after
-                installation to restart.
+                repository, update through that repository. After installing,
+                quit and relaunch the app.
               </p>
             </div>
           )}
@@ -149,12 +151,14 @@ export function UpdateDialog() {
             Source update instructions
           </Button>
         )}
-        {status?.availableVersion && status.installation === "unknown" && (
-          <p className="text-sm">
-            This installation cannot update itself. Install the appropriate
-            package from the release page.
-          </p>
-        )}
+        {status?.availableVersion &&
+          !status.canInstall &&
+          !["deb", "source"].includes(status.installation) && (
+            <p className="text-sm">
+              This installation cannot update itself. Install the appropriate
+              package from the release page, then quit and relaunch the app.
+            </p>
+          )}
         {state.phase === "downloading" && (
           <p role="status">
             Downloading…{" "}

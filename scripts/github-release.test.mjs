@@ -273,3 +273,42 @@ test("bundler configuration contains only the public signing key", async () => {
     if (path) await rm(dirname(path), { recursive: true, force: true });
   }
 });
+
+test("explicit manual release publishes packages and an announcement without signing assets", async (t) => {
+  const { input, output, options } = await fixture(t);
+  await rm(join(input, "codex-prism-windows-x64", "app-setup.exe.sig"));
+  await rm(join(input, "codex-prism-macos-arm64", "app.app.tar.gz"));
+  await assert.rejects(
+    assemble(input, output, { ...options, publicKey: "" }),
+    /requires PRISM_UPDATE_PUBLIC_KEY/,
+  );
+  const files = await assemble(input, output, {
+    ...options,
+    publicKey: "",
+    manualRelease: true,
+  });
+  assert.equal(files.length, 8);
+  assert.ok(
+    !files.some((p) => p.endsWith(".sig") || p.endsWith(".app.tar.gz")),
+  );
+  assert.deepEqual(
+    JSON.parse(await readFile(join(output, "latest.json"), "utf8")),
+    {
+      version: options.version,
+      notes: options.notes,
+      platforms: {},
+    },
+  );
+  const manifest = JSON.parse(
+    await readFile(join(output, "release.json"), "utf8"),
+  );
+  assert.equal(manifest.commit, options.commit);
+  for (const artifact of manifest.artifacts) {
+    assert.equal(
+      artifact.sha256,
+      createHash("sha256")
+        .update(await readFile(join(output, artifact.name)))
+        .digest("hex"),
+    );
+  }
+});
