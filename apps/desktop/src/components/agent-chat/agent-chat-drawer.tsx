@@ -381,7 +381,7 @@ export function AgentChatDrawer({
       </Dialog>
       {open && (
         <div id="codex-chat-content" className="flex min-h-0 flex-1 flex-col">
-          {s.tabs.length > 1 && (
+          {(s.tabs.length > 1 || s.tabs.some((x) => x.kind === "review")) && (
             <nav
               aria-label="Open chats"
               className="flex shrink-0 gap-1 overflow-x-auto px-3 pb-1"
@@ -401,11 +401,19 @@ export function AgentChatDrawer({
                     x.id === t.id && "bg-muted text-foreground",
                   )}
                 >
+                  {x.kind === "review" && (
+                    <span
+                      role="img"
+                      aria-label="Reviewer chat"
+                      title="Reviewer chat"
+                      className="size-2 shrink-0 rounded-full bg-purple-500"
+                    />
+                  )}
                   <button
                     className="truncate"
                     onClick={() => s.setActiveTab(x.id)}
                   >
-                    {x.title}{" "}
+                    {x.kind === "review" && "Review · "}{x.title}{" "}
                     {proposal?.state === "conflicts"
                       ? " · Conflicts"
                       : proposal?.state === "repairing"

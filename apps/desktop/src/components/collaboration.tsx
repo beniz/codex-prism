@@ -779,7 +779,7 @@ export function CollaborationPanel({ projectId }: { projectId: string }) {
                   throw new Error(
                     "Save the manuscript before requesting review",
                   );
-                const chatId = useAgentChatStore.getState().createTab();
+                const chatId = useAgentChatStore.getState().createTab("review");
                 const prepared = await collaboration<PreparedProposal>(
                   projectId,
                   "review_start",

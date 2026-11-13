@@ -36,6 +36,7 @@ export interface ChatItem {
 export interface TabState {
   restoring?: boolean;
   mode?: "plan" | "default";
+  kind?: "review";
   id: string;
   title: string;
   projectPath: string | null;
@@ -70,7 +71,7 @@ interface ChatState {
   requestPinnedContextRemoval(labels: string[]): void;
   resetForProject(root: string | null): void;
   newSession(): void;
-  createTab(): string;
+  createTab(kind?: "review"): string;
   setActiveTab(id: string): void;
   closeTab(id: string): void;
   sendPrompt(prompt: string, context?: PromptContextOverride): Promise<void>;
@@ -343,9 +344,13 @@ export const useAgentChatStore = create<ChatState>((set, get) => ({
       }
     })();
   },
-  createTab: () => {
+  createTab: (kind) => {
     if (get().restoringChats) return get().activeTabId;
     const t = tab();
+    if (kind === "review") {
+      t.kind = kind;
+      t.title = "Manuscript";
+    }
     set((s) => ({
       tabs: [...s.tabs, t],
       activeTabId: t.id,
@@ -391,6 +396,10 @@ export const useAgentChatStore = create<ChatState>((set, get) => ({
       set((s) => ({
         review,
         proposals: pending,
+        tabs: s.tabs.map((t) => t.kind === "review" ? t : pending.some((p) =>
+          p.projectId === id && p.origin === "reviewer" && p.state !== "original" &&
+          (p.chatId === t.id || (!!t.sessionId && p.threadId === t.sessionId)))
+          ? { ...t, kind: "review" as const } : t),
         locked:
           review.active ||
           review.changes.length > 0 ||
@@ -630,7 +639,7 @@ export const useAgentChatStore = create<ChatState>((set, get) => ({
                   ...x,
                   isStreaming: true,
                   error: null,
-                  title: x.sessionId ? x.title : prompt.slice(0, 70),
+                  title: x.sessionId || x.kind === "review" ? x.title : prompt.slice(0, 70),
                   messages: [
                     ...x.messages,
                     {
@@ -992,7 +1001,7 @@ function chatTabsSnapshot(state: ChatState) {
       selectedModel: state.selectedModel,
       effortLevel: state.effortLevel,
       tabs: state.tabs.map(t => ({
-        id: t.id, title: t.title, sessionId: t.sessionId, draft: savedDraft(t), mode: t.mode,
+        id: t.id, title: t.title, sessionId: t.sessionId, draft: savedDraft(t), mode: t.mode, kind: t.kind,
       })),
     },
   };
@@ -1026,7 +1035,7 @@ useAgentChatStore.subscribe((state, previous) => {
     state.effortLevel !== previous.effortLevel || state.tabs.length !== previous.tabs.length ||
     state.tabs.some((t, i) => {
       const old = previous.tabs[i];
-      return t.id !== old.id || t.title !== old.title || t.sessionId !== old.sessionId || t.mode !== old.mode || t.submittedDraft !== old.submittedDraft;
+      return t.id !== old.id || t.title !== old.title || t.sessionId !== old.sessionId || t.mode !== old.mode || t.kind !== old.kind || t.submittedDraft !== old.submittedDraft;
     });
   if (metadataChanged) {
     try { persistChatTabs(); } catch { /* Automatic persistence is best effort. */ }

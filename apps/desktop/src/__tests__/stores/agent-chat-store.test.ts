@@ -641,6 +641,39 @@ describe("project chat restoration", () => {
       thread: { turns: [{ items: [{ id: "reply", type: "agentMessage", text: id }] }] },
     }));
   });
+  it("preserves reviewer identity and title through submission and project reopening", async () => {
+    const state = useAgentChatStore.getState();
+    const id = state.createTab("review");
+    await state.sendPrompt("Review the manuscript with detailed instructions");
+    expect(useAgentChatStore.getState().tabs.find(t => t.id === id)).toMatchObject({
+      kind: "review", title: "Manuscript", sessionId: "thread1",
+    });
+    expect(readChatTabs("/paper")?.tabs.find(t => t.id === id)?.kind).toBe("review");
+    state.resetForProject(null);
+    state.resetForProject("/paper");
+    await waitForRestore();
+    expect(useAgentChatStore.getState().tabs.find(t => t.id === id)).toMatchObject({
+      kind: "review", title: "Manuscript",
+    });
+    expect(useAgentChatStore.getState().tabs.find(t => t.id === "tab1")?.kind).toBeUndefined();
+  });
+  it("recovers legacy reviewer identity from its own proposal and retains it after resolution", async () => {
+    const state = useAgentChatStore.getState();
+    useAgentChatStore.setState({ tabs: [
+      { ...state.tabs[0], sessionId: "thread1" },
+      { ...state.tabs[0], id: "other", sessionId: "thread2" },
+    ] });
+    vi.mocked(proposals.list).mockResolvedValueOnce([{
+      id: "review", projectId: "p1", threadId: "thread1", chatId: "old-tab",
+      origin: "reviewer", state: "ready", generation: 1,
+      conflicts: [], parent: null, changes: [],
+    }]);
+    await state.refreshReview();
+    expect(useAgentChatStore.getState().tabs.map(t => t.kind)).toEqual(["review", undefined]);
+    vi.mocked(proposals.list).mockResolvedValueOnce([]);
+    await state.refreshReview();
+    expect(readChatTabs("/paper")?.tabs.map(t => t.kind)).toEqual(["review", undefined]);
+  });
   it("restores open tabs, active conversation and drafts using backend messages", async () => {
     const state = useAgentChatStore.getState();
     useAgentChatStore.setState({
