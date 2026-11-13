@@ -163,6 +163,54 @@ describe("useDocumentStore", () => {
   });
 
   describe("openProject", () => {
+    it("shows the workspace before registration finishes", async () => {
+      let release!: () => void;
+      vi.mocked(backend.projects.register).mockImplementationOnce(async () => {
+        await new Promise<void>(resolve => { release = resolve; });
+        return { id: "project-id", root: "/opening", name: "Opening" };
+      });
+      vi.mocked(invoke).mockResolvedValue(undefined as never);
+      vi.mocked(readDir).mockResolvedValue([]);
+      const task = useDocumentStore.getState().openProject("/opening");
+      expect(useDocumentStore.getState().projectRoot).toBe("/opening");
+      expect(useDocumentStore.getState().initialized).toBe(false);
+      expect(useDocumentStore.getState().files).toEqual([]);
+      release();
+      await task;
+      expect(useDocumentStore.getState().initialized).toBe(true);
+    });
+
+    it("does not repopulate a closed project from a late source read", async () => {
+      vi.mocked(invoke).mockResolvedValue(undefined as never);
+      vi.mocked(readDir).mockResolvedValue([{ name: "main.tex", isDirectory: false }] as any);
+      let finish!: (value: string) => void;
+      vi.mocked(readTextFile).mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+      const task = useDocumentStore.getState().openProject("/late");
+      await vi.waitFor(() => expect(finish).toBeDefined());
+      useDocumentStore.getState().closeProject();
+      finish("Late source");
+      await task;
+      expect(useDocumentStore.getState().projectRoot).toBeNull();
+      expect(useDocumentStore.getState().files).toEqual([]);
+    });
+    it("publishes the main source before delayed secondary sources", async () => {
+      vi.mocked(invoke).mockResolvedValue(undefined as never);
+      vi.mocked(readDir).mockResolvedValue([
+        { name: "main.tex", isDirectory: false }, { name: "chapter.tex", isDirectory: false },
+      ] as any);
+      let finish!: (value: string) => void;
+      vi.mocked(readTextFile).mockImplementation(async path =>
+        String(path).endsWith("main.tex") ? "\\documentclass{article}"
+          : await new Promise(resolve => { finish = resolve; }));
+      const task = useDocumentStore.getState().openProject("/staged");
+      await vi.waitFor(() => expect(finish).toBeDefined());
+      expect(useDocumentStore.getState().files[0].content).toContain("documentclass");
+      expect(useDocumentStore.getState().previewReady).toBe(true);
+      expect(useDocumentStore.getState().initialized).toBe(false);
+      finish("Chapter");
+      await task;
+      expect(useDocumentStore.getState().initialized).toBe(true);
+    });
     it("opens a template's chosen main file ahead of main.tex", async () => {
       vi.mocked(invoke).mockResolvedValue(undefined as never);
       vi.mocked(readDir).mockResolvedValue([
@@ -238,7 +286,8 @@ describe("useDocumentStore", () => {
       expect(readDir).not.toHaveBeenCalledWith("/project/__pycache__");
       expect(stat).toHaveBeenCalledTimes(1);
       expect(stat).toHaveBeenCalledWith("/project/tool.py");
-      expect(readTextFile).toHaveBeenCalledTimes(2);
+      expect(readTextFile).toHaveBeenCalledTimes(1);
+      expect(readTextFile).not.toHaveBeenCalledWith("/project/tool.py");
       expect(readTextFile).not.toHaveBeenCalledWith("/project/compiled.pyc");
       expect(
         useDocumentStore.getState().files.map((file) => file.relativePath),

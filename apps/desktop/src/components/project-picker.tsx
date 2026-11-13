@@ -1,3 +1,8 @@
+import { getMupdfClient } from "@/lib/mupdf/mupdf-client";
+import {
+  loadSavedProjectPreview,
+  retainProjectPreview,
+} from "@/lib/project-preview";
 import { UpdateSettings, UpdateIndicator } from "@/components/app-updates";
 import {
   loadProjectPreview,
@@ -73,6 +78,7 @@ type ProjectPreviewState =
   | { status: "error" };
 
 export function ProjectPicker() {
+  useEffect(() => getMupdfClient().retainWorkers(), []);
   const [showModeDialog, setShowModeDialog] = useState(false);
   const [wizardMode, setWizardMode] = useState<CreationMode | null>(null);
   const [appVersion, setAppVersion] = useState("");
@@ -607,6 +613,13 @@ function ProjectPreviewCard({
   const [preview, setPreview] = useState<ProjectPreviewState>({
     status: "loading",
   });
+  useEffect(
+    () =>
+      preview.status === "ready" && preview.data.kind === "pdf"
+        ? retainProjectPreview(preview.data.url)
+        : undefined,
+    [preview],
+  );
   const createdDateLabel =
     preview.status === "ready"
       ? formatProjectCreatedDate(preview.data.createdAt)
@@ -615,21 +628,38 @@ function ProjectPreviewCard({
   useEffect(() => {
     if (!visible) return;
     let cancelled = false;
-    setPreview({ status: "loading" });
-    loadProjectPreview(project.path)
+    const controller = new AbortController();
+    void (async () => {
+      const cached = await loadSavedProjectPreview(project.path);
+      if (!cancelled && cached) setPreview({ status: "ready", data: cached });
+      if (cancelled) return;
+      return loadProjectPreview(project.path, controller.signal);
+    })()
       .then((data) => {
-        if (!cancelled) setPreview({ status: "ready", data });
+        if (!cancelled && data) setPreview({ status: "ready", data });
       })
       .catch((err) => {
         console.warn("Failed to load project preview:", {
           path: project.path,
           error: err,
         });
-        if (!cancelled) setPreview({ status: "error" });
+        if (!cancelled)
+          setPreview((current) =>
+            current.status === "ready"
+              ? {
+                  ...current,
+                  data: {
+                    ...current.data,
+                    warning: "Cached preview — project unavailable",
+                  },
+                }
+              : { status: "error" },
+          );
       });
 
     return () => {
       cancelled = true;
+      controller.abort();
     };
   }, [project.path, project.lastOpened, visible, folderView, refresh]);
 
@@ -641,6 +671,11 @@ function ProjectPreviewCard({
           onClick={onOpen}
         >
           <ProjectPreviewSurface preview={preview} projectName={project.name} />
+          {preview.status === "ready" && preview.data.warning && (
+            <span className="absolute inset-x-0 bottom-0 bg-background/90 p-1 text-muted-foreground text-xs">
+              {preview.data.warning}
+            </span>
+          )}
         </button>
         <Button
           variant="ghost"
@@ -686,6 +721,7 @@ function ProjectPreviewSurface({
       <img
         src={preview.data.url}
         alt={`${projectName} preview`}
+        title={preview.data.warning}
         className="h-full w-full bg-white object-contain object-center"
       />
     );

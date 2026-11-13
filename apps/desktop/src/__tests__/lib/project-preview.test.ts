@@ -1,7 +1,10 @@
 import { beforeEach, expect, it, vi } from "vitest";
 import { backend, invoke } from "@/lib/backend";
 import { getMupdfClient } from "@/lib/mupdf/mupdf-client";
-import { loadProjectPreview } from "@/lib/project-preview";
+import {
+  loadProjectPreview,
+  loadSavedProjectPreview,
+} from "@/lib/project-preview";
 vi.mock("@/lib/backend", () => ({
   invoke: vi.fn(),
   backend: { projects: { register: vi.fn() }, files: { read: vi.fn() } },
@@ -16,6 +19,10 @@ let client: {
 };
 beforeEach(() => {
   vi.clearAllMocks();
+  Object.defineProperty(HTMLImageElement.prototype, "decode", {
+    configurable: true,
+    value: vi.fn().mockResolvedValue(undefined),
+  });
   project = `p${++counter}`;
   vi.mocked(backend.projects.register).mockResolvedValue({
     id: project,
@@ -101,4 +108,47 @@ it("shares simultaneous requests for the same project", async () => {
   vi.mocked(invoke).mockResolvedValue(manifest());
   await Promise.all([loadProjectPreview(project), loadProjectPreview(project)]);
   expect(client.renderThumbnail).toHaveBeenCalledTimes(1);
+});
+
+it("restores a saved preview without registration, PDF reads, or worker startup", async () => {
+  vi.spyOn(HTMLImageElement.prototype, "decode").mockResolvedValue(undefined);
+  vi.mocked(invoke).mockResolvedValue({
+    projectId: project,
+    pdf: ".prism/build/thesis.pdf",
+    revision: "1",
+    bytes: [137, 80, 78, 71],
+    createdAt: 1000,
+  });
+  expect(await loadSavedProjectPreview(project)).toMatchObject({ kind: "pdf" });
+  expect(backend.projects.register).not.toHaveBeenCalled();
+  vi.mocked(invoke).mockResolvedValue(manifest());
+  expect(await loadProjectPreview(project)).toMatchObject({ kind: "pdf" });
+  expect(backend.files.read).not.toHaveBeenCalled();
+  expect(getMupdfClient).not.toHaveBeenCalled();
+});
+it("drops requests cancelled before discovery without opening a worker", async () => {
+  const controller = new AbortController();
+  controller.abort();
+  await expect(
+    loadProjectPreview(project, controller.signal),
+  ).rejects.toMatchObject({ name: "AbortError" });
+  expect(backend.projects.register).not.toHaveBeenCalled();
+  expect(getMupdfClient).not.toHaveBeenCalled();
+});
+it("ignores corrupt saved images and removes their cache entry", async () => {
+  vi.spyOn(HTMLImageElement.prototype, "decode").mockRejectedValue(
+    new Error("Invalid PNG"),
+  );
+  vi.mocked(invoke).mockResolvedValue({
+    projectId: project,
+    pdf: "main.pdf",
+    revision: "1",
+    bytes: [1],
+  });
+  expect(await loadSavedProjectPreview(project)).toBeNull();
+  expect(invoke).toHaveBeenLastCalledWith("project_service", {
+    projectId: "",
+    operation: "thumbnail_cache_delete",
+    args: { root: project },
+  });
 });

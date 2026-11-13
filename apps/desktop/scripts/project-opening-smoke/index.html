@@ -1,0 +1,13 @@
+<!doctype html>
+<html><body style="margin:0">
+<script>
+// Some store modules query the host during import; install a neutral fixture first.
+window.__TAURI_INTERNALS__ = {
+  metadata: { currentWindow: { label: "main" }, currentWebview: { label: "main" } },
+  transformCallback: () => 0,
+  invoke: async () => []
+};
+window.__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener: () => {} };
+</script>
+<script type="module" src="./harness.tsx"></script>
+</body></html>

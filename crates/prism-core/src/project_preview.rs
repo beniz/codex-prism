@@ -153,3 +153,135 @@ mod tests {
         );
     }
 }
+
+// Disposable, versioned card images; never stored inside a writing project.
+pub(crate) fn cache(
+    app: &Backend,
+    project: &str,
+    operation: &str,
+    args: Value,
+) -> Result<Value, String> {
+    let directory = app.inner.config.data_dir.join("project-thumbnails");
+    fs::create_dir_all(&directory).map_err(|e| e.to_string())?;
+    let root = args["root"].as_str().ok_or("Missing project path")?;
+    let key = projects::revision(format!("thumbnail-v1-420:{root}").as_bytes());
+    let file = directory.join(format!("{key}.json"));
+    if operation == "thumbnail_cache_get" {
+        return Ok(fs::metadata(&file)
+            .ok()
+            .filter(|m| m.len() <= 24 * 1024 * 1024)
+            .and_then(|_| fs::read(&file).ok())
+            .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
+            .filter(|v| {
+                v["version"] == 1
+                    && v["bytes"].as_array().is_some_and(|a| {
+                        a.iter()
+                            .take(8)
+                            .filter_map(Value::as_u64)
+                            .collect::<Vec<_>>()
+                            == vec![137, 80, 78, 71, 13, 10, 26, 10]
+                    })
+            })
+            .unwrap_or(Value::Null));
+    }
+    if operation == "thumbnail_cache_delete" {
+        let _ = fs::remove_file(file);
+        return Ok(Value::Null);
+    }
+    if operation != "thumbnail_cache_put" {
+        return Err("Unknown thumbnail operation".into());
+    }
+    let manifest = discover(app, project)?;
+    if manifest["pdfs"] != args["candidates"] {
+        return Err("Preview selection changed".into());
+    }
+    let candidate = args["pdf"].as_str().ok_or("Missing PDF")?;
+    let revision = args["revision"].as_str().ok_or("Missing revision")?;
+    if !manifest["pdfs"].as_array().is_some_and(|pdfs| {
+        pdfs.iter()
+            .any(|p| p["path"] == candidate && p["revision"] == revision)
+    }) {
+        return Err("PDF changed while rendering preview".into());
+    }
+    let bytes = args["bytes"].as_array().ok_or("Missing PNG")?;
+    if bytes.len() > 16 * 1024 * 1024
+        || bytes
+            .iter()
+            .take(8)
+            .filter_map(Value::as_u64)
+            .collect::<Vec<_>>()
+            != vec![137, 80, 78, 71, 13, 10, 26, 10]
+    {
+        return Err("Invalid thumbnail".into());
+    }
+    let entry = json!({"version":1,"projectId":project,"pdf":candidate,"revision":revision,"bytes":bytes,"createdAt":manifest["createdAt"]});
+    let encoded = serde_json::to_vec(&entry).map_err(|e| e.to_string())?;
+    if encoded.len() > 24 * 1024 * 1024 {
+        return Err("Thumbnail exceeds cache entry limit".into());
+    }
+    projects::atomic_bytes(&file, &encoded)?;
+    let mut entries: Vec<_> = fs::read_dir(&directory)
+        .map_err(|e| e.to_string())?
+        .filter_map(Result::ok)
+        .filter(|e| e.path().extension().is_some_and(|e| e == "json"))
+        .filter_map(|e| {
+            e.metadata()
+                .ok()
+                .map(|m| (m.modified().unwrap_or(UNIX_EPOCH), m.len(), e.path()))
+        })
+        .collect();
+    entries.sort();
+    let mut size: u64 = entries.iter().map(|e| e.1).sum();
+    let mut count = entries.len();
+    for (_, bytes, path) in entries {
+        if size <= 128 * 1024 * 1024 && count <= 1000 {
+            break;
+        }
+        if fs::remove_file(path).is_ok() {
+            size -= bytes;
+            count -= 1;
+        }
+    }
+    Ok(Value::Null)
+}
+
+#[cfg(test)]
+mod cache_tests {
+    use super::*;
+    #[test]
+    fn cache_survives_restart_and_rejects_changed_source() {
+        let temp = tempfile::tempdir().unwrap();
+        let config = crate::BackendConfig {
+            data_dir: temp.path().join("data"),
+            home_dir: temp.path().join("home"),
+            temp_dir: temp.path().join("tmp"),
+        };
+        let root = temp.path().join("paper with spaces");
+        fs::create_dir(&root).unwrap();
+        fs::write(root.join("main.pdf"), b"pdf").unwrap();
+        let app = Backend::new(config.clone(), std::sync::Arc::new(crate::NoopEventSink)).unwrap();
+        let p = projects::project_register(app.clone(), root.to_string_lossy().into()).unwrap();
+        let m = discover(&app, &p.id).unwrap();
+        let args = json!({"root":root,"pdf":"main.pdf","revision":m["pdfs"][0]["revision"],"candidates":m["pdfs"],"bytes":[137,80,78,71,13,10,26,10]});
+        cache(&app, &p.id, "thumbnail_cache_put", args.clone()).unwrap();
+        let reopened = Backend::new(config, std::sync::Arc::new(crate::NoopEventSink)).unwrap();
+        assert_eq!(
+            cache(&reopened, "", "thumbnail_cache_get", json!({"root":root})).unwrap()["pdf"],
+            "main.pdf"
+        );
+        fs::write(root.join("main.pdf"), b"changed pdf").unwrap();
+        assert!(cache(&reopened, &p.id, "thumbnail_cache_put", args).is_err());
+        cache(
+            &reopened,
+            "",
+            "thumbnail_cache_delete",
+            json!({"root":root}),
+        )
+        .unwrap();
+        assert!(
+            cache(&reopened, "", "thumbnail_cache_get", json!({"root":root}))
+                .unwrap()
+                .is_null()
+        );
+    }
+}

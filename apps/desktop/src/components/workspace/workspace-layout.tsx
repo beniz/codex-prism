@@ -32,13 +32,15 @@ function easeInOutSmooth(progress: number) {
 
 export function WorkspaceLayout() {
   const files = useDocumentStore((s) => s.files);
+  const openingError = useDocumentStore(s => s.openingError);
+  const openingPhase = useDocumentStore(s => s.openingPhase);
   const activeFileId = useDocumentStore((s) => s.activeFileId);
   useDocumentStore((s) => s.pdfRevision);
   const activeFile = files.find((file) => file.id === activeFileId);
   const root = activeFile?.type === "tex" ? resolveTexRoot(activeFile.id, files)
     : (getCurrentPdfRootId() ?? resolveTexRoot(activeFile?.id ?? "", files));
   useChatPdfBuilds(files.find((file) => file.id === root)?.relativePath);
-  const initialized = useDocumentStore((s) => s.initialized);
+
   const previewVisible = usePreviewStore((s) => s.visible);
   const setPreviewVisible = usePreviewStore((s) => s.setVisible);
   const workspaceRef = useRef<HTMLDivElement>(null);
@@ -181,16 +183,28 @@ export function WorkspaceLayout() {
     return () => resizeObserver.disconnect();
   }, [getCollapsedSidebarSize, sidebarCollapsed]);
 
-  if (!initialized) {
-    return (
-      <div className="flex h-full items-center justify-center">
-        <div className="text-muted-foreground">Loading project...</div>
-      </div>
-    );
+
+  if (!openingError && (openingPhase === "registering" || openingPhase === "scanning")) {
+    return <div ref={workspaceRef} data-panel-group className="flex h-full">
+      <aside className="w-[15%] border-r p-3 text-sm">
+        <button onClick={() => useDocumentStore.getState().closeProject()}>Back to projects</button>
+      </aside>
+      <main className="flex flex-1 items-center justify-center text-sm text-muted-foreground">Loading document…</main>
+      <aside className="flex w-[35%] flex-col justify-end border-l p-3">
+        <div role="status" className="text-xs text-muted-foreground">
+          {openingPhase === "registering" ? "Opening project…" : "Discovering project files…"}
+        </div>
+      </aside>
+    </div>;
   }
 
   return (
     <div ref={workspaceRef} className="flex h-full flex-col">
+      {openingError && <div role="alert" className="flex items-center gap-3 p-3 text-sm">
+        <span>Could not open project: {openingError}</span>
+        <button onClick={() => { const s = useDocumentStore.getState(); if (s.projectRoot) void s.openProject(s.projectRoot).catch(() => {}); }}>Retry</button>
+        <button onClick={() => useDocumentStore.getState().closeProject()}>Back to projects</button>
+      </div>}
       <PanelGroup direction="horizontal" className="h-full">
         <Panel
           id="sidebar"

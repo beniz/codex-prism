@@ -2,7 +2,7 @@ import { ActivityLine } from "./activity-line";
 import { QuestionRequest } from "./question-request";
 import { SourceCompletion } from "./source-completion";
 import { listContinuation } from "@/lib/composer-lists";
-import { ChatHistory } from "./chat-history";
+import { ChatPanes } from "./chat-panes";
 import { ActivityLabel } from "./activity-label";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
@@ -71,7 +71,7 @@ export function AgentChatDrawer({
     createTab: useAgentChatStore((state) => state.createTab),
     effortLevel: useAgentChatStore((state) => state.effortLevel),
     error: useAgentChatStore((state) => state.error),
-    restoringChats: useAgentChatStore((state) => state.restoringChats),
+    restoringChats: useAgentChatStore((state) => state.restoringChats || !!state.tabs.find(t => t.id === state.activeTabId)?.restoring),
     isStreaming: useAgentChatStore((state) => state.isStreaming),
     locked: useAgentChatStore((state) => state.locked),
     pendingAttachments: useAgentChatStore(
@@ -123,6 +123,7 @@ export function AgentChatDrawer({
     setInputHeight(Math.max(56, Math.min(height, Math.max(56, available))));
   };
   const files = useDocumentStore((d) => d.files);
+  const openingProject = useDocumentStore((d) => !!d.projectRoot && !d.initialized);
   const proposals = useAgentChatStore((state) => state.proposals);
   const t = s.tabs.find((t) => t.id === s.activeTabId)!;
   const questionRequests = s.requests.filter(
@@ -134,14 +135,8 @@ export function AgentChatDrawer({
   const reportError = (e: unknown) =>
     useAgentChatStore.setState({ error: String(e) });
   useEffect(() => {
-    const el = viewport.current;
-    if (el && followMessages.current) el.scrollTop = el.scrollHeight;
-  }, [t.messages, s.requests, open]);
-  useEffect(() => {
     promptHistory.current = null;
     followMessages.current = true;
-    const el = viewport.current;
-    if (el) el.scrollTop = el.scrollHeight;
   }, [t.id]);
   useEffect(() => {
     void ensureAgentEvents().catch(reportError);
@@ -175,7 +170,7 @@ export function AgentChatDrawer({
     setup.models.find((m) => m.model === s.selectedModel) ||
     setup.models.find((m) => m.isDefault);
 
-  const canSend =
+  const canSend = !openingProject &&
     !awaitingAnswer &&
     !s.restoringChats &&
     !!t.draft.trim() &&
@@ -450,7 +445,7 @@ export function AgentChatDrawer({
               followMessages.current =
                 el.scrollHeight - el.scrollTop - el.clientHeight < 48;
             }}
-            className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 py-3"
+            className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-4 py-3"
           >
             {!s.restoringChats && !t.messages.length && (
               <div className="flex h-full min-h-16 flex-col items-center justify-center gap-2 text-center">
@@ -469,7 +464,7 @@ export function AgentChatDrawer({
                 Restoring conversations…
               </p>
             )}
-            <ChatHistory key={t.id} messages={t.messages} viewport={viewport} />
+            <ChatPanes key={s.projectId ?? ""} tabs={s.tabs} activeId={t.id} />
             {!t.isStreaming && !t.error && t.mode === "plan" && t.messages.some((m) => m.type === "proposedPlan" && m.status === "completed") && [...t.messages].reverse().find((m) => m.type === "userMessage" || m.type === "proposedPlan")?.status === "completed" && (
               <div className="flex gap-2" role="group" aria-label="Plan actions">
                 <Button onClick={() => {

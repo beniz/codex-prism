@@ -155,7 +155,10 @@ export function PdfPreview() {
     height: number;
   } | null>(null);
   const hasInitialCompile = useRef<string | null>(null);
+  const earlyPdfAttempt = useRef<string | null>(null);
   const initialized = useDocumentStore((s) => s.initialized);
+  const openingGeneration = useDocumentStore(s => s.openingGeneration);
+  const previewReady = useDocumentStore((s) => s.previewReady);
 
   // Derive pdfData from external cache, re-read whenever pdfRevision bumps
   const mainPdfData = useMemo(() => getCurrentPdfBytes(), [pdfRevision]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -567,11 +570,16 @@ export function PdfPreview() {
 
   useEffect(() => {
     if (chatPdf.proposal) return;
-    if (hasInitialCompile.current === projectRoot) return;
-    if (!initialized || !projectRoot) return;
+    const key = `${projectRoot}:${openingGeneration}`;
+    const current = () => useDocumentStore.getState().projectRoot === projectRoot &&
+      useDocumentStore.getState().openingGeneration === openingGeneration;
+    if (hasInitialCompile.current === key) return;
+    if (!initialized && earlyPdfAttempt.current === key) return;
+    if ((!initialized && !previewReady) || !projectRoot) return;
     if (pdfData || isCompiling || compileError) return;
 
-    hasInitialCompile.current = projectRoot;
+    hasInitialCompile.current = key;
+    if (!initialized) earlyPdfAttempt.current = key;
 
     const compile = async () => {
       setIsCompiling(true);
@@ -586,25 +594,28 @@ export function PdfPreview() {
         }
         const { rootId, targetPath } = resolved;
         const existing = await loadExistingPdf(projectRoot, targetPath);
-        if (useDocumentStore.getState().projectRoot !== projectRoot) return;
+        if (!current()) return;
         if (existing) {
           setPdfData(existing, rootId, false);
           return;
         }
+        if (!useDocumentStore.getState().initialized) { hasInitialCompile.current = null; return; }
         await saveAllFiles();
         const data = await compileLatex(projectRoot, targetPath);
-        if (useDocumentStore.getState().projectRoot === projectRoot)
+        if (current())
           setPdfData(data, rootId);
       } catch (error) {
-        if (useDocumentStore.getState().projectRoot === projectRoot)
+        if (current())
           setCompileError(formatCompileError(error));
       } finally {
-        setIsCompiling(false);
+        if (current()) setIsCompiling(false);
       }
     };
     compile();
   }, [
     initialized,
+    previewReady,
+    openingGeneration,
     projectRoot,
     pdfData,
     isCompiling,
@@ -683,6 +694,7 @@ export function PdfPreview() {
   }, []);
 
   const handleCompile = async (force = false, automatic = false) => {
+    if (!useDocumentStore.getState().initialized) return;
     if (chatPdf.proposal) {
       await chatPdf.compile();
       return;

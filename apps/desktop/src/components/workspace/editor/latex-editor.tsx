@@ -142,6 +142,11 @@ export function LatexEditor() {
     isTextFile && activeFileContent === undefined && !!activeFile;
   const loadFileContent = useDocumentStore((s) => s.loadFileContent);
 
+  useEffect(() => {
+    if ((isTextFile || activeFile?.type === "image") && activeFile && activeFile.content === undefined &&
+        (activeFile.fileSize ?? 0) <= 1024 * 1024) void loadFileContent(activeFile.id);
+  }, [activeFile?.id, isTextFile, loadFileContent]);
+
   // History review state
   const reviewingSnapshot = useHistoryStore((s) => s.reviewingSnapshot);
   const historyDiffResult = useHistoryStore((s) => s.diffResult);

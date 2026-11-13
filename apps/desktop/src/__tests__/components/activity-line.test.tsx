@@ -36,7 +36,7 @@ beforeEach(() => {
     proposals: [],
     review: { active: false, changes: [] },
   });
-  useDocumentStore.setState({
+  useDocumentStore.setState({ initialized: true,
     projectRoot: "/paper",
     projectId: "project",
     isCompiling: false,
