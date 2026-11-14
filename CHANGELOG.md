@@ -5,6 +5,10 @@ and detailed release notes are in [docs/releases](docs/releases/README.md).
 
 ## Unreleased
 
+## 1.8.0-dev
+
+Development prerelease from `feat_init_git_collab`; 1.7.1 remains the stable release.
+
 - Keep the collaboration sidebar stable during synchronization: use the blue sync icon and the activity indicator below chat instead of temporary sync and cancel rows.
 - Open shared-project settings from the Collaboration heading, show the connected repository address in the sidebar, and manage existing connections and disconnection in the settings dialog.
 - Add a small gap between the outline and Collaboration section in the sidebar.

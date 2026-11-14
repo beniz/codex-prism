@@ -1,7 +1,7 @@
 # Git collaboration and manuscript review
 
-These features are under Unreleased. They are not part of previously published
-packages.
+These experimental features are included in the 1.8.0-dev prerelease. They are
+not part of the stable 1.7.1 release.
 
 ## Connect a project
 

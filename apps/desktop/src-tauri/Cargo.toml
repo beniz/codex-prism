@@ -1,6 +1,6 @@
 [package]
 name = "codex-prism-desktop"
-version = "1.7.1"
+version = "1.8.0-dev"
 description = "AI-powered LaTeX writing workspace"
 edition = "2021"
 
