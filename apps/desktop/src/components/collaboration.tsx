@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef, useState } from "react";
+import { UsersIcon } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -572,8 +573,14 @@ export function CollaborationPanel({ projectId }: { projectId: string }) {
   const reviews = proposals.filter((p) => p.origin === "reviewer");
   const resolutions = proposals.filter((p) => p.origin === "resolution");
   return (
-    <div className="space-y-2 border-t px-3 py-3 text-xs">
-      <div className="font-medium">Collaboration</div>
+    <div className="space-y-2 border-sidebar-border border-t px-3 pb-3 text-xs">
+      <div className="flex h-8 shrink-0 items-center justify-center gap-2">
+        <UsersIcon
+          className="size-3.5 shrink-0 text-muted-foreground"
+          aria-hidden="true"
+        />
+        <span className="font-medium text-xs">Collaboration</span>
+      </div>
       {!status.connected ? (
         <ConnectSharedProject projectId={projectId} connected={reload} />
       ) : (

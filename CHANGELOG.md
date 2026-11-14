@@ -5,6 +5,7 @@ and detailed release notes are in [docs/releases](docs/releases/README.md).
 
 ## Unreleased
 
+- Center the Collaboration sidebar heading and add a people icon to match neighboring sections.
 - Save reviewer findings independently of suggested manuscript edits. Keep selected tracked files, defer or discard other suggestions, and reopen locally retained reports even after discard; saved reviews allow independent editing and later conflict-aware acceptance.
 - Open reviewer findings in closable tabs beside the PDF, with readable Markdown, highlighted source references and quotes, tables, and equations for pending and saved reviews.
 - Mark reviewer chat tabs with a persistent purple dot and Review label, alongside the orange indicator for pending changes.
