@@ -1,6 +1,7 @@
 import { invoke } from "@/lib/backend";
 import { create } from "zustand";
 import { toast } from "sonner";
+import { beginActivity } from "@/stores/activity-store";
 
 export const useCollaborationLock = create<{ projectId: string | null }>(
   () => ({ projectId: null }),
@@ -46,6 +47,7 @@ export async function syncProject(
   }
   if (background && Date.now() - (lastCheck.get(projectId) ?? 0) < 60_000)
     return;
+  let activity: ReturnType<typeof beginActivity> | undefined;
   const task = (async () => {
     const status = await collaboration<CollaborationStatus>(
       projectId,
@@ -55,6 +57,8 @@ export async function syncProject(
     lastCheck.set(projectId, Date.now());
     const { useDocumentStore } = await import("@/stores/document-store");
     const doc = useDocumentStore.getState();
+    if (doc.projectId === projectId && doc.projectRoot)
+      activity = beginActivity({ projectPath: doc.projectRoot }, "syncing");
     type SyncResult = CollaborationStatus & {
       resolution?: PreparedProposal;
       changed?: boolean;
@@ -85,6 +89,7 @@ export async function syncProject(
         useCollaborationLock.setState({ projectId: null });
       }
     }
+    activity?.finish();
     if (useDocumentStore.getState().projectId !== projectId) return;
     if (result.resolution) {
       const { useAgentChatStore } = await import("@/stores/agent-chat-store");
@@ -113,6 +118,7 @@ export async function syncProject(
   try {
     await task;
   } finally {
+    activity?.finish();
     running.delete(projectId);
     window.dispatchEvent(
       new CustomEvent("prism-collaboration", { detail: projectId }),

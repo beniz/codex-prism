@@ -1,10 +1,12 @@
 import { beforeEach, expect, it, vi } from "vitest";
 import { invoke } from "@/lib/backend";
 import { syncProject, useCollaborationLock } from "@/lib/collaboration";
+import { resetActivities, useActivityStore } from "@/stores/activity-store";
 
 const { document, chats } = vi.hoisted(() => ({
   document: {
     projectId: "",
+    projectRoot: "/paper",
     files: [] as { isDirty: boolean }[],
     refreshFiles: vi.fn(),
     setPendingRecompile: vi.fn(),
@@ -26,12 +28,46 @@ vi.mock("@/stores/agent-chat-store", () => ({
 let counter = 0;
 beforeEach(() => {
   vi.clearAllMocks();
+  resetActivities();
   document.projectId = `collaboration-${++counter}`;
   document.files = [{ isDirty: false }];
   useCollaborationLock.setState({ projectId: null });
   vi.mocked(invoke).mockImplementation(async (_command, args) =>
     args?.operation === "status" ? { connected: true } : { changed: false },
   );
+});
+
+it.each([
+  false,
+  true,
+])("tracks background sync activity through completion or failure (failure: %s)", async (fails) => {
+  let finish!: () => void;
+  vi.mocked(invoke).mockImplementation(async (_command, args) => {
+    if (args?.operation === "status") return { connected: true };
+    await new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    if (fails) throw new Error("Network unavailable");
+    return { changed: false };
+  });
+  const task = syncProject(document.projectId, true);
+  const completion = fails
+    ? expect(task).rejects.toThrow("Network unavailable")
+    : expect(task).resolves.toBeUndefined();
+  await vi.waitFor(() => expect(finish).toBeTypeOf("function"));
+  expect(useActivityStore.getState().operations).toMatchObject([
+    { projectPath: "/paper", kind: "syncing", projectWide: false },
+  ]);
+  finish();
+  await completion;
+  expect(useActivityStore.getState().operations).toEqual([]);
+});
+
+it("does not announce synchronization for a disconnected project", async () => {
+  vi.mocked(invoke).mockResolvedValue({ connected: false });
+  await syncProject(document.projectId, true);
+  expect(useActivityStore.getState().operations).toEqual([]);
+  expect(invoke).toHaveBeenCalledTimes(1);
 });
 
 it("does not checkpoint edits or compile unchanged input on a background check", async () => {

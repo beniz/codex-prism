@@ -289,6 +289,8 @@ async function field(label: string, value: string) {
   );
   if (button("Sync now")!.textContent?.trim())
     throw new Error("Sync still has a separate sidebar row");
+  const idleSidebarHeight = sidebar.getBoundingClientRect().height;
+  const idleSidebarText = sidebar.textContent;
   synchronizing = true;
   window.dispatchEvent(new CustomEvent("prism-collaboration"));
   await wait(
@@ -296,6 +298,13 @@ async function field(label: string, value: string) {
   );
   if (!button("Synchronizing…")!.classList.contains("text-blue-600"))
     throw new Error("Background sync is not highlighted");
+  if (
+    sidebar.getBoundingClientRect().height !== idleSidebarHeight ||
+    sidebar.textContent !== idleSidebarText
+  )
+    throw new Error("Synchronization changes the sidebar layout or text");
+  if (button("Cancel sync"))
+    throw new Error("Transient cancel sync row remains");
   synchronizing = false;
   window.dispatchEvent(new CustomEvent("prism-collaboration"));
   await wait(() => !!button("Sync now") && !button("Sync now")!.disabled);
@@ -500,6 +509,7 @@ async function field(label: string, value: string) {
       "borderless sidebar action rows",
       "heading icon synchronizes and refreshes reviews",
       "background synchronization highlights the icon until completion",
+      "synchronization leaves sidebar layout and text stable",
       "formatted Markdown and math",
       "PDF stays mounted across tab switches",
       "close and reopen findings",

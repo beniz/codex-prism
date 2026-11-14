@@ -4,7 +4,6 @@ import {
   LinkIcon,
   RefreshCwIcon,
   HistoryIcon,
-  XIcon,
   ClipboardCheckIcon,
   GitMergeIcon,
   FileTextIcon,
@@ -780,9 +779,7 @@ export function CollaborationPanel({ projectId }: { projectId: string }) {
                   "size-1.5 shrink-0 rounded-full",
                   status.warning || status.localEdits
                     ? "bg-amber-500"
-                    : status.busy
-                      ? "bg-muted-foreground"
-                      : "bg-green-500",
+                    : "bg-green-500",
                 )}
               />
               <span
@@ -794,16 +791,14 @@ export function CollaborationPanel({ projectId }: { projectId: string }) {
                   undefined
                 }
               >
-                {status.busy
-                  ? "Synchronizing…"
-                  : status.message ||
-                    status.warning ||
-                    status.localEdits ||
-                    (status.behind
-                      ? "Updates available"
-                      : status.ahead
-                        ? "Saved locally · waiting to share"
-                        : "Up to date")}
+                {status.message ||
+                  status.warning ||
+                  status.localEdits ||
+                  (status.behind
+                    ? "Updates available"
+                    : status.ahead
+                      ? "Saved locally · waiting to share"
+                      : "Up to date")}
               </span>
             </div>
             <div
@@ -835,22 +830,12 @@ export function CollaborationPanel({ projectId }: { projectId: string }) {
           </span>
         </div>
         {status.connected && (
-          <>
-            {status.busy && (
-              <CollaborationRow
-                icon={XIcon}
-                onClick={() => void collaboration(projectId, "cancel")}
-              >
-                Cancel sync
-              </CollaborationRow>
-            )}
-            <CollaborationRow
-              icon={HistoryIcon}
-              onClick={() => setHistoryOpen(true)}
-            >
-              View changes
-            </CollaborationRow>
-          </>
+          <CollaborationRow
+            icon={HistoryIcon}
+            onClick={() => setHistoryOpen(true)}
+          >
+            View changes
+          </CollaborationRow>
         )}
         <CollaborationRow
           icon={ClipboardCheckIcon}

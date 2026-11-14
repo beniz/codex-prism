@@ -23,6 +23,7 @@ export const activityLabels = {
   restoring: "Restoring conversations…",
   history: "Loading history…",
   conversation: "Loading conversation…",
+  syncing: "Synchronizing…",
 } as const;
 export type ActivityKind = keyof typeof activityLabels;
 export interface ActivityOwner {

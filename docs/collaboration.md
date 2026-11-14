@@ -45,6 +45,10 @@ to HTTPS.
 - The **Sync now** icon in the Collaboration heading saves eligible files,
   checkpoints them, synchronizes, and refreshes reviews. Without a remote, the
   icon refreshes local reviews only.
+- During automatic or manual synchronization, the heading icon turns blue and
+  **Synchronizing…** appears in the activity indicator below chat, alongside
+  other agent statuses. The sidebar keeps its layout without temporary sync or
+  cancel rows.
 - Opening or focusing a connected project checks for updates, with a cooldown.
   There is no periodic background polling.
 
