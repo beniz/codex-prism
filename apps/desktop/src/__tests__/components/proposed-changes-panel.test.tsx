@@ -237,3 +237,61 @@ it("does not transfer a busy Keep button to another chat's proposal", async () =
     expect(keep().disabled).toBe(false);
   } finally { await act(async () => root.unmount()); }
 });
+
+it("separates saving review findings from selected document acceptance", async () => {
+  (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
+  const host = document.createElement("div");
+  const root = createRoot(host);
+  const change = state.review.changes[0] as Proposal["changes"][number];
+  const proposal: Proposal = {
+    id: "review",
+    projectId: "project",
+    threadId: "review-thread",
+    generation: 1,
+    state: "ready",
+    origin: "reviewer",
+    hasReview: true,
+    reviewSaved: false,
+    conflicts: [],
+    parent: null,
+    changes: [
+      { ...change, path: "main.tex" },
+      { ...change, path: "section.tex" },
+      { ...change, path: ".prism-collab/reviews/review/report.md" },
+    ],
+  };
+  state.proposals = [proposal];
+  const button = (text: string) =>
+    [...host.querySelectorAll("button")].find((b) => b.textContent === text)!;
+  try {
+    await act(async () => root.render(<ProposedChangesPanel />));
+    expect(host.querySelectorAll('input[type="checkbox"]')).toHaveLength(2);
+    expect(host.textContent).not.toContain(".prism-collab/");
+    await act(async () => button("Save review").click());
+    expect(state.decideProposal).toHaveBeenLastCalledWith("save_review");
+    await act(async () =>
+      host
+        .querySelectorAll<HTMLInputElement>('input[type="checkbox"]')[1]
+        .click(),
+    );
+    await act(async () => button("Keep selected (1)").click());
+    expect(state.decideProposal).toHaveBeenLastCalledWith("apply", [
+      "main.tex",
+    ]);
+    await act(async () =>
+      host
+        .querySelectorAll<HTMLInputElement>('input[type="checkbox"]')[0]
+        .click(),
+    );
+    expect(button("Keep selected (0)").disabled).toBe(true);
+    proposal.reviewSaved = true;
+    proposal.generation++;
+    await act(async () => root.render(<ProposedChangesPanel />));
+    expect(button("Review saved").disabled).toBe(true);
+    expect(button("Keep selected (0)").disabled).toBe(true);
+    await act(async () => button("Discard suggested changes").click());
+    expect(state.decideProposal).toHaveBeenLastCalledWith("discard");
+  } finally {
+    await act(async () => root.unmount());
+  }
+});

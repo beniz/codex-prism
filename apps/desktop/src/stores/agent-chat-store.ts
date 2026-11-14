@@ -36,6 +36,7 @@ export interface ChatItem {
 export interface TabState {
   restoring?: boolean;
   mode?: "plan" | "default";
+  kind?: "review";
   id: string;
   title: string;
   projectPath: string | null;
@@ -57,7 +58,10 @@ interface ChatState {
   activeProjectPath: string | null;
   review: Review;
   proposals: Proposal[];
-  decideProposal(action: "apply" | "discard" | "repair"): Promise<void>;
+  decideProposal(
+    action: "apply" | "discard" | "repair" | "save_review",
+    paths?: string[],
+  ): Promise<void>;
   locked: boolean;
   requests: AgentEvent[];
   selectedModel: string;
@@ -70,7 +74,7 @@ interface ChatState {
   requestPinnedContextRemoval(labels: string[]): void;
   resetForProject(root: string | null): void;
   newSession(): void;
-  createTab(): string;
+  createTab(kind?: "review"): string;
   setActiveTab(id: string): void;
   closeTab(id: string): void;
   sendPrompt(prompt: string, context?: PromptContextOverride): Promise<void>;
@@ -153,21 +157,50 @@ export const useAgentChatStore = create<ChatState>((set, get) => ({
   projectId: null,
   activeProjectPath: null,
   proposals: [],
-  decideProposal: async (action) => {
+  decideProposal: async (action, paths) => {
     const state = get();
     const p = activeProposal(state);
     if (!p || proposalActivityBusy(p.id)) return;
-    const owner = state.tabs.find(t => t.id === p.chatId || (t.sessionId && t.sessionId === p.threadId));
-    const activity = beginActivity({ projectPath: state.activeProjectPath, chatId: owner?.id,
-      proposalId: p.id, generation: p.generation }, action, { projectWide: action === "apply" });
+    const owner = state.tabs.find(
+      (t) => t.id === p.chatId || (t.sessionId && t.sessionId === p.threadId),
+    );
+    const activity = beginActivity(
+      {
+        projectPath: state.activeProjectPath,
+        chatId: owner?.id,
+        proposalId: p.id,
+        generation: p.generation,
+      },
+      action === "save_review" ? "saveReview" : action,
+      { projectWide: action === "apply" || action === "save_review" },
+    );
     const generation = projectGeneration;
-    set(s => ({ error: null, tabs: s.tabs.map(t => t.id === owner?.id ? { ...t, error: null } : t) }));
+    let checkpointToShare: string | null = null;
+    set((s) => ({
+      error: null,
+      tabs: s.tabs.map((t) => (t.id === owner?.id ? { ...t, error: null } : t)),
+    }));
     try {
-      const result = await proposals.operate(p, action);
+      if (
+        action === "apply" &&
+        p.origin === "reviewer" &&
+        useDocumentStore.getState().files.some((file) => file.isDirty)
+      )
+        throw new Error(
+          "Save your manuscript edits before accepting reviewer changes.",
+        );
+      const result =
+        paths === undefined
+          ? await proposals.operate(p, action)
+          : await proposals.operate(p, action, { paths });
       if (generation !== projectGeneration) return;
       activity.update("refreshing");
       await get().refreshReview();
       if (generation !== projectGeneration) return;
+      if (result?.reviewAgain)
+        toast.info(
+          "The manuscript changed. Review the updated proposal before Keep.",
+        );
       if (result?.historyWarning)
         toast.warning(
           `Changes applied, but history could not be saved: ${result.historyWarning}`,
@@ -185,11 +218,16 @@ export const useAgentChatStore = create<ChatState>((set, get) => ({
         await get().sendPrompt(result.prompt);
       }
       if (
-        action === "apply" &&
+        (action === "apply" || action === "save_review") &&
         !result?.conflicts?.length &&
+        !result?.reviewAgain &&
         get().projectId === p.projectId
       ) {
         const doc = useDocumentStore.getState();
+        if (!result?.historyWarning) checkpointToShare = p.projectId;
+        // Report-only reviews allow manual editing while pending. Their Keep
+        // must not reload and replace an unsaved editor buffer.
+        if (result?.sourceChanged === false) return;
         await doc.refreshFiles();
         const { compileLatex, loadExistingPdf, resolveCompileTarget, formatCompileError } =
           await import("@/lib/latex-compiler");
@@ -220,11 +258,20 @@ export const useAgentChatStore = create<ChatState>((set, get) => ({
         }
       }
     } catch (e) {
-      if (generation === projectGeneration) set(s => ({
-        error: !owner || s.activeTabId === owner.id ? String(e) : s.error,
-        tabs: s.tabs.map(t => t.id === owner?.id ? { ...t, error: String(e) } : t),
-      }));
-    } finally { activity.finish(); }
+      if (generation === projectGeneration)
+        set((s) => ({
+          error: !owner || s.activeTabId === owner.id ? String(e) : s.error,
+          tabs: s.tabs.map((t) =>
+            t.id === owner?.id ? { ...t, error: String(e) } : t,
+          ),
+        }));
+    } finally {
+      activity.finish();
+      if (checkpointToShare) {
+        const { shareCheckpoint } = await import("@/lib/collaboration");
+        shareCheckpoint(checkpointToShare);
+      }
+    }
   },
   review: { active: false, changes: [] },
   locked: false,
@@ -321,9 +368,13 @@ export const useAgentChatStore = create<ChatState>((set, get) => ({
       }
     })();
   },
-  createTab: () => {
+  createTab: (kind) => {
     if (get().restoringChats) return get().activeTabId;
     const t = tab();
+    if (kind === "review") {
+      t.kind = kind;
+      t.title = "Manuscript";
+    }
     set((s) => ({
       tabs: [...s.tabs, t],
       activeTabId: t.id,
@@ -369,10 +420,14 @@ export const useAgentChatStore = create<ChatState>((set, get) => ({
       set((s) => ({
         review,
         proposals: pending,
+        tabs: s.tabs.map((t) => t.kind === "review" ? t : pending.some((p) =>
+          p.projectId === id && p.origin === "reviewer" && p.state !== "original" &&
+          (p.chatId === t.id || (!!t.sessionId && p.threadId === t.sessionId)))
+          ? { ...t, kind: "review" as const } : t),
         locked:
           review.active ||
           review.changes.length > 0 ||
-          pending.length > 0 ||
+          pending.some((p) => p.blocksEditing !== false) ||
           s.tabs.some((t) => t.isStreaming),
       }));
     });
@@ -388,7 +443,7 @@ export const useAgentChatStore = create<ChatState>((set, get) => ({
         locked:
           review.active ||
           review.changes.length > 0 ||
-          get().proposals.length > 0 ||
+          get().proposals.some((p) => p.blocksEditing !== false) ||
           get().tabs.some((t) => t.isStreaming),
         error: null,
       });
@@ -608,7 +663,7 @@ export const useAgentChatStore = create<ChatState>((set, get) => ({
                   ...x,
                   isStreaming: true,
                   error: null,
-                  title: x.sessionId ? x.title : prompt.slice(0, 70),
+                  title: x.sessionId || x.kind === "review" ? x.title : prompt.slice(0, 70),
                   messages: [
                     ...x.messages,
                     {
@@ -970,7 +1025,7 @@ function chatTabsSnapshot(state: ChatState) {
       selectedModel: state.selectedModel,
       effortLevel: state.effortLevel,
       tabs: state.tabs.map(t => ({
-        id: t.id, title: t.title, sessionId: t.sessionId, draft: savedDraft(t), mode: t.mode,
+        id: t.id, title: t.title, sessionId: t.sessionId, draft: savedDraft(t), mode: t.mode, kind: t.kind,
       })),
     },
   };
@@ -1004,7 +1059,7 @@ useAgentChatStore.subscribe((state, previous) => {
     state.effortLevel !== previous.effortLevel || state.tabs.length !== previous.tabs.length ||
     state.tabs.some((t, i) => {
       const old = previous.tabs[i];
-      return t.id !== old.id || t.title !== old.title || t.sessionId !== old.sessionId || t.mode !== old.mode || t.submittedDraft !== old.submittedDraft;
+      return t.id !== old.id || t.title !== old.title || t.sessionId !== old.sessionId || t.mode !== old.mode || t.kind !== old.kind || t.submittedDraft !== old.submittedDraft;
     });
   if (metadataChanged) {
     try { persistChatTabs(); } catch { /* Automatic persistence is best effort. */ }

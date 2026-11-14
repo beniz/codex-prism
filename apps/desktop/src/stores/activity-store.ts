@@ -14,6 +14,7 @@ export const activityLabels = {
   stopping: "Stopping Codex…",
   reviewing: "Preparing changes for review…",
   apply: "Applying changes…",
+  saveReview: "Saving review…",
   discard: "Discarding changes…",
   repair: "Preparing conflict repair…",
   refreshing: "Refreshing document…",
@@ -22,6 +23,7 @@ export const activityLabels = {
   restoring: "Restoring conversations…",
   history: "Loading history…",
   conversation: "Loading conversation…",
+  syncing: "Synchronizing…",
 } as const;
 export type ActivityKind = keyof typeof activityLabels;
 export interface ActivityOwner {

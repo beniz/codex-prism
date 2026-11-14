@@ -43,7 +43,7 @@ fn save(root: &str, s: &State) -> Result<(), String> {
     fs::create_dir_all(Path::new(root).join(".codexprism")).map_err(|e| e.to_string())?;
     crate::projects::save_json(&state_path(root), s)
 }
-fn mutex(root: &str) -> Arc<Mutex<()>> {
+pub(crate) fn mutex(root: &str) -> Arc<Mutex<()>> {
     static LOCKS: OnceLock<Mutex<HashMap<PathBuf, Arc<Mutex<()>>>>> = OnceLock::new();
     let key = open_repo(root)
         .map(|r| r.commondir().to_owned())
@@ -124,7 +124,7 @@ fn branch(repo: &Repository) -> Result<String, String> {
 fn head(repo: &Repository) -> Option<git2::Commit<'_>> {
     repo.head().ok().and_then(|r| r.peel_to_commit().ok())
 }
-fn safe(repo: &Repository) -> Result<(), String> {
+pub(crate) fn safe(repo: &Repository) -> Result<(), String> {
     branch(repo)?;
     if repo.state() != git2::RepositoryState::Clean {
         return Err("History paused during a Git merge, rebase or other operation".into());
@@ -521,6 +521,9 @@ fn apply(root: &str, op: &Operation) -> Result<Option<SnapshotInfo>, String> {
         id: id.to_string(),
         message,
         timestamp: sig.when().seconds(),
+        author_name: sig.name().unwrap_or("").into(),
+        author_email: sig.email().unwrap_or("").into(),
+        parent_ids: parent.iter().map(|c| c.id().to_string()).collect(),
         labels: vec![],
         changed_files: changed,
     }))
@@ -860,6 +863,19 @@ pub(crate) fn restore(root: &str, target: &str) -> Result<SnapshotInfo, String> 
                 id: original_head.ok_or("Missing HEAD")?.to_string(),
                 message,
                 timestamp: chrono::Utc::now().timestamp(),
+                author_name: repo
+                    .signature()
+                    .ok()
+                    .and_then(|s| s.name().map(str::to_owned))
+                    .unwrap_or_default(),
+                author_email: repo
+                    .signature()
+                    .ok()
+                    .and_then(|s| s.email().map(str::to_owned))
+                    .unwrap_or_default(),
+                parent_ids: head(&repo)
+                    .map(|c| c.parent_ids().map(|id| id.to_string()).collect())
+                    .unwrap_or_default(),
                 labels: vec![],
                 changed_files: vec![],
             }),

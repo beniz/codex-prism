@@ -81,6 +81,10 @@ export interface Review {
   changes: ReviewChange[];
 }
 export interface Proposal {
+  origin?: "reviewer" | "resolution" | null;
+  blocksEditing?: boolean;
+  reviewSaved?: boolean;
+  hasReview?: boolean;
   id: string;
   projectId: string;
   threadId: string | null;
@@ -320,10 +324,24 @@ export const proposals = {
       args: {},
     }),
   operate: <
-    T = { conflicts?: string[]; historyWarning?: string; prompt?: string; reusedBuilds?: string[] },
+    T = {
+      conflicts?: string[];
+      historyWarning?: string;
+      prompt?: string;
+      reusedBuilds?: string[];
+      reviewAgain?: boolean;
+      sourceChanged?: boolean;
+    },
   >(
     p: Proposal,
-    action: "apply" | "discard" | "repair" | "read" | "compile" | "recover",
+    action:
+      | "apply"
+      | "discard"
+      | "repair"
+      | "read"
+      | "compile"
+      | "recover"
+      | "save_review",
     extra: Record<string, unknown> = {},
   ) =>
     nativeInvoke<T>("project_service", {

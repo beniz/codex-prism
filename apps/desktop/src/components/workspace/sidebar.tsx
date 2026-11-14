@@ -1,3 +1,4 @@
+import { CollaborationPanel } from "@/components/collaboration";
 import { UpdateIndicator } from "@/components/app-updates";
 import { DataSources } from "@/components/data-sources";
 import { ProjectInstructions } from "@/components/agent-chat/project-instructions";
@@ -1330,7 +1331,18 @@ export function Sidebar({
             </Panel>
           </PanelGroup>
 
-          {instructionsProjectId && <DataSources key={instructionsProjectId} projectId={instructionsProjectId} />}
+          {instructionsProjectId && (
+            <CollaborationPanel
+              key={`collaboration-${instructionsProjectId}`}
+              projectId={instructionsProjectId}
+            />
+          )}
+          {instructionsProjectId && (
+            <DataSources
+              key={instructionsProjectId}
+              projectId={instructionsProjectId}
+            />
+          )}
           {/* Environment section — Python + Skills */}
           <EnvironmentSection projectPath={projectRoot} />
 

@@ -37,6 +37,32 @@ impl EventSink for DesktopEvents {
 }
 
 pub struct DesktopDirectoryPreparer;
+pub struct DesktopCredentialStore;
+impl prism_core::CredentialStore for DesktopCredentialStore {
+    fn get(&self, server: &str) -> Result<Option<String>, String> {
+        let entry = keyring::Entry::new("codex-prism.git", server).map_err(|e| e.to_string())?;
+        match entry.get_password() {
+            Ok(value) => Ok(Some(value)),
+            Err(keyring::Error::NoEntry) => Ok(None),
+            Err(e) => Err(e.to_string()),
+        }
+    }
+    fn set(&self, server: &str, secret: &str) -> Result<(), String> {
+        keyring::Entry::new("codex-prism.git", server)
+            .map_err(|e| e.to_string())?
+            .set_password(secret)
+            .map_err(|e| e.to_string())
+    }
+    fn remove(&self, server: &str) -> Result<(), String> {
+        match keyring::Entry::new("codex-prism.git", server)
+            .map_err(|e| e.to_string())?
+            .delete_credential()
+        {
+            Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+            Err(e) => Err(e.to_string()),
+        }
+    }
+}
 impl DirectoryPreparer for DesktopDirectoryPreparer {
     fn prepare(&self, target: &Path, ownership_root: &Path) -> Result<(), String> {
         #[cfg(not(target_os = "windows"))]

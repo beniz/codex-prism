@@ -130,13 +130,13 @@ For the third example, add the paper in project settings first, then type `@` an
 
 ## Your files and privacy
 
-Projects, document compilation, and Git history stay local. Codex sends prompts and the content it uses to its configured AI provider. Its installed CLI manages the account and credentials.
+Projects and document compilation stay local. Git history is shared with the configured remote only when collaboration is connected. Codex sends prompts and the content it uses to its configured AI provider. Its installed CLI manages the account and credentials.
 
-Git commit titles can contain shortened prompts. **Include prompt in commits** adds full user prompts and is off by default. Review history before sharing it; codex-prism never pushes automatically.
+Git commit titles can contain shortened prompts. **Include prompt in commits** adds full user prompts and is off by default. Review history before sharing it; connected projects automatically push explicit Save checkpoints and changes accepted with Keep. Autosave remains local.
 
 Remote data sources need an already running, authenticated Codex server. Remote agents are instructed to leave sources unchanged; this is **instruction-based protection**, not a filesystem read-only guarantee. [SSH setup and limits](README_AGENTS.md#ssh-data-sources)
 
-codex-prism is a single-user desktop editor. “Git-collaborative” refers to working with agents through reviewable commits; it does not provide simultaneous editing by multiple people.
+codex-prism supports asynchronous Git collaboration through GitHub and Gitea. Use **Connect shared project** from the project picker or workspace; **Request review** prepares findings and suggested edits on a local branch. It does not provide simultaneous live editing. See [collaboration setup](docs/collaboration.md).
 
 ## Troubleshooting
 

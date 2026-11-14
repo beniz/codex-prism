@@ -30,6 +30,7 @@ jobs:
     container: ubuntu:26.04
     timeout-minutes: 60
     env:
+      PRISM_GITHUB_CLIENT_ID: ${{ vars.PRISM_GITHUB_CLIENT_ID }}
       PRISM_MANUAL_RELEASE: ${{ !inputs.signed_updates && '1' || '0' }}
       PRISM_OFFICIAL_BUILD: ${{ inputs.release_tag != '' && '1' || '0' }}
       PRISM_UPDATE_PUBLIC_KEY: ${{ inputs.release_tag != '' && inputs.signed_updates && secrets.PRISM_UPDATE_PUBLIC_KEY || '' }}
@@ -50,7 +51,7 @@ jobs:
           apt-get install -y --no-install-recommends \
             ca-certificates git curl wget build-essential pkg-config python3 \
             libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev \
-            librsvg2-bin patchelf squashfs-tools libssl-dev libpng-dev \
+            librsvg2-bin patchelf squashfs-tools libssl-dev libpng-dev libdbus-1-dev \
             zlib1g-dev file xdg-utils
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
