@@ -5,6 +5,7 @@ and detailed release notes are in [docs/releases](docs/releases/README.md).
 
 ## Unreleased
 
+- Add a small gap between the outline and Collaboration section in the sidebar.
 - Consolidate manual synchronization into the Collaboration heading icon, removing the separate Sync now row; highlight the icon in blue during automatic or manual synchronization. Local projects use the icon to refresh reviews.
 
 - Use compact sidebar rows for collaboration actions, highlight Request review in purple, and list saved, local, and pending reviews directly for one-click opening.

@@ -669,7 +669,7 @@ export function CollaborationPanel({ projectId }: { projectId: string }) {
   };
   return (
     <section
-      className="border-sidebar-border border-t text-xs"
+      className="mt-2 border-sidebar-border border-t text-xs"
       aria-label="Collaboration"
     >
       <div className="relative flex h-8 shrink-0 items-center justify-center gap-2 px-9">
