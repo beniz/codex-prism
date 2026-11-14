@@ -2,7 +2,7 @@
 
 Status: evolving design for the initial implementation. See [collaboration setup](collaboration.md) for current usage and build configuration. Unreleased changes are not features of previously published packages.
 
-Implementation decisions: repository-root projects only; manual sharing after explicit Save or Sync now; agent sharing after Keep; GitHub browser sign-in independent of SSH transport; reviewer reports and proposed edits by default; review branches remain local in the first release.
+Implementation decisions: repository-root projects only; manual sharing after explicit Save or Sync now; agent sharing after Keep or Save review; GitHub browser sign-in independent of SSH transport; reviewer reports and proposed edits by default; review branches remain local in the first release.
 
 ## Goal
 
@@ -258,25 +258,23 @@ remote reviewers and CI deployment are outside the initial scope.
    the agent does not control main-branch acceptance or remote publication.
 4. Present the report, ordinary source diffs, PDF preview, and follow-up chat.
    Preserve the exact reviewed base and proposal revision through refinements.
-5. **Keep** integrates the approved result into the shared branch and resumes
-   normal synchronization. If main has advanced, prepare the integration against
-   the latest revision; use agent conflict resolution where needed, and renew
-   review when the proposed result changes.
-6. Keep review branches local in the initial release. Accepted reports and edits
-   travel through ordinary shared-branch synchronization. Publishing unaccepted
-   review branches and provider pull-request UI are deferred.
+5. **Save review** commits only the report and metadata to the shared branch for
+   normal synchronization. Preserve the suggested document edits as a pending
+   proposal, and allow independent manual edits while the reviewer is idle.
+6. **Keep selected** integrates selected tracked document files (and saves the
+   findings if necessary). Unselected edits remain pending. Merge against the
+   latest manuscript and require renewed review when the result changes.
+7. **Discard suggested changes** dismisses remaining document edits but retains
+   findings locally. Saved review records and already accepted files survive.
 
-Keep both reports and unaccepted manuscript edits on the review branch initially.
-Prism can display reports directly from that branch. Accepted review records can
-travel with the integration commit; report-only reviews should not create a
-manuscript-edit lock solely because metadata exists. Publishing a report without
-accepting accompanying edits is a separate operation, not an implicit merge of
-the whole branch.
-
-**Discard** leaves the shared manuscript unchanged. Pending or interrupted work
-remains recoverable until explicitly discarded. Do not remove active or pending
-review worktrees during cleanup, and do not delete published review branches
-implicitly.
+Review branches and retained snapshots stay local. The saved-reviews UI also
+exposes locally retained reports after their worktrees have been cleaned up.
+Saving findings and accepting selected edits create single-parent commits; never
+merge the reviewer branch just to save its report, since that would make rejected
+source revisions reachable through shared history. Durable decision journals
+cover both Git publication and the remaining proposal's snapshot/generation.
+Review records are excluded from the document-change checklist and retain their
+original reviewed revision across subsequent independent editing.
 
 ### Minimal review records
 

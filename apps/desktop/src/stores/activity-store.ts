@@ -14,6 +14,7 @@ export const activityLabels = {
   stopping: "Stopping Codex…",
   reviewing: "Preparing changes for review…",
   apply: "Applying changes…",
+  saveReview: "Saving review…",
   discard: "Discarding changes…",
   repair: "Preparing conflict repair…",
   refreshing: "Refreshing document…",

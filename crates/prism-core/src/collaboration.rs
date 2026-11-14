@@ -110,7 +110,7 @@ fn branch(repo: &Repository) -> Result<String, String> {
         .map(str::to_owned)
         .ok_or("Missing branch".into())
 }
-fn tracked_clean(repo: &Repository) -> Result<(), String> {
+pub(crate) fn tracked_clean(repo: &Repository) -> Result<(), String> {
     workflow::safe(repo)?;
     let mut options = git2::StatusOptions::new();
     options.include_untracked(false);
@@ -1371,6 +1371,7 @@ pub(crate) async fn service(
                 }
             }
         }
+        reviews.extend(crate::proposals::local_reviews(&app, project.as_deref().ok_or("Missing project")?)?);
         return Ok(json!(reviews));
     }
     if operation == "report" {

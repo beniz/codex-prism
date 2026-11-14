@@ -58,7 +58,10 @@ interface ChatState {
   activeProjectPath: string | null;
   review: Review;
   proposals: Proposal[];
-  decideProposal(action: "apply" | "discard" | "repair"): Promise<void>;
+  decideProposal(
+    action: "apply" | "discard" | "repair" | "save_review",
+    paths?: string[],
+  ): Promise<void>;
   locked: boolean;
   requests: AgentEvent[];
   selectedModel: string;
@@ -154,13 +157,23 @@ export const useAgentChatStore = create<ChatState>((set, get) => ({
   projectId: null,
   activeProjectPath: null,
   proposals: [],
-  decideProposal: async (action) => {
+  decideProposal: async (action, paths) => {
     const state = get();
     const p = activeProposal(state);
     if (!p || proposalActivityBusy(p.id)) return;
-    const owner = state.tabs.find(t => t.id === p.chatId || (t.sessionId && t.sessionId === p.threadId));
-    const activity = beginActivity({ projectPath: state.activeProjectPath, chatId: owner?.id,
-      proposalId: p.id, generation: p.generation }, action, { projectWide: action === "apply" });
+    const owner = state.tabs.find(
+      (t) => t.id === p.chatId || (t.sessionId && t.sessionId === p.threadId),
+    );
+    const activity = beginActivity(
+      {
+        projectPath: state.activeProjectPath,
+        chatId: owner?.id,
+        proposalId: p.id,
+        generation: p.generation,
+      },
+      action === "save_review" ? "saveReview" : action,
+      { projectWide: action === "apply" || action === "save_review" },
+    );
     const generation = projectGeneration;
     let checkpointToShare: string | null = null;
     set((s) => ({
@@ -168,7 +181,18 @@ export const useAgentChatStore = create<ChatState>((set, get) => ({
       tabs: s.tabs.map((t) => (t.id === owner?.id ? { ...t, error: null } : t)),
     }));
     try {
-      const result = await proposals.operate(p, action);
+      if (
+        action === "apply" &&
+        p.origin === "reviewer" &&
+        useDocumentStore.getState().files.some((file) => file.isDirty)
+      )
+        throw new Error(
+          "Save your manuscript edits before accepting reviewer changes.",
+        );
+      const result =
+        paths === undefined
+          ? await proposals.operate(p, action)
+          : await proposals.operate(p, action, { paths });
       if (generation !== projectGeneration) return;
       activity.update("refreshing");
       await get().refreshReview();
@@ -194,7 +218,7 @@ export const useAgentChatStore = create<ChatState>((set, get) => ({
         await get().sendPrompt(result.prompt);
       }
       if (
-        action === "apply" &&
+        (action === "apply" || action === "save_review") &&
         !result?.conflicts?.length &&
         !result?.reviewAgain &&
         get().projectId === p.projectId

@@ -56,7 +56,11 @@ const FindingsDocument = memo(function FindingsDocument({
             Reviewer findings
           </span>
           <span className="rounded-full bg-muted px-2.5 py-1">
-            {findings.status === "saved" ? "Saved review" : "Pending review"}
+            {findings.status === "saved"
+              ? "Saved review"
+              : findings.status === "local"
+                ? "Local review"
+                : "Pending review"}
           </span>
           {findings.reviewedCommit && (
             <span className="text-muted-foreground">

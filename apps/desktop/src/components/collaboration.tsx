@@ -515,6 +515,8 @@ export function CollaborationPanel({ projectId }: { projectId: string }) {
         scope?: string;
         reviewedCommit?: string;
         schemaVersion: number;
+        proposalId?: string;
+        local?: boolean;
       }[]
     | null
   >(null);
@@ -699,12 +701,12 @@ export function CollaborationPanel({ projectId }: { projectId: string }) {
               const path = p.changes.find((c) =>
                 c.path.endsWith("/report.md"),
               )?.path;
-              if (path)
+              if (p.hasReview || path)
                 await openFindings(
                   {
                     id: `proposal:${p.id}`,
-                    title: "Pending review",
-                    status: "pending",
+                    title: p.reviewSaved ? "Saved review" : "Pending review",
+                    status: p.reviewSaved ? "saved" : "pending",
                   },
                   { proposalId: p.id },
                 );
@@ -742,30 +744,33 @@ export function CollaborationPanel({ projectId }: { projectId: string }) {
           <DialogHeader>
             <DialogTitle>Saved reviews</DialogTitle>
             <DialogDescription>
-              Accepted findings shared with this manuscript.
+              Saved findings and locally retained reviews, including discarded
+              suggestions.
             </DialogDescription>
           </DialogHeader>
           {savedReviews?.length === 0 && (
             <p className="text-muted-foreground text-sm">
-              No saved reviews yet. Keep a reviewer proposal to save its
-              findings.
+              No review findings yet. Completed findings are retained here even
+              if you discard suggested document changes.
             </p>
           )}
           {savedReviews?.map((review) => (
             <Button
-              key={review.id}
+              key={`${review.proposalId ? "local" : "saved"}:${review.id}`}
               variant="outline"
               disabled={busy || review.schemaVersion !== 1}
               onClick={() =>
                 run(() =>
                   openFindings(
                     {
-                      id: `review:${review.id}`,
+                      id: `${review.proposalId ? "proposal" : "review"}:${review.id}`,
                       title: review.scope || "General scientific review",
-                      status: "saved",
+                      status: review.local ? "local" : "saved",
                       reviewedCommit: review.reviewedCommit,
                     },
-                    { reviewId: review.id },
+                    review.proposalId
+                      ? { proposalId: review.proposalId }
+                      : { reviewId: review.id },
                   ),
                 )
               }
@@ -774,6 +779,7 @@ export function CollaborationPanel({ projectId }: { projectId: string }) {
                 ? review.scope || "General scientific review"
                 : "Review from a newer version"}{" "}
               · {review.reviewedCommit?.slice(0, 8)}
+              {review.local ? " · Local" : ""}
             </Button>
           ))}
         </DialogContent>

@@ -83,6 +83,8 @@ export interface Review {
 export interface Proposal {
   origin?: "reviewer" | "resolution" | null;
   blocksEditing?: boolean;
+  reviewSaved?: boolean;
+  hasReview?: boolean;
   id: string;
   projectId: string;
   threadId: string | null;
@@ -332,7 +334,14 @@ export const proposals = {
     },
   >(
     p: Proposal,
-    action: "apply" | "discard" | "repair" | "read" | "compile" | "recover",
+    action:
+      | "apply"
+      | "discard"
+      | "repair"
+      | "read"
+      | "compile"
+      | "recover"
+      | "save_review",
     extra: Record<string, unknown> = {},
   ) =>
     nativeInvoke<T>("project_service", {

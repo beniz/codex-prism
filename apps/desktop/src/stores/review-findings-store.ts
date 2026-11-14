@@ -5,7 +5,7 @@ export interface ReviewFindings {
   id: string;
   title: string;
   report: string;
-  status: "pending" | "saved";
+  status: "pending" | "saved" | "local";
   reviewedCommit?: string;
 }
 

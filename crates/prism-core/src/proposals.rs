@@ -43,6 +43,10 @@ pub struct ProposalSummary {
     pub origin: Option<String>,
     #[serde(default)]
     pub blocks_editing: Option<bool>,
+    #[serde(default)]
+    pub review_saved: bool,
+    #[serde(default)]
+    pub has_review: bool,
     pub id: String,
     pub workspace_id: String,
     pub project_id: String,
@@ -74,10 +78,16 @@ pub struct RepairOutcome {
     pub proposal_id: String,
     pub prompt: String,
 }
+mod reviewer;
+pub(crate) use reviewer::local_reviews;
 type Files = BTreeMap<String, Vec<u8>>;
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct Proposal {
+    #[serde(default)]
+    review_saved: bool,
+    #[serde(default)]
+    review_deferred: bool,
     #[serde(default)]
     pub git: Option<GitProposal>,
     #[serde(default)]
@@ -164,12 +174,11 @@ pub(crate) fn locked(app: &Backend, project: &str) -> Result<bool, String> {
         {
             return Ok(true);
         }
+        if p.review_deferred {
+            continue;
+        }
         let r = snapshot(app, &p)?;
-        if r.before
-            .keys()
-            .chain(r.after.keys())
-            .any(|n| !n.starts_with(".prism-collab/") && r.before.get(n) != r.after.get(n))
-        {
+        if !reviewer::document_paths(app, &p, &r)?.is_empty() {
             return Ok(true);
         }
     }
@@ -205,6 +214,8 @@ fn create(
     parent: Option<String>,
 ) -> Result<Proposal, String> {
     let p = Proposal {
+        review_saved: false,
+        review_deferred: false,
         git: None,
         planning: false,
         source_context: Value::Null,
@@ -463,6 +474,9 @@ pub(crate) fn finish(app: &Backend, id: &str, interrupted: bool) -> Result<(), S
         }
     };
     let checkpoint = checkpoint_reviewer(app, &mut p, &mut r);
+    if p.git.as_ref().is_some_and(|g| g.kind == "reviewer") {
+        p.review_saved = false;
+    }
     if let Err(error) = checkpoint {
         // Retain captured output even if Git administration changed or writing
         // the branch failed. A follow-up can retry; Keep cannot omit that work.
@@ -793,15 +807,10 @@ pub(crate) fn report(app: &Backend, project: &str, id: &str) -> Result<Value, St
         return Err("Unknown review".into());
     }
     let r = snapshot(app, &p)?;
-    let report = r
-        .after
-        .iter()
-        .find(|(name, _)| {
-            name.starts_with(".prism-collab/reviews/") && name.ends_with("/report.md")
-        })
-        .map(|(_, b)| String::from_utf8_lossy(b).to_string())
-        .unwrap_or_default();
-    Ok(json!({"report":report,"reviewedCommit":p.git.map(|g|g.base)}))
+    let prefix = reviewer::record_prefix(&p)?;
+    let report = r.after.get(&format!("{prefix}report.md"))
+        .map(|b| String::from_utf8_lossy(b).to_string()).unwrap_or_default();
+    Ok(json!({"report":report,"reviewedCommit":p.git.map(|g|g.reviewed_commit.unwrap_or(g.base))}))
 }
 fn resolution_prompt() -> &'static str {
     "Resolve the collaborator conflict in this workspace. Exact base, local and incoming snapshots are in .codexprism/merge-inputs; any repair-intent snapshots preserve prior proposed changes. Preserve both contributors' intentions, and ask about incompatible scientific claims. Leave the result for review. Do not run Git commands, commit, push, or change other workspaces."
@@ -869,7 +878,7 @@ pub(crate) fn prepare_reviewer(
     }
     let report = format!(".prism-collab/reviews/{}/report.md", p.id);
     Ok(
-        json!({"proposalId":p.id,"prompt":format!("Review this scientific manuscript for clarity, reasoning, consistency and supporting evidence. Scope: {scope}. Write your findings to {report}, with source paths and quoted context. Also propose justified manuscript improvements directly in this workspace. Do not invent evidence or measurements; ask when scientific intent is ambiguous. Do not edit any other collaboration records. Do not run Git commands, commit, push, or modify other workspaces. Leave all changes for user review and Keep. Reviewed revision: {}.",base.id())}),
+        json!({"proposalId":p.id,"prompt":format!("Review this scientific manuscript for clarity, reasoning, consistency and supporting evidence. Scope: {scope}. Write your findings to {report}, with source paths and quoted context. Also propose justified manuscript improvements to already tracked document files directly in this workspace. Leave untracked local context unchanged. Findings are retained independently from manuscript edits. Do not invent evidence or measurements; ask when scientific intent is ambiguous. Do not edit any other collaboration records. Do not run Git commands, commit, push, or modify other workspaces. Leave all changes for user review and Keep. Reviewed revision: {}.",base.id())}),
     )
 }
 fn checked(app: &Backend, project: &str, id: &str, generation: u64) -> Result<Proposal, String> {
@@ -1102,9 +1111,11 @@ pub(crate) fn service(
         let _lock = app.inner.projects.0.lock().map_err(|e| e.to_string())?;
         return Ok(json!(all(app, project)?.into_iter().map(|p| {
             let r = snapshot(app, &p)?;
-            let changes: Vec<_> = r.before.keys().chain(r.after.keys()).collect::<BTreeSet<_>>().into_iter().filter(|n|r.before.get(*n)!=r.after.get(*n)).map(|n|json!({"path":n,"oldContent":r.before.get(n).and_then(|b|std::str::from_utf8(b).ok()),"newContent":r.after.get(n).and_then(|b|std::str::from_utf8(b).ok()),"kind":if !r.before.contains_key(n){"added"}else if !r.after.contains_key(n){"deleted"}else{"modified"},"binary":r.before.get(n).into_iter().chain(r.after.get(n)).any(|b|b.contains(&0)||std::str::from_utf8(b).is_err())})).collect();
-            let blocks_editing = ["running","repairing","applying"].contains(&p.state.as_str()) || changes.iter().any(|c| !c["path"].as_str().unwrap_or("").starts_with(".prism-collab/")) || p.git.as_ref().is_some_and(|g| g.kind == "resolution");
-            Ok(json!({"id":p.id,"workspaceId":p.id,"projectId":project,"threadId":p.thread_id,"chatId":p.chat_id,"error":p.error,"turnId":p.turn_id,"generation":p.generation,"state":p.state,"conflicts":p.conflicts,"parent":p.parent,"changes":changes,"origin":p.git.as_ref().map(|g| &g.kind),"blocksEditing":blocks_editing}))
+            let reviewer = p.git.as_ref().is_some_and(|g| g.kind == "reviewer");
+            let eligible = if reviewer { Some(reviewer::document_paths(app, &p, &r)?) } else { None };
+            let changes: Vec<_> = r.before.keys().chain(r.after.keys()).collect::<BTreeSet<_>>().into_iter().filter(|n|r.before.get(*n)!=r.after.get(*n) && eligible.as_ref().is_none_or(|paths| paths.contains(*n))).map(|n|json!({"path":n,"oldContent":r.before.get(n).and_then(|b|std::str::from_utf8(b).ok()),"newContent":r.after.get(n).and_then(|b|std::str::from_utf8(b).ok()),"kind":if !r.before.contains_key(n){"added"}else if !r.after.contains_key(n){"deleted"}else{"modified"},"binary":r.before.get(n).into_iter().chain(r.after.get(n)).any(|b|b.contains(&0)||std::str::from_utf8(b).is_err())})).collect();
+            let blocks_editing = ["running","repairing","applying"].contains(&p.state.as_str()) || (!p.review_deferred && changes.iter().any(|c| !c["path"].as_str().unwrap_or("").starts_with(".prism-collab/"))) || p.git.as_ref().is_some_and(|g| g.kind == "resolution");
+            Ok(json!({"id":p.id,"workspaceId":p.id,"projectId":project,"threadId":p.thread_id,"chatId":p.chat_id,"error":p.error,"turnId":p.turn_id,"generation":p.generation,"state":p.state,"conflicts":p.conflicts,"parent":p.parent,"changes":changes,"origin":p.git.as_ref().map(|g| &g.kind),"blocksEditing":blocks_editing,"reviewSaved":p.review_saved,"hasReview":reviewer && r.after.contains_key(&format!("{}report.md",reviewer::record_prefix(&p)?))}))
         }).collect::<Result<Vec<_>,String>>()?));
     }
     let id = args["proposalId"].as_str().ok_or("Missing proposalId")?;
@@ -1124,6 +1135,9 @@ pub(crate) fn service(
         return Ok(
             json!({"projectId":project,"threadId":p.thread_id,"workspaceId":p.id,"proposalId":id,"generation":generation,"files":files.keys().collect::<Vec<_>>(),"bytes":files.get(name)}),
         );
+    }
+    if p.git.as_ref().is_some_and(|g| g.kind == "reviewer") && ["proposal_save_review", "proposal_apply"].contains(&operation) {
+        return reviewer::decide(app, project, id, generation, operation == "proposal_save_review", &args);
     }
     let r = snapshot(app, &p)?;
     let main = projects::get(app, project)?;
@@ -1283,6 +1297,8 @@ pub(crate) fn service(
             )?;
             candidate.chat_id = p.chat_id.clone();
             candidate.git = p.git.clone();
+            candidate.review_deferred = p.review_deferred;
+            candidate.review_saved = p.review_saved;
             candidate.commit_subject = p.commit_subject.clone();
             let intended = root(app, &candidate)?.join(".codexprism/repair-intent");
             for (side, files) in [("before", &r.before), ("after", &r.after)] {
@@ -1319,6 +1335,14 @@ fn recover_inner(app: &Backend, finish_runs: bool) {
         let Ok(p) = load(app, &e.file_name().to_string_lossy()) else {
             continue;
         };
+        if reviewer::pending(app, &p) {
+            if let Err(error) = reviewer::recover(app, &p) {
+                let mut failed = p.clone();
+                failed.error = Some(error);
+                let _ = save(app, &failed);
+            }
+            continue;
+        }
         let journal = e.path().join("application.json");
         if journal.exists() {
             let result = (|| -> Result<(), String> {

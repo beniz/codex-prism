@@ -71,13 +71,30 @@ branch. Findings and proposed improvements are reviewed through the normal chat,
 diffs, PDF preview, and Keep controls. Report-only results do not keep the editor
 locked after the turn completes.
 
-Review branches are local in this release. Keep integrates the report and approved
-edits into the manuscript branch, where normal synchronization can share them.
-Untracked local context is retained in the reviewer workspace without being
-published unchanged. Save manuscript files before requesting edits to them.
-Discard leaves main unchanged. **View saved reviews** reopens accepted findings,
-including those received from collaborators. No automatic reviews, pull requests, or review
-branch publication are performed.
+Review branches remain local. Findings are always retained locally and remain
+available under **View saved reviews**, including after **Discard suggested
+changes**. Local-only findings are labeled **Local**.
+
+- **Save review** records only this review's report and metadata on the manuscript
+  branch for normal synchronization. Suggested document edits remain pending, and
+  manual editing is unlocked once the agent is idle.
+- **Keep selected** accepts only the checked tracked document files, and saves the
+  review records if needed. Unselected edits remain pending in the reviewer chat.
+  Save any manual manuscript edits before accepting reviewer changes.
+- **Discard suggested changes** dismisses the pending edits without removing the
+  retained findings or previously accepted files.
+
+After independent edits, acceptance merges selected files against the current
+manuscript. A changed merge result requires renewed review; conflicting files
+remain unapplied and can be repaired with the agent. Reviewer follow-ups keep
+pending edits and the original reviewed revision. New or untracked context files
+are not included in document acceptance. Record saving and selective acceptance
+use ordinary commits containing only the chosen output, never a merge of the
+entire reviewer branch and its unaccepted history. Existing staged or unsaved
+on-disk changes cause acceptance to pause without changing them.
+
+Report-only reviews do not trigger source reload or main-PDF compilation. No
+automatic reviews, pull requests, or review-branch publication are performed.
 
 Versioned review metadata lives in `.prism-collab/reviews/<id>/`. It is excluded
 from TeX inputs and ordinary source snapshots/restores. Runtime state, credentials,

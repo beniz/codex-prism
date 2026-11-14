@@ -1,6 +1,8 @@
 // Real React components with a disposable host boundary; no real credentials or remotes.
 import { createRoot } from "react-dom/client";
 import "../../src/styles/globals.css";
+import { ProposedChangesPanel } from "../../src/components/agent-chat/proposed-changes-panel";
+import { proposals } from "../../src/lib/backend";
 import { useDocumentStore } from "../../src/stores/document-store";
 import { useAgentChatStore } from "../../src/stores/agent-chat-store";
 import { useReviewFindingsStore } from "../../src/stores/review-findings-store";
@@ -42,6 +44,7 @@ const calls: { operation: string; projectId: string | null; args: any }[] = [];
 let opened = "";
 let submitted = "";
 let callback = 0;
+let retainedLocalReview = false;
 let delayReport = false;
 let finishReport: ((value: { report: string }) => void) | undefined;
 (window as any).__TAURI_INTERNALS__ = {
@@ -88,6 +91,18 @@ let finishReport: ((value: { report: string }) => void) | undefined;
             reviewedCommit: "abcdef12",
             schemaVersion: 1,
           },
+          ...(retainedLocalReview
+            ? [
+                {
+                  id: "retained",
+                  proposalId: "retained",
+                  scope: "Retained findings",
+                  reviewedCommit: "abcdef12",
+                  schemaVersion: 1,
+                  local: true,
+                },
+              ]
+            : []),
         ];
       case "report":
         if (delayReport) {
@@ -203,6 +218,7 @@ async function field(label: string, value: string) {
     <div style={{ display: "flex", height: "100vh" }}>
       <aside style={{ width: 280 }}>
         <CollaborationPanel projectId="existing" />
+        <ProposedChangesPanel />
       </aside>
       <main style={{ flex: 1, minWidth: 0 }}>
         <ReviewFindingsTabs>
@@ -256,6 +272,8 @@ async function field(label: string, value: string) {
         projectId: "existing",
         chatId: useAgentChatStore.getState().activeTabId,
         origin: "reviewer",
+        hasReview: true,
+        reviewSaved: false,
         state: "ready",
         generation: 1,
         conflicts: [],
@@ -295,6 +313,85 @@ async function field(label: string, value: string) {
   useDocumentStore.setState({ projectId: "existing" });
   await click("View saved reviews");
   await click("Clarity · abcdef12");
+  // Exercise the real decision controls with a deterministic native boundary.
+  useAgentChatStore.setState({
+    projectId: "existing",
+    proposals: [
+      {
+        ...useAgentChatStore.getState().proposals[0],
+        changes: ["main.tex", "section.tex"].map((path) => ({
+          path,
+          kind: "modified",
+          binary: false,
+          oldContent: "Before",
+          newContent: "After",
+        })),
+      },
+    ],
+  });
+  let kept: string[] = [];
+  proposals.operate = (async (proposal, action, extra) => {
+    if (action === "save_review") {
+      useAgentChatStore.setState({
+        locked: false,
+        proposals: [
+          {
+            ...proposal,
+            generation: proposal.generation + 1,
+            reviewSaved: true,
+            blocksEditing: false,
+          },
+        ],
+      });
+    } else if (action === "apply") {
+      kept = extra?.paths as string[];
+      useAgentChatStore.setState({
+        proposals: [
+          {
+            ...proposal,
+            generation: proposal.generation + 1,
+            changes: proposal.changes.filter(
+              (change) => !kept.includes(change.path),
+            ),
+          },
+        ],
+      });
+    } else if (action === "discard") {
+      retainedLocalReview = true;
+      useAgentChatStore.setState({ proposals: [] });
+    }
+    return { sourceChanged: false, conflicts: [] };
+  }) as typeof proposals.operate;
+  await click("Save review");
+  if (useAgentChatStore.getState().proposals[0].changes.length !== 2)
+    throw new Error("Save review accepted document changes");
+  await wait(() => !!document.querySelector('input[type="checkbox"]'));
+  const checklist = [
+    ...document.querySelectorAll<HTMLLabelElement>(
+      'section[aria-label="Review chat proposal"] label',
+    ),
+  ];
+  checklist
+    .find((label) => label.textContent?.includes("section.tex"))!
+    .querySelector<HTMLInputElement>("input")!
+    .click();
+  await click("Keep selected (1)");
+  if (kept.join() !== "main.tex")
+    throw new Error("Acceptance did not respect selected files");
+  if (
+    useAgentChatStore.getState().proposals[0].changes[0].path !== "section.tex"
+  )
+    throw new Error("Unselected edit was not retained");
+  await click("Discard suggested changes");
+  await click("View saved reviews");
+  await click("Retained findings · abcdef12 · Local");
+  if (!document.body.innerText.includes("Local review"))
+    throw new Error("Retained findings are not labeled local");
+  if (
+    calls.filter((call) => call.operation === "report").at(-1)?.args
+      .proposalId !== "retained"
+  )
+    throw new Error("Retained findings did not use their archived snapshot");
   return {
     ok: true,
     checks: [
@@ -311,6 +408,10 @@ async function field(label: string, value: string) {
       "pending findings preserve chat selection",
       "project isolation",
       "late report ignored after project navigation",
+      "save review leaves document changes pending",
+      "selected acceptance retains unselected files",
+      "discard retains saved findings",
+      "archived local review opens from its retained snapshot",
     ],
   };
 };

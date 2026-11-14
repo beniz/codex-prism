@@ -1112,7 +1112,7 @@ it("clears prompt preparation after validation failure and stopping after a fail
   expect(useAgentChatStore.getState().error).toContain("Stop request failed");
 });
 
-it("keeps a report-only review without reloading an unsaved manuscript buffer", async () => {
+it("saves a report-only review without reloading an unsaved manuscript buffer", async () => {
   const refreshFiles = vi.fn();
   const buffer = {
     id: "main.tex",
@@ -1141,9 +1141,84 @@ it("keeps a report-only review without reloading an unsaved manuscript buffer", 
     conflicts: [],
     sourceChanged: false,
   });
-  await useAgentChatStore.getState().decideProposal("apply");
+  await useAgentChatStore.getState().decideProposal("save_review");
   expect(refreshFiles).not.toHaveBeenCalled();
   expect(compileLatex).not.toHaveBeenCalled();
   expect(buffer.content).toBe("Unsaved manual paragraph");
   expect(useAgentChatStore.getState().error).toBeNull();
+});
+
+it("saves review records without replacing dirty buffers or compiling pending edits", async () => {
+  const state = useAgentChatStore.getState();
+  const pending = {
+    id: "review",
+    projectId: "p1",
+    chatId: "tab1",
+    origin: "reviewer",
+    state: "ready",
+    generation: 1,
+    changes: [
+      {
+        path: "main.tex",
+        kind: "modified",
+        oldContent: "before",
+        newContent: "suggested",
+        binary: false,
+      },
+    ],
+    conflicts: [],
+  } as any;
+  const buffer = { id: "main.tex", content: "manual draft", isDirty: true };
+  const refreshFiles = vi.fn();
+  vi.mocked(useDocumentStore.getState).mockReturnValue({
+    ...useDocumentStore.getState(),
+    files: [buffer],
+    refreshFiles,
+  } as any);
+  useAgentChatStore.setState({ proposals: [pending], locked: true });
+  vi.mocked(proposals.operate).mockResolvedValueOnce({
+    conflicts: [],
+    sourceChanged: false,
+  });
+  vi.mocked(proposals.list).mockResolvedValueOnce([
+    { ...pending, generation: 2, reviewSaved: true, blocksEditing: false },
+  ]);
+  await state.decideProposal("save_review");
+  expect(proposals.operate).toHaveBeenCalledWith(pending, "save_review");
+  expect(refreshFiles).not.toHaveBeenCalled();
+  expect(compileLatex).not.toHaveBeenCalled();
+  expect(buffer.content).toBe("manual draft");
+  expect(useAgentChatStore.getState().locked).toBe(false);
+  expect(useAgentChatStore.getState().proposals[0].changes).toHaveLength(1);
+});
+
+it("sends only selected document paths and refuses acceptance over unsaved buffers", async () => {
+  const pending = {
+    id: "review",
+    projectId: "p1",
+    chatId: "tab1",
+    origin: "reviewer",
+    state: "ready",
+    generation: 1,
+  } as any;
+  useAgentChatStore.setState({ proposals: [pending] });
+  vi.mocked(proposals.operate).mockResolvedValueOnce({
+    conflicts: [],
+    sourceChanged: false,
+  });
+  await useAgentChatStore.getState().decideProposal("apply", ["main.tex"]);
+  expect(proposals.operate).toHaveBeenCalledWith(pending, "apply", {
+    paths: ["main.tex"],
+  });
+  vi.mocked(proposals.operate).mockClear();
+  useAgentChatStore.setState({ proposals: [pending] });
+  vi.mocked(useDocumentStore.getState).mockReturnValue({
+    ...useDocumentStore.getState(),
+    files: [{ isDirty: true }],
+  } as any);
+  await useAgentChatStore.getState().decideProposal("apply", ["main.tex"]);
+  expect(proposals.operate).not.toHaveBeenCalled();
+  expect(useAgentChatStore.getState().error).toContain(
+    "Save your manuscript edits",
+  );
 });
