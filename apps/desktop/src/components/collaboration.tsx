@@ -1,6 +1,22 @@
-import { useEffect, useId, useRef, useState } from "react";
-import { UsersIcon } from "lucide-react";
+import { useEffect, useId, useRef, useState, type ComponentProps } from "react";
+import {
+  UsersIcon,
+  LinkIcon,
+  RefreshCwIcon,
+  HistoryIcon,
+  UnplugIcon,
+  XIcon,
+  ClipboardCheckIcon,
+  GitMergeIcon,
+  FileTextIcon,
+  FolderIcon,
+  ChevronRightIcon,
+  GitBranchIcon,
+  type LucideIcon,
+} from "lucide-react";
 import { toast } from "sonner";
+import { cn } from "@/lib/utils";
+import { useReviewList } from "@/hooks/use-review-list";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -38,10 +54,33 @@ interface Profile {
   emails?: { email: string; primary?: boolean; verified?: boolean }[];
 }
 
+function CollaborationRow({
+  icon: Icon,
+  children,
+  className,
+  ...props
+}: ComponentProps<"button"> & { icon: LucideIcon }) {
+  return (
+    <button
+      type="button"
+      className={cn(
+        "flex w-full min-w-0 items-center gap-2 rounded px-2 py-1 text-left text-xs hover:bg-sidebar-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50",
+        className,
+      )}
+      {...props}
+    >
+      <Icon aria-hidden="true" className="size-3.5 shrink-0" />
+      {children}
+    </button>
+  );
+}
+
 export function ConnectSharedProject({
   projectId = null,
   connected,
+  sidebar = false,
 }: {
+  sidebar?: boolean;
   projectId?: string | null;
   connected?: () => void;
 }) {
@@ -188,9 +227,15 @@ export function ConnectSharedProject({
   };
   return (
     <>
-      <Button size="sm" variant="outline" onClick={() => close(true)}>
-        Connect shared project
-      </Button>
+      {sidebar ? (
+        <CollaborationRow icon={LinkIcon} onClick={() => close(true)}>
+          <span className="truncate">Connect shared project</span>
+        </CollaborationRow>
+      ) : (
+        <Button size="sm" variant="outline" onClick={() => close(true)}>
+          Connect shared project
+        </Button>
+      )}
       <Dialog open={visible} onOpenChange={close}>
         <DialogContent className="max-h-[90vh] overflow-auto">
           <DialogHeader>
@@ -507,20 +552,70 @@ export function CollaborationPanel({ projectId }: { projectId: string }) {
     useReviewFindingsStore
       .getState()
       .open(projectId, { ...findings, report: value.report });
-    setSavedReviews(null);
   };
   const [historyOpen, setHistoryOpen] = useState(false);
-  const [savedReviews, setSavedReviews] = useState<
-    | {
-        id: string;
-        scope?: string;
-        reviewedCommit?: string;
-        schemaVersion: number;
-        proposalId?: string;
-        local?: boolean;
-      }[]
-    | null
-  >(null);
+  const proposals = useAgentChatStore((state) => state.proposals);
+  const reviews = proposals.filter(
+    (p) =>
+      p.projectId === projectId &&
+      p.origin === "reviewer" &&
+      p.state !== "original",
+  );
+  const resolutions = proposals.filter(
+    (p) =>
+      p.projectId === projectId &&
+      p.origin === "resolution" &&
+      p.state !== "original",
+  );
+  const reviewRevision = reviews
+    .map((p) => `${p.id}:${p.generation}:${p.state}`)
+    .join("|");
+  const reviewList = useReviewList(projectId, reviewRevision);
+  const activeFindings = useReviewFindingsStore((state) =>
+    state.projectId === projectId ? state.activeTab : null,
+  );
+  const entries = reviewList.reviews.map((review) => {
+    const pending = reviews.find(
+      (p) =>
+        review.proposalId === p.id ||
+        (!review.local && review.id === p.id && p.reviewSaved),
+    );
+    return {
+      id: `${review.proposalId ? "proposal" : "review"}:${review.id}`,
+      title: review.scope || "General scientific review",
+      status:
+        pending && !pending.reviewSaved
+          ? ("pending" as const)
+          : review.local
+            ? ("local" as const)
+            : ("saved" as const),
+      reviewedCommit: review.reviewedCommit,
+      ready: review.schemaVersion === 1,
+      args: review.proposalId
+        ? { proposalId: review.proposalId }
+        : { reviewId: review.id },
+    };
+  });
+  for (const p of reviews) {
+    if (
+      reviewList.reviews.some(
+        (review) =>
+          review.proposalId === p.id ||
+          (!review.local && review.id === p.id && p.reviewSaved),
+      )
+    )
+      continue;
+    entries.push({
+      id: `proposal:${p.id}`,
+      title: "Manuscript review",
+      status: p.reviewSaved ? "saved" : "pending",
+      reviewedCommit: undefined,
+      ready:
+        !!p.hasReview ||
+        p.changes.some((change) => change.path.endsWith("/report.md")),
+      args: { proposalId: p.id },
+    });
+  }
   const locked = useAgentChatStore((s) => s.locked);
   const reload = () =>
     collaboration<CollaborationStatus>(projectId, "status")
@@ -546,7 +641,10 @@ export function CollaborationPanel({ projectId }: { projectId: string }) {
     const subscription = listen<{ projectId: string }>(
       "project-collaboration",
       ({ payload }) => {
-        if (payload.projectId === projectId) refresh();
+        if (payload.projectId === projectId) {
+          refresh();
+          reviewList.refresh();
+        }
       },
     );
     window.addEventListener("focus", sync);
@@ -557,7 +655,7 @@ export function CollaborationPanel({ projectId }: { projectId: string }) {
       window.removeEventListener("focus", sync);
       window.removeEventListener("prism-collaboration", refresh);
     };
-  }, [projectId]);
+  }, [projectId, reviewList.refresh]);
   const run = async (fn: () => Promise<void>) => {
     setBusy(true);
     try {
@@ -569,45 +667,91 @@ export function CollaborationPanel({ projectId }: { projectId: string }) {
       void reload();
     }
   };
-  const proposals = useAgentChatStore((s) => s.proposals);
-  const reviews = proposals.filter((p) => p.origin === "reviewer");
-  const resolutions = proposals.filter((p) => p.origin === "resolution");
   return (
-    <div className="space-y-2 border-sidebar-border border-t px-3 pb-3 text-xs">
-      <div className="flex h-8 shrink-0 items-center justify-center gap-2">
+    <section
+      className="border-sidebar-border border-t text-xs"
+      aria-label="Collaboration"
+    >
+      <div className="relative flex h-8 shrink-0 items-center justify-center gap-2 px-9">
         <UsersIcon
           className="size-3.5 shrink-0 text-muted-foreground"
           aria-hidden="true"
         />
         <span className="font-medium text-xs">Collaboration</span>
+        <button
+          type="button"
+          className="absolute right-1 rounded-md p-1.5 text-muted-foreground hover:bg-sidebar-accent hover:text-foreground"
+          title="Refresh collaboration"
+          aria-label="Refresh collaboration"
+          onClick={() => {
+            void reload();
+            reviewList.refresh();
+          }}
+        >
+          <RefreshCwIcon className="size-3.5" aria-hidden="true" />
+        </button>
       </div>
-      {!status.connected ? (
-        <ConnectSharedProject projectId={projectId} connected={reload} />
-      ) : (
-        <>
-          <p role="status">
-            {busy || status.busy
-              ? "Synchronizing…"
-              : status.message ||
-                status.warning ||
-                status.localEdits ||
-                (status.behind
-                  ? "Updates available"
-                  : status.ahead
-                    ? "Saved locally · waiting to share"
-                    : "Up to date")}
-          </p>
-          <p className="text-muted-foreground">
-            {status.branch}
-            {status.checkedAt
-              ? ` · checked ${new Date(status.checkedAt * 1000).toLocaleTimeString()}`
-              : ""}
-          </p>
-          <div className="flex flex-wrap gap-1">
-            <ConnectSharedProject projectId={projectId} connected={reload} />
-            <Button
-              size="sm"
-              variant="outline"
+      <div className="space-y-0.5 px-1 pb-1.5">
+        {status.connected && (
+          <>
+            <div
+              className="flex min-w-0 items-center gap-2 px-2 py-1"
+              role="status"
+            >
+              <span
+                aria-hidden="true"
+                className={cn(
+                  "size-1.5 shrink-0 rounded-full",
+                  status.warning || status.localEdits
+                    ? "bg-amber-500"
+                    : status.busy
+                      ? "bg-muted-foreground"
+                      : "bg-green-500",
+                )}
+              />
+              <span
+                className="truncate"
+                title={
+                  status.message ||
+                  status.warning ||
+                  status.localEdits ||
+                  undefined
+                }
+              >
+                {status.busy
+                  ? "Synchronizing…"
+                  : status.message ||
+                    status.warning ||
+                    status.localEdits ||
+                    (status.behind
+                      ? "Updates available"
+                      : status.ahead
+                        ? "Saved locally · waiting to share"
+                        : "Up to date")}
+              </span>
+            </div>
+            <div
+              className="flex min-w-0 items-center gap-2 px-2 py-1 text-muted-foreground"
+              title={
+                status.checkedAt
+                  ? `Checked ${new Date(status.checkedAt * 1000).toLocaleTimeString()}`
+                  : undefined
+              }
+            >
+              <GitBranchIcon aria-hidden="true" className="size-3.5 shrink-0" />
+              <span className="truncate">{status.branch}</span>
+            </div>
+          </>
+        )}
+        <ConnectSharedProject
+          sidebar
+          projectId={projectId}
+          connected={reload}
+        />
+        {status.connected && (
+          <>
+            <CollaborationRow
+              icon={RefreshCwIcon}
               disabled={busy}
               onClick={() =>
                 run(async () => {
@@ -630,24 +774,23 @@ export function CollaborationPanel({ projectId }: { projectId: string }) {
               }
             >
               Sync now
-            </Button>
-            <Button
-              size="sm"
-              variant="ghost"
-              onClick={() => void collaboration(projectId, "cancel")}
-            >
-              Cancel sync
-            </Button>
-            <Button
-              size="sm"
-              variant="ghost"
+            </CollaborationRow>
+            {status.busy && (
+              <CollaborationRow
+                icon={XIcon}
+                onClick={() => void collaboration(projectId, "cancel")}
+              >
+                Cancel sync
+              </CollaborationRow>
+            )}
+            <CollaborationRow
+              icon={HistoryIcon}
               onClick={() => setHistoryOpen(true)}
             >
               View changes
-            </Button>
-            <Button
-              size="sm"
-              variant="ghost"
+            </CollaborationRow>
+            <CollaborationRow
+              icon={UnplugIcon}
               disabled={busy}
               onClick={() =>
                 run(async () => {
@@ -656,148 +799,140 @@ export function CollaborationPanel({ projectId }: { projectId: string }) {
               }
             >
               Disconnect
-            </Button>
-          </div>
-        </>
-      )}
-      <Button
-        size="sm"
-        variant="outline"
-        disabled={busy || locked}
-        onClick={() => setReviewOpen(true)}
-      >
-        Request review
-      </Button>
-      {resolutions.map((p) => (
-        <Button
-          key={p.id}
-          size="sm"
-          variant="outline"
-          disabled={busy || ["running", "repairing"].includes(p.state)}
-          onClick={() =>
-            run(async () => {
-              const chats = useAgentChatStore.getState();
-              const owner = chats.tabs.find(
-                (t) =>
-                  t.id === p.chatId ||
-                  (t.sessionId && t.sessionId === p.threadId),
-              );
-              if (owner) {
-                chats.setActiveTab(owner.id);
-                return;
-              }
-              const chatId = chats.createTab();
-              await collaboration(projectId, "attach", {
-                proposalId: p.id,
-                chatId,
-              });
-              await useAgentChatStore.getState().refreshReview();
-            })
-          }
+            </CollaborationRow>
+          </>
+        )}
+        <CollaborationRow
+          icon={ClipboardCheckIcon}
+          className="text-purple-700 dark:text-purple-300"
+          disabled={busy || locked}
+          onClick={() => setReviewOpen(true)}
         >
-          Review pending resolution
-        </Button>
-      ))}
-      {reviews.map((p) => (
-        <Button
-          key={p.id}
-          size="sm"
-          variant="ghost"
-          onClick={() =>
-            run(async () => {
-              const path = p.changes.find((c) =>
-                c.path.endsWith("/report.md"),
-              )?.path;
-              if (p.hasReview || path)
-                await openFindings(
-                  {
-                    id: `proposal:${p.id}`,
-                    title: p.reviewSaved ? "Saved review" : "Pending review",
-                    status: p.reviewSaved ? "saved" : "pending",
-                  },
-                  { proposalId: p.id },
+          Request review
+        </CollaborationRow>
+        {resolutions.map((p) => (
+          <CollaborationRow
+            key={p.id}
+            icon={GitMergeIcon}
+            disabled={busy || ["running", "repairing"].includes(p.state)}
+            onClick={() =>
+              run(async () => {
+                const chats = useAgentChatStore.getState();
+                const owner = chats.tabs.find(
+                  (t) =>
+                    t.id === p.chatId ||
+                    (t.sessionId && t.sessionId === p.threadId),
                 );
-              else toast.info("The reviewer has not written findings yet.");
-            })
-          }
-        >
-          View reviewer findings
-        </Button>
-      ))}
-      <Button
-        size="sm"
-        variant="ghost"
-        disabled={busy}
-        onClick={() =>
-          run(async () => {
-            const saved = await collaboration<NonNullable<typeof savedReviews>>(
-              projectId,
-              "reviews",
-            );
-            if (useDocumentStore.getState().projectId === projectId)
-              setSavedReviews(saved);
-          })
-        }
-      >
-        View saved reviews
-      </Button>
-      <Dialog
-        open={savedReviews !== null}
-        onOpenChange={(v) => {
-          if (!v) setSavedReviews(null);
-        }}
-      >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Saved reviews</DialogTitle>
-            <DialogDescription>
-              Saved findings and locally retained reviews, including discarded
-              suggestions.
-            </DialogDescription>
-          </DialogHeader>
-          {savedReviews?.length === 0 && (
-            <p className="text-muted-foreground text-sm">
-              No review findings yet. Completed findings are retained here even
-              if you discard suggested document changes.
+                if (owner) {
+                  chats.setActiveTab(owner.id);
+                  return;
+                }
+                const chatId = chats.createTab();
+                await collaboration(projectId, "attach", {
+                  proposalId: p.id,
+                  chatId,
+                });
+                await useAgentChatStore.getState().refreshReview();
+              })
+            }
+          >
+            Review pending resolution
+          </CollaborationRow>
+        ))}
+        <details className="group" open>
+          <summary className="flex cursor-pointer list-none items-center gap-1 rounded px-2 py-1 hover:bg-sidebar-accent [&::-webkit-details-marker]:hidden">
+            <ChevronRightIcon
+              aria-hidden="true"
+              className="size-3 shrink-0 group-open:rotate-90"
+            />
+            <FolderIcon
+              aria-hidden="true"
+              className="size-3.5 shrink-0 text-muted-foreground"
+            />
+            <span className="ml-1">Reviews</span>
+            <span className="ml-auto text-muted-foreground">
+              {entries.length}
+            </span>
+          </summary>
+          <ul
+            className="max-h-56 space-y-0.5 overflow-y-auto"
+            aria-label="Review findings"
+          >
+            {entries.map((entry) => (
+              <li key={entry.id}>
+                <button
+                  type="button"
+                  disabled={busy || !entry.ready}
+                  aria-current={
+                    activeFindings === entry.id ? "page" : undefined
+                  }
+                  aria-label={`Open review: ${entry.title} (${entry.status})`}
+                  title={`${entry.title}${entry.reviewedCommit ? ` · Reviewed revision ${entry.reviewedCommit.slice(0, 8)}` : ""}${!entry.ready ? " · Findings unavailable yet or require a newer version" : ""}`}
+                  className={cn(
+                    "flex w-full min-w-0 items-center gap-2 rounded py-1 pr-2 pl-7 text-left hover:bg-sidebar-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50",
+                    activeFindings === entry.id && "bg-sidebar-accent",
+                  )}
+                  onClick={() =>
+                    run(() =>
+                      openFindings(
+                        {
+                          id: entry.id,
+                          title: entry.title,
+                          status: entry.status,
+                          reviewedCommit: entry.reviewedCommit,
+                        },
+                        entry.args,
+                      ),
+                    )
+                  }
+                >
+                  <FileTextIcon
+                    className="size-3.5 shrink-0 text-purple-500"
+                    aria-hidden="true"
+                  />
+                  <span className="min-w-0 flex-1 truncate">
+                    {entry.title.replace(/\s+/g, " ")}
+                  </span>
+                  <span className="shrink-0 text-[10px] text-muted-foreground">
+                    {entry.status === "saved"
+                      ? "Saved"
+                      : entry.status === "local"
+                        ? "Local"
+                        : entry.ready
+                          ? "Pending"
+                          : "Reviewing…"}
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ul>
+          {reviewList.loading && !entries.length && (
+            <p className="py-1 pl-7 text-muted-foreground" role="status">
+              Loading reviews…
             </p>
           )}
-          {savedReviews?.map((review) => (
-            <Button
-              key={`${review.proposalId ? "local" : "saved"}:${review.id}`}
-              variant="outline"
-              disabled={busy || review.schemaVersion !== 1}
-              onClick={() =>
-                run(() =>
-                  openFindings(
-                    {
-                      id: `${review.proposalId ? "proposal" : "review"}:${review.id}`,
-                      title: review.scope || "General scientific review",
-                      status: review.local ? "local" : "saved",
-                      reviewedCommit: review.reviewedCommit,
-                    },
-                    review.proposalId
-                      ? { proposalId: review.proposalId }
-                      : { reviewId: review.id },
-                  ),
-                )
-              }
+          {!reviewList.loading && !reviewList.error && !entries.length && (
+            <p className="py-1 pl-7 text-muted-foreground">No reviews yet</p>
+          )}
+          {reviewList.error && (
+            <CollaborationRow
+              icon={RefreshCwIcon}
+              title={reviewList.error}
+              onClick={reviewList.refresh}
             >
-              {review.schemaVersion === 1
-                ? review.scope || "General scientific review"
-                : "Review from a newer version"}{" "}
-              · {review.reviewedCommit?.slice(0, 8)}
-              {review.local ? " · Local" : ""}
-            </Button>
-          ))}
-        </DialogContent>
-      </Dialog>
+              Could not load reviews · Retry
+            </CollaborationRow>
+          )}
+        </details>
+      </div>
       <Dialog open={reviewOpen} onOpenChange={setReviewOpen}>
         <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-2xl">
           <DialogHeader>
             <DialogTitle>Request review</DialogTitle>
             <DialogDescription>
               The reviewer will prepare findings and suggested edits on a local
-              branch. Keep accepts them into your manuscript.
+              branch. Save the review independently, then keep selected document
+              changes when ready.
             </DialogDescription>
           </DialogHeader>
           <label htmlFor={reviewInstructionsId} className="font-medium text-sm">
@@ -855,6 +990,6 @@ export function CollaborationPanel({ projectId }: { projectId: string }) {
           <HistoryPanel />
         </DialogContent>
       </Dialog>
-    </div>
+    </section>
   );
 }

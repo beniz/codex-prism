@@ -91,6 +91,18 @@ let finishReport: ((value: { report: string }) => void) | undefined;
             reviewedCommit: "abcdef12",
             schemaVersion: 1,
           },
+          ...useAgentChatStore
+            .getState()
+            .proposals.filter(
+              (p) => p.origin === "reviewer" && p.hasReview && !p.reviewSaved,
+            )
+            .map((p) => ({
+              id: p.id,
+              proposalId: p.id,
+              scope: "Manuscript review",
+              schemaVersion: 1,
+              local: true,
+            })),
           ...(retainedLocalReview
             ? [
                 {
@@ -148,7 +160,8 @@ async function wait(test: () => boolean) {
 }
 function button(label: string) {
   return [...document.querySelectorAll("button")].find(
-    (b) => b.textContent?.trim() === label,
+    (b) =>
+      b.textContent?.trim() === label || b.getAttribute("aria-label") === label,
   );
 }
 async function click(label: string) {
@@ -227,12 +240,19 @@ async function field(label: string, value: string) {
       </main>
     </div>,
   );
+  await wait(() => !!button("Open review: Clarity (saved)"));
+  const sidebar = document.querySelector(
+    'section[aria-label="Collaboration"]',
+  )!;
+  if (sidebar.querySelector('[data-slot="button"]'))
+    throw new Error("Sidebar still uses button chrome");
+  if (button("View saved reviews"))
+    throw new Error("Reviews still require opening a dialog");
   await click("Request review");
   await click("Start review");
   await wait(() => submitted === "Review the argument");
   const pdf = document.querySelector("[data-pdf-fixture]");
-  await click("View saved reviews");
-  await click("Clarity · abcdef12");
+  await click("Open review: Clarity (saved)");
   await wait(() => !!document.querySelector(".review-findings-markdown h2"));
   const article = document.querySelector(
     'article[aria-label="Reviewer findings"]',
@@ -255,8 +275,7 @@ async function field(label: string, value: string) {
   if (!document.querySelector("[data-pdf-fixture]")?.checkVisibility())
     throw new Error("PDF not visible on switch");
   await click("Findings · Clarity");
-  await click("View saved reviews");
-  await click("Clarity · abcdef12");
+  await click("Open review: Clarity (saved)");
   if (useReviewFindingsStore.getState().tabs.length !== 1)
     throw new Error("Duplicate report tab");
   document
@@ -290,7 +309,16 @@ async function field(label: string, value: string) {
     ],
   });
   const chat = useAgentChatStore.getState().activeTabId;
-  await click("View reviewer findings");
+  await wait(
+    () => calls.filter((call) => call.operation === "reviews").length > 1,
+  );
+  if (
+    document.querySelectorAll(
+      '[aria-label="Open review: Manuscript review (pending)"]',
+    ).length !== 1
+  )
+    throw new Error("Pending review listed twice");
+  await click("Open review: Manuscript review (pending)");
   await wait(() => useReviewFindingsStore.getState().tabs.length === 1);
   if (useAgentChatStore.getState().activeTabId !== chat)
     throw new Error("Reading findings switched chats");
@@ -298,11 +326,11 @@ async function field(label: string, value: string) {
     throw new Error("Missing pending status");
   useDocumentStore.setState({ projectId: "other" });
   await pause();
-  if (document.body.innerText.includes("Manuscript review"))
+  if (document.querySelector('article[aria-label="Reviewer findings"]'))
     throw new Error("Report leaked into another project");
   useDocumentStore.setState({ projectId: "existing" });
   delayReport = true;
-  await click("View reviewer findings");
+  await click("Open review: Manuscript review (pending)");
   await wait(() => !!finishReport);
   const previousTabs = useReviewFindingsStore.getState().tabs;
   useDocumentStore.setState({ projectId: "other" });
@@ -311,8 +339,7 @@ async function field(label: string, value: string) {
   if (useReviewFindingsStore.getState().tabs !== previousTabs)
     throw new Error("Late report changed findings after navigation");
   useDocumentStore.setState({ projectId: "existing" });
-  await click("View saved reviews");
-  await click("Clarity · abcdef12");
+  await click("Open review: Clarity (saved)");
   // Exercise the real decision controls with a deterministic native boundary.
   useAgentChatStore.setState({
     projectId: "existing",
@@ -383,8 +410,7 @@ async function field(label: string, value: string) {
   )
     throw new Error("Unselected edit was not retained");
   await click("Discard suggested changes");
-  await click("View saved reviews");
-  await click("Retained findings · abcdef12 · Local");
+  await click("Open review: Retained findings (local)");
   if (!document.body.innerText.includes("Local review"))
     throw new Error("Retained findings are not labeled local");
   if (
@@ -402,6 +428,8 @@ async function field(label: string, value: string) {
       "existing identity preserved",
       "review routing",
       "saved findings",
+      "automatic inline review list",
+      "borderless sidebar action rows",
       "formatted Markdown and math",
       "PDF stays mounted across tab switches",
       "close and reopen findings",

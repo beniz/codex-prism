@@ -72,8 +72,11 @@ diffs, PDF preview, and Keep controls. Report-only results do not keep the edito
 locked after the turn completes.
 
 Review branches remain local. Findings are always retained locally and remain
-available under **View saved reviews**, including after **Discard suggested
-changes**. Local-only findings are labeled **Local**.
+listed directly under **Collaboration → Reviews**, including after **Discard
+suggested changes**. Click a review to open its findings tab. Local-only findings
+are labeled **Local**; pending and saved reviews are labeled separately. The list
+refreshes when reviews finish or are saved, and the section refresh icon reloads
+it manually.
 
 - **Save review** records only this review's report and metadata on the manuscript
   branch for normal synchronization. Suggested document edits remain pending, and
