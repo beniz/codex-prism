@@ -36,7 +36,9 @@ to HTTPS.
 - **Autosave** writes local files without creating a sharing checkpoint.
 - **Save** creates the normal Git checkpoint and schedules synchronization.
 - **Keep** accepts agent changes, records them, and schedules synchronization.
-- **Sync now** saves eligible files, checkpoints them, and synchronizes.
+- The **Sync now** icon in the Collaboration heading saves eligible files,
+  checkpoints them, synchronizes, and refreshes reviews. Without a remote, the
+  icon refreshes local reviews only.
 - Opening or focusing a connected project checks for updates, with a cooldown.
   There is no periodic background polling.
 

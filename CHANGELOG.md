@@ -5,6 +5,8 @@ and detailed release notes are in [docs/releases](docs/releases/README.md).
 
 ## Unreleased
 
+- Consolidate manual synchronization into the Collaboration heading icon, removing the separate Sync now row; highlight the icon in blue during automatic or manual synchronization. Local projects use the icon to refresh reviews.
+
 - Use compact sidebar rows for collaboration actions, highlight Request review in purple, and list saved, local, and pending reviews directly for one-click opening.
 - Center the Collaboration sidebar heading and add a people icon to match neighboring sections.
 - Save reviewer findings independently of suggested manuscript edits. Keep selected tracked files, defer or discard other suggestions, and reopen locally retained reports even after discard; saved reviews allow independent editing and later conflict-aware acceptance.

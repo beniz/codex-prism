@@ -45,6 +45,7 @@ let opened = "";
 let submitted = "";
 let callback = 0;
 let retainedLocalReview = false;
+let synchronizing = false;
 let delayReport = false;
 let finishReport: ((value: { report: string }) => void) | undefined;
 (window as any).__TAURI_INTERNALS__ = {
@@ -60,6 +61,7 @@ let finishReport: ((value: { report: string }) => void) | undefined;
       case "status":
         return {
           connected: args.projectId === "existing",
+          busy: synchronizing,
           url: "https://git.example.test/team/paper",
           branch: "draft/one",
           name: "Existing Author",
@@ -248,6 +250,32 @@ async function field(label: string, value: string) {
     throw new Error("Sidebar still uses button chrome");
   if (button("View saved reviews"))
     throw new Error("Reviews still require opening a dialog");
+  const syncCount = calls.filter((call) => call.operation === "sync").length;
+  const reviewCount = calls.filter(
+    (call) => call.operation === "reviews",
+  ).length;
+  await click("Sync now");
+  await wait(
+    () => calls.filter((call) => call.operation === "sync").length > syncCount,
+  );
+  await wait(
+    () =>
+      calls.filter((call) => call.operation === "reviews").length > reviewCount,
+  );
+  if (button("Sync now")!.textContent?.trim())
+    throw new Error("Sync still has a separate sidebar row");
+  synchronizing = true;
+  window.dispatchEvent(new CustomEvent("prism-collaboration"));
+  await wait(
+    () => button("Synchronizing…")?.getAttribute("aria-busy") === "true",
+  );
+  if (!button("Synchronizing…")!.classList.contains("text-blue-600"))
+    throw new Error("Background sync is not highlighted");
+  synchronizing = false;
+  window.dispatchEvent(new CustomEvent("prism-collaboration"));
+  await wait(() => !!button("Sync now") && !button("Sync now")!.disabled);
+  if (button("Sync now")!.classList.contains("text-blue-600"))
+    throw new Error("Sync highlight remained after completion");
   await click("Request review");
   await click("Start review");
   await wait(() => submitted === "Review the argument");
@@ -430,6 +458,8 @@ async function field(label: string, value: string) {
       "saved findings",
       "automatic inline review list",
       "borderless sidebar action rows",
+      "heading icon synchronizes and refreshes reviews",
+      "background synchronization highlights the icon until completion",
       "formatted Markdown and math",
       "PDF stays mounted across tab switches",
       "close and reopen findings",

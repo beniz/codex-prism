@@ -680,13 +680,53 @@ export function CollaborationPanel({ projectId }: { projectId: string }) {
         <span className="font-medium text-xs">Collaboration</span>
         <button
           type="button"
-          className="absolute right-1 rounded-md p-1.5 text-muted-foreground hover:bg-sidebar-accent hover:text-foreground"
-          title="Refresh collaboration"
-          aria-label="Refresh collaboration"
-          onClick={() => {
-            void reload();
-            reviewList.refresh();
-          }}
+          className={cn(
+            "absolute right-1 rounded-md p-1.5 hover:bg-sidebar-accent",
+            status.busy
+              ? "text-blue-600 dark:text-blue-400"
+              : "text-muted-foreground hover:text-foreground disabled:opacity-50",
+          )}
+          title={
+            status.busy
+              ? "Synchronizing…"
+              : status.connected
+                ? "Sync now"
+                : "Refresh reviews"
+          }
+          aria-label={
+            status.busy
+              ? "Synchronizing…"
+              : status.connected
+                ? "Sync now"
+                : "Refresh reviews"
+          }
+          aria-busy={!!status.busy}
+          disabled={busy || status.busy}
+          onClick={() =>
+            run(async () => {
+              try {
+                if (status.connected) {
+                  const doc = useDocumentStore.getState();
+                  if (!useAgentChatStore.getState().locked && doc.projectRoot) {
+                    await doc.saveAllFiles();
+                    if (
+                      useDocumentStore.getState().files.some((f) => f.isDirty)
+                    )
+                      throw new Error("Some edits could not be saved");
+                    await useHistoryStore
+                      .getState()
+                      .createSnapshot(
+                        doc.projectRoot,
+                        "docs(history): sync document",
+                      );
+                  }
+                  await syncProject(projectId);
+                }
+              } finally {
+                reviewList.refresh();
+              }
+            })
+          }
         >
           <RefreshCwIcon className="size-3.5" aria-hidden="true" />
         </button>
@@ -750,31 +790,6 @@ export function CollaborationPanel({ projectId }: { projectId: string }) {
         />
         {status.connected && (
           <>
-            <CollaborationRow
-              icon={RefreshCwIcon}
-              disabled={busy}
-              onClick={() =>
-                run(async () => {
-                  const doc = useDocumentStore.getState();
-                  if (!useAgentChatStore.getState().locked && doc.projectRoot) {
-                    await doc.saveAllFiles();
-                    if (
-                      useDocumentStore.getState().files.some((f) => f.isDirty)
-                    )
-                      throw new Error("Some edits could not be saved");
-                    await useHistoryStore
-                      .getState()
-                      .createSnapshot(
-                        doc.projectRoot,
-                        "docs(history): sync document",
-                      );
-                  }
-                  await syncProject(projectId);
-                })
-              }
-            >
-              Sync now
-            </CollaborationRow>
             {status.busy && (
               <CollaborationRow
                 icon={XIcon}
