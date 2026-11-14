@@ -5,6 +5,7 @@ and detailed release notes are in [docs/releases](docs/releases/README.md).
 
 ## Unreleased
 
+- Open shared-project settings from the Collaboration heading, show the connected repository address in the sidebar, and manage existing connections and disconnection in the settings dialog.
 - Add a small gap between the outline and Collaboration section in the sidebar.
 - Consolidate manual synchronization into the Collaboration heading icon, removing the separate Sync now row; highlight the icon in blue during automatic or manual synchronization. Local projects use the icon to refresh reviews.
 

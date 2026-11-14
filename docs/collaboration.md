@@ -6,11 +6,17 @@ packages.
 ## Connect a project
 
 Install Git, then choose **Connect shared project** from the project picker or
-workspace. Paste a GitHub/Gitea repository URL, branch link, or SSH clone URL.
+click the **Collaboration** heading in an open project's sidebar. Paste a
+GitHub/Gitea repository URL, branch link, or SSH clone URL.
 Check the repository, confirm the branch and contributor identity, and connect.
 From the picker, choose a new local folder; from an open project, Prism connects
 the existing repository. Projects must be at the repository root. Unrelated
 histories must be opened in separate folders.
+
+Once connected, the sidebar shows **Connected to <address>**; hover to see the
+full address. Click the **Collaboration** heading to reopen the populated
+settings, update the connection with **Save connection**, or **Disconnect**.
+The separate sync icon continues to synchronize without opening settings.
 
 Create repositories and invite collaborators through your hosting provider.
 Direct shared-branch pushes must be allowed. Rejected pushes remain local and

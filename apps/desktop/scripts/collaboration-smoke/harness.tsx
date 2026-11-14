@@ -46,6 +46,7 @@ let submitted = "";
 let callback = 0;
 let retainedLocalReview = false;
 let synchronizing = false;
+let existingConnected = true;
 let delayReport = false;
 let finishReport: ((value: { report: string }) => void) | undefined;
 (window as any).__TAURI_INTERNALS__ = {
@@ -60,7 +61,7 @@ let finishReport: ((value: { report: string }) => void) | undefined;
     switch (args.operation) {
       case "status":
         return {
-          connected: args.projectId === "existing",
+          connected: args.projectId === "existing" && existingConnected,
           busy: synchronizing,
           url: "https://git.example.test/team/paper",
           branch: "draft/one",
@@ -80,7 +81,11 @@ let finishReport: ((value: { report: string }) => void) | undefined;
           emails: [{ email: "author@example.test", verified: true }],
         };
       case "connect":
+        if (args.projectId === "existing") existingConnected = true;
         return { project: { id: "cloned", root: "/temporary/shared" } };
+      case "disconnect":
+        existingConnected = false;
+        return null;
       case "sync":
         return { changed: false };
       case "review_start":
@@ -226,7 +231,7 @@ async function field(label: string, value: string) {
   )
     throw new Error("Existing project requests clone destination");
   await click("Check repository");
-  await click("Connect");
+  await click("Save connection");
   await wait(() => calls.filter((c) => c.operation === "connect").length === 2);
   useDocumentStore.setState({ projectId: "existing", files: [] });
   root.render(
@@ -250,6 +255,26 @@ async function field(label: string, value: string) {
     throw new Error("Sidebar still uses button chrome");
   if (button("View saved reviews"))
     throw new Error("Reviews still require opening a dialog");
+  if (button("Connect shared project") || button("Disconnect"))
+    throw new Error("Connection management still appears as sidebar actions");
+  if (
+    !sidebar.textContent?.includes(
+      "Connected to https://git.example.test/team/paper",
+    )
+  )
+    throw new Error("Connected repository address is missing");
+  await click("Open collaboration settings");
+  await wait(
+    () => !!button("Save connection") && !button("Save connection")!.disabled,
+  );
+  await field("Your contributor name", "Updated Author");
+  await click("Save connection");
+  await wait(() => calls.filter((c) => c.operation === "connect").length === 3);
+  if (
+    calls.filter((c) => c.operation === "connect").at(-1)?.args.name !==
+    "Updated Author"
+  )
+    throw new Error("Connection settings did not save the changed identity");
   const syncCount = calls.filter((call) => call.operation === "sync").length;
   const reviewCount = calls.filter(
     (call) => call.operation === "reviews",
@@ -446,6 +471,18 @@ async function field(label: string, value: string) {
       .proposalId !== "retained"
   )
     throw new Error("Retained findings did not use their archived snapshot");
+  await click("Open collaboration settings");
+  await click("Disconnect");
+  await wait(() => !!sidebar.textContent?.includes("Not connected"));
+  await click("Open collaboration settings");
+  await click("Check repository");
+  await click("Connect");
+  await wait(
+    () =>
+      !!sidebar.textContent?.includes(
+        "Connected to https://git.example.test/team/paper",
+      ),
+  );
   return {
     ok: true,
     checks: [
@@ -454,6 +491,9 @@ async function field(label: string, value: string) {
       "API identity",
       "slash branch",
       "existing identity preserved",
+      "heading opens editable connection settings",
+      "connected address replaces connect action",
+      "disconnect and reconnect through settings",
       "review routing",
       "saved findings",
       "automatic inline review list",

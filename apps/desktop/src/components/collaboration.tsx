@@ -4,7 +4,6 @@ import {
   LinkIcon,
   RefreshCwIcon,
   HistoryIcon,
-  UnplugIcon,
   XIcon,
   ClipboardCheckIcon,
   GitMergeIcon,
@@ -86,6 +85,7 @@ export function ConnectSharedProject({
 }) {
   const formId = useId();
   const [visible, setVisible] = useState(false);
+  const [isConnected, setIsConnected] = useState(false);
   const [url, setUrl] = useState("");
   const [branch, setBranch] = useState("");
   const [destination, setDestination] = useState("");
@@ -207,9 +207,14 @@ export function ConnectSharedProject({
       void collaboration(null, "cancel").catch(() => {});
     } else if (projectId) {
       const ticket = generation.current;
+      setBusy(true);
+      setError("");
+      setResolved(false);
       void collaboration<CollaborationStatus>(projectId, "status")
         .then((s) => {
           if (ticket !== generation.current) return;
+          setIsConnected(s.connected);
+          setResolved(!!(s.connected && s.url && s.branch));
           if (s.url) {
             setUrl(s.url);
             try {
@@ -222,15 +227,28 @@ export function ConnectSharedProject({
         })
         .catch((e) => {
           if (ticket === generation.current) setError(String(e));
+        })
+        .finally(() => {
+          if (ticket === generation.current) setBusy(false);
         });
     }
   };
   return (
     <>
       {sidebar ? (
-        <CollaborationRow icon={LinkIcon} onClick={() => close(true)}>
-          <span className="truncate">Connect shared project</span>
-        </CollaborationRow>
+        <button
+          type="button"
+          className="flex h-full min-w-0 items-center justify-center gap-2 rounded-md px-2 hover:bg-sidebar-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          onClick={() => close(true)}
+          title="Shared project settings"
+          aria-label="Open collaboration settings"
+        >
+          <UsersIcon
+            className="size-3.5 shrink-0 text-muted-foreground"
+            aria-hidden="true"
+          />
+          <span className="truncate font-medium text-xs">Collaboration</span>
+        </button>
       ) : (
         <Button size="sm" variant="outline" onClick={() => close(true)}>
           Connect shared project
@@ -239,10 +257,13 @@ export function ConnectSharedProject({
       <Dialog open={visible} onOpenChange={close}>
         <DialogContent className="max-h-[90vh] overflow-auto">
           <DialogHeader>
-            <DialogTitle>Connect shared project</DialogTitle>
+            <DialogTitle>
+              {projectId ? "Shared project settings" : "Connect shared project"}
+            </DialogTitle>
             <DialogDescription>
-              Connect a GitHub or Gitea repository. Saved checkpoints and
-              accepted changes will be shared automatically.
+              {isConnected
+                ? "Manage the connected repository, branch, credentials, and contributor identity. Saved checkpoints and accepted changes are shared automatically."
+                : "Connect a GitHub or Gitea repository. Saved checkpoints and accepted changes will be shared automatically."}
             </DialogDescription>
           </DialogHeader>
           <fieldset disabled={busy} className="contents">
@@ -502,8 +523,23 @@ export function ConnectSharedProject({
                 })
               }
             >
-              {busy ? "Working…" : "Connect"}
+              {busy ? "Working…" : isConnected ? "Save connection" : "Connect"}
             </Button>
+            {isConnected && (
+              <Button
+                variant="outline"
+                onClick={() =>
+                  run(async () => {
+                    await collaboration(projectId, "disconnect");
+                    setIsConnected(false);
+                    close(false);
+                    connected?.();
+                  })
+                }
+              >
+                Disconnect
+              </Button>
+            )}
           </fieldset>
         </DialogContent>
       </Dialog>
@@ -673,11 +709,11 @@ export function CollaborationPanel({ projectId }: { projectId: string }) {
       aria-label="Collaboration"
     >
       <div className="relative flex h-8 shrink-0 items-center justify-center gap-2 px-9">
-        <UsersIcon
-          className="size-3.5 shrink-0 text-muted-foreground"
-          aria-hidden="true"
+        <ConnectSharedProject
+          sidebar
+          projectId={projectId}
+          connected={reload}
         />
-        <span className="font-medium text-xs">Collaboration</span>
         <button
           type="button"
           className={cn(
@@ -783,11 +819,21 @@ export function CollaborationPanel({ projectId }: { projectId: string }) {
             </div>
           </>
         )}
-        <ConnectSharedProject
-          sidebar
-          projectId={projectId}
-          connected={reload}
-        />
+        <div
+          className="flex min-w-0 items-center gap-2 px-2 py-1 text-muted-foreground"
+          title={
+            status.connected
+              ? `Connected to ${status.url || status.remote}`
+              : "Open Collaboration settings to connect a shared project"
+          }
+        >
+          <LinkIcon className="size-3.5 shrink-0" aria-hidden="true" />
+          <span className="truncate">
+            {status.connected
+              ? `Connected to ${status.url || status.remote}`
+              : "Not connected"}
+          </span>
+        </div>
         {status.connected && (
           <>
             {status.busy && (
@@ -803,17 +849,6 @@ export function CollaborationPanel({ projectId }: { projectId: string }) {
               onClick={() => setHistoryOpen(true)}
             >
               View changes
-            </CollaborationRow>
-            <CollaborationRow
-              icon={UnplugIcon}
-              disabled={busy}
-              onClick={() =>
-                run(async () => {
-                  await collaboration(projectId, "disconnect");
-                })
-              }
-            >
-              Disconnect
             </CollaborationRow>
           </>
         )}
