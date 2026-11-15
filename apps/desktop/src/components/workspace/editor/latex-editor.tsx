@@ -1,4 +1,5 @@
-import { useCollaborationLock } from "@/lib/collaboration";
+import { guardEditorTransaction } from "@/lib/editor-edit-lock";
+import { EditorLockNotice } from "./editor-lock-notice";
 import { usePdfNavigationStore } from "@/stores/pdf-navigation-store";
 import { usePreviewStore } from "@/stores/preview-store";
 import { activeProposal } from "@/stores/agent-chat-store";
@@ -656,14 +657,7 @@ export function LatexEditor() {
           },
         }),
         EditorState.transactionFilter.of((tr) =>
-          tr.docChanged &&
-          !tr.annotation(backendReload) &&
-          (useAgentChatStore.getState().locked ||
-            (useCollaborationLock.getState().projectId !== null &&
-              useCollaborationLock.getState().projectId ===
-                useDocumentStore.getState().projectId))
-            ? []
-            : tr,
+          guardEditorTransaction(tr, !!tr.annotation(backendReload)),
         ),
         compileKeymap,
         lineNumbers(),
@@ -1223,6 +1217,7 @@ export function LatexEditor() {
           </div>
         </div>
       )}
+      {isTextFile && !isLargeFileNotLoaded && <EditorLockNotice />}
       {/* Editor viewport — absolute editor content stays inside this area. */}
       <div
         ref={isPdf || isImage ? undefined : parentRef}

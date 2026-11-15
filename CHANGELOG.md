@@ -5,6 +5,8 @@ and detailed release notes are in [docs/releases](docs/releases/README.md).
 
 ## Unreleased
 
+- Explain locked LaTeX editing above the editor, link to chats with running work or pending changes, and highlight the explanation when an edit is attempted. Selection and copying remain available.
+
 ## 1.8.0-dev
 
 Development prerelease from `feat_init_git_collab`; 1.7.1 remains the stable release.
