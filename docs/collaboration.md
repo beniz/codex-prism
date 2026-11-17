@@ -1,7 +1,8 @@
 # Git collaboration and manuscript review
 
-These experimental features are included in the 1.8.0-dev prerelease. They are
-not part of the stable 1.7.1 release.
+Git collaboration and manuscript review are available starting with codex-prism
+1.8.0. Collaboration exchanges accepted changes asynchronously through GitHub
+or Gitea; it does not provide simultaneous live editing.
 
 ## Connect a project
 

@@ -5,6 +5,12 @@ and detailed release notes are in [docs/releases](docs/releases/README.md).
 
 ## Unreleased
 
+## 1.8.0
+
+- Add built-in asynchronous Git collaboration through GitHub and Gitea: connect or open shared repositories, configure contributor identity, and use HTTPS credentials or existing SSH configuration.
+- Synchronize connected projects after explicit Save or Keep and check for incoming updates on project opening or focus. Autosave remains local; incoming conflicts become isolated, reviewable agent proposals.
+- Request manuscript reviews in isolated local branches/workspaces. Read findings beside the PDF, save reports independently, accept selected tracked document files, or retain suggestions for later conflict-aware acceptance.
+- Make collaboration status and review access available in the sidebar, with stable layout during synchronization, connection settings from its heading, and clearly marked reviewer chats.
 - Explain locked LaTeX editing above the editor, link to chats with running work or pending changes, and highlight the explanation when an edit is attempted. Selection and copying remain available.
 
 ## 1.8.0-dev
