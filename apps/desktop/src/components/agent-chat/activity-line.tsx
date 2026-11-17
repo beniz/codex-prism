@@ -55,6 +55,7 @@ export const ActivityLine = memo(function ActivityLine({
   const proposalPdfError = useProposalPdfError(chat.proposal);
   const tabs = JSON.parse(chat.tabSummary) as [string, string, boolean][];
   const current = operations.filter((o) => o.projectPath === chat.projectPath);
+  const syncing = current.some((o) => o.kind === "syncing");
   // Prefer project acceptance, then active-chat operations, then its tools/builds.
   const rank = (o: (typeof current)[number]) =>
     o.projectWide
@@ -156,6 +157,10 @@ export const ActivityLine = memo(function ActivityLine({
   }
   if (otherChats.size)
     text += ` · ${otherChats.size} other ${otherChats.size === 1 ? "chat active" : "chats active"}`;
+  if (syncing && !text.startsWith(activityLabels.syncing)) {
+    text += ` · ${activityLabels.syncing}`;
+    if (detail) detail += `\n${activityLabels.syncing}`;
+  }
   if (!detail && tone === "busy") {
     const pending = [...new Set(current.map(o => activityLabels[o.kind]))];
     if (chat.restoring) pending.push("Restoring conversations…");

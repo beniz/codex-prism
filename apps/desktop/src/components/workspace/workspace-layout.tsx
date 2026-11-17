@@ -19,6 +19,8 @@ import { ProposedChangesPanel } from "@/components/agent-chat/proposed-changes-p
 import { getCurrentPdfRootId, resolveTexRoot, useDocumentStore } from "@/stores/document-store";
 import { useChatPdfBuilds } from "@/hooks/use-chat-pdf";
 import { usePreviewStore } from "@/stores/preview-store";
+import { useReviewFindingsStore } from "@/stores/review-findings-store";
+import { ReviewFindingsTabs } from "./preview/review-findings";
 
 const SIDEBAR_DEFAULT_SIZE = 15;
 const SIDEBAR_MIN_SIZE = 10;
@@ -31,6 +33,10 @@ function easeInOutSmooth(progress: number) {
 }
 
 export function WorkspaceLayout() {
+  const projectId = useDocumentStore((s) => s.projectId);
+  useEffect(() => {
+    useReviewFindingsStore.getState().resetForProject(projectId);
+  }, [projectId]);
   const files = useDocumentStore((s) => s.files);
   const openingError = useDocumentStore(s => s.openingError);
   const openingPhase = useDocumentStore(s => s.openingPhase);
@@ -270,7 +276,9 @@ export function WorkspaceLayout() {
             minSize={25}
             className="min-w-0"
           >
-            <PdfPreview />
+            <ReviewFindingsTabs>
+              <PdfPreview />
+            </ReviewFindingsTabs>
           </Panel>
         )}
       </PanelGroup>

@@ -39,6 +39,14 @@ pub struct ProposalChange {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProposalSummary {
+    #[serde(default)]
+    pub origin: Option<String>,
+    #[serde(default)]
+    pub blocks_editing: Option<bool>,
+    #[serde(default)]
+    pub review_saved: bool,
+    #[serde(default)]
+    pub has_review: bool,
     pub id: String,
     pub workspace_id: String,
     pub project_id: String,
@@ -55,6 +63,12 @@ pub struct ProposalSummary {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ApplyOutcome {
+    #[serde(default)]
+    pub review_again: Option<bool>,
+    #[serde(default)]
+    pub source_changed: Option<bool>,
+    #[serde(default)]
+    pub reused_builds: Vec<String>,
     pub conflicts: Vec<String>,
     pub history_warning: Option<String>,
 }
@@ -64,10 +78,18 @@ pub struct RepairOutcome {
     pub proposal_id: String,
     pub prompt: String,
 }
+mod reviewer;
+pub(crate) use reviewer::local_reviews;
 type Files = BTreeMap<String, Vec<u8>>;
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct Proposal {
+    #[serde(default)]
+    review_saved: bool,
+    #[serde(default)]
+    review_deferred: bool,
+    #[serde(default)]
+    pub git: Option<GitProposal>,
     #[serde(default)]
     pub planning: bool,
     #[serde(default)]
@@ -91,6 +113,17 @@ pub(crate) struct Proposal {
     pub state: String,
     pub conflicts: Vec<String>,
     pub parent: Option<String>,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub(crate) struct GitProposal {
+    pub kind: String,
+    pub base: String,
+    pub incoming: String,
+    pub branch: Option<String>,
+    #[serde(default)]
+    pub reviewed_commit: Option<String>,
+    #[serde(default)]
+    pub scope: Option<String>,
 }
 fn directory(app: &Backend) -> Result<PathBuf, String> {
     let p = projects::data_dir(app)?.join("proposals");
@@ -135,7 +168,21 @@ pub(crate) fn all(app: &Backend, project: &str) -> Result<Vec<Proposal>, String>
     Ok(result)
 }
 pub(crate) fn locked(app: &Backend, project: &str) -> Result<bool, String> {
-    Ok(!all(app, project)?.is_empty())
+    for p in all(app, project)? {
+        if p.git.as_ref().is_none_or(|g| g.kind != "reviewer")
+            || ["running", "repairing", "applying"].contains(&p.state.as_str())
+        {
+            return Ok(true);
+        }
+        if p.review_deferred {
+            continue;
+        }
+        let r = snapshot(app, &p)?;
+        if !reviewer::document_paths(app, &p, &r)?.is_empty() {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 fn write_files(root: &Path, before: &Files, after: &Files) -> Result<(), String> {
     let names: BTreeSet<_> = before.keys().chain(after.keys()).collect();
@@ -167,6 +214,9 @@ fn create(
     parent: Option<String>,
 ) -> Result<Proposal, String> {
     let p = Proposal {
+        review_saved: false,
+        review_deferred: false,
+        git: None,
         planning: false,
         source_context: Value::Null,
         planning_conflicts: vec![],
@@ -292,6 +342,119 @@ pub(crate) fn bind(app: &Backend, p: &mut Proposal, thread: String) -> Result<()
     p.thread_id = Some(thread);
     save(app, p)
 }
+fn checkpoint_reviewer(app: &Backend, p: &mut Proposal, r: &mut Review) -> Result<(), String> {
+    let Some(g) = &p.git else {
+        return Ok(());
+    };
+    if g.kind != "reviewer" {
+        return Ok(());
+    }
+    let review_id = g
+        .branch
+        .as_deref()
+        .and_then(|b| b.rsplit('/').next())
+        .unwrap_or(&p.id);
+    let report_path = format!(".prism-collab/reviews/{review_id}/report.md");
+    let workspace = root(app, p)?;
+    let report = projects::resolve(&workspace, &report_path)?;
+    if report.is_file() {
+        r.after.insert(
+            report_path.clone(),
+            fs::read(report).map_err(|e| e.to_string())?,
+        );
+    }
+    let metadata_path = format!(".prism-collab/reviews/{review_id}/review.json");
+    use sha2::{Digest, Sha256};
+    let mut context = Sha256::new();
+    for (name, bytes) in &r.before {
+        context.update((name.len() as u64).to_be_bytes());
+        context.update(name.as_bytes());
+        context.update((bytes.len() as u64).to_be_bytes());
+        context.update(bytes);
+    }
+    let context_digest = format!("{:x}", context.finalize());
+    r.after.insert(metadata_path, serde_json::to_vec_pretty(&json!({
+        "schemaVersion":1,"id":review_id,"reviewedCommit":g.reviewed_commit.as_ref().unwrap_or(&g.base),
+        "reviewer":"Prism Reviewer","scope":g.scope,"report":report_path,"contextDigest":context_digest
+    })).map_err(|e| e.to_string())?);
+    let Some(branch) = &g.branch else {
+        return Ok(());
+    };
+    let main = projects::get(app, &p.project_id)?;
+    let lock = workflow::mutex(&main.root.to_string_lossy());
+    let _history = lock.lock().map_err(|e| e.to_string())?;
+    let repo = git2::Repository::open(main.root).map_err(|e| e.to_string())?;
+    let work = if workspace.join(".git").exists() {
+        let work = git2::Repository::open(&workspace).map_err(|e| e.to_string())?;
+        let expected = repo.commondir().join("worktrees").join(review_id);
+        if fs::canonicalize(work.path()).map_err(|e| e.to_string())?
+            != fs::canonicalize(expected).map_err(|e| e.to_string())?
+        {
+            return Err("Reviewer worktree administration changed".into());
+        }
+        Some(work)
+    } else if p.parent.is_none() {
+        return Err("Reviewer worktree administration is missing".into());
+    } else {
+        None
+    };
+    let parent = repo
+        .find_commit(git2::Oid::from_str(&g.incoming).map_err(|e| e.to_string())?)
+        .map_err(|e| e.to_string())?;
+    let base = repo
+        .find_commit(git2::Oid::from_str(&g.base).map_err(|e| e.to_string())?)
+        .map_err(|e| e.to_string())?;
+    let tree = proposal_tree(&repo, &base, &r.before, &r.after)?;
+    let branch_ref = format!("refs/heads/{branch}");
+    let actual = repo.refname_to_id(&branch_ref).map_err(|e| e.to_string())?;
+    let marker = format!("Prism-Review: {}:{}", p.id, p.generation + 1);
+    let oid = if actual != parent.id() {
+        let tip = repo.find_commit(actual).map_err(|e| e.to_string())?;
+        if tip.tree_id() != tree.id()
+            || !tip
+                .message()
+                .unwrap_or("")
+                .lines()
+                .any(|line| line == marker)
+        {
+            return Err("Reviewer branch changed outside Prism".into());
+        }
+        actual // Recover a checkpoint interrupted after its ref update.
+    } else {
+        let author = git2::Signature::now("Prism Reviewer", "reviewer@codex-prism.local")
+            .map_err(|e| e.to_string())?;
+        let committer = repo.signature().map_err(|e| e.to_string())?;
+        let oid = repo
+            .commit(
+                None,
+                &author,
+                &committer,
+                &format!("Review manuscript\n\n{marker}"),
+                &tree,
+                &[&parent],
+            )
+            .map_err(|e| e.to_string())?;
+        repo.reference_matching(
+            &branch_ref,
+            oid,
+            true,
+            parent.id(),
+            "Prism reviewer checkpoint",
+        )
+        .map_err(|e| e.to_string())?;
+        oid
+    };
+    if let Some(g) = &mut p.git {
+        g.incoming = oid.to_string();
+    }
+    if let Some(work) = work {
+        let mut index = work.index().map_err(|e| e.to_string())?;
+        index.read_tree(&tree).map_err(|e| e.to_string())?;
+        index.write().map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
 pub(crate) fn finish(app: &Backend, id: &str, interrupted: bool) -> Result<(), String> {
     let _lock = app.inner.projects.0.lock().map_err(|e| e.to_string())?;
     let mut p = load(app, id)?;
@@ -310,6 +473,23 @@ pub(crate) fn finish(app: &Backend, id: &str, interrupted: bool) -> Result<(), S
             return Err(error);
         }
     };
+    let checkpoint = checkpoint_reviewer(app, &mut p, &mut r);
+    if p.git.as_ref().is_some_and(|g| g.kind == "reviewer") {
+        p.review_saved = false;
+    }
+    if let Err(error) = checkpoint {
+        // Retain captured output even if Git administration changed or writing
+        // the branch failed. A follow-up can retry; Keep cannot omit that work.
+        p.generation += 1;
+        p.state = "interrupted".into();
+        p.error = Some(format!(
+            "Reviewer checkpoint failed; retry with a follow-up: {error}"
+        ));
+        review_storage::save(&snapshot_path(app, &p)?, &r)?;
+        save(app, &p)?;
+        app.emit_review(json!({"projectId":p.project_id}))?;
+        return Err(error);
+    }
     p.generation += 1;
     review_storage::save(&snapshot_path(app, &p)?, &r)?;
     // A successful question-only turn has nothing to review. Keeping its old
@@ -317,6 +497,7 @@ pub(crate) fn finish(app: &Backend, id: &str, interrupted: bool) -> Result<(), S
     // Compare cumulative changes, so follow-ups still retain earlier edits.
     p.state = if r.before == r.after
         && p.parent.is_none()
+        && p.git.is_none()
         && (p.planning || (!interrupted && !p.cancel_requested))
     {
         "discarded"
@@ -477,6 +658,229 @@ fn merge(
 fn merge_repo(app: &Backend, p: &Proposal) -> Result<git2::Repository, String> {
     git2::Repository::init_bare(dir(app, &p.id)?.join("merge.git")).map_err(|e| e.to_string())
 }
+fn proposal_tree<'a>(
+    repo: &'a git2::Repository,
+    parent: &git2::Commit<'_>,
+    before: &Files,
+    after: &Files,
+) -> Result<git2::Tree<'a>, String> {
+    let mut index = git2::Index::new().map_err(|e| e.to_string())?;
+    index
+        .read_tree(&parent.tree().map_err(|e| e.to_string())?)
+        .map_err(|e| e.to_string())?;
+    for name in before.keys().chain(after.keys()).collect::<BTreeSet<_>>() {
+        if before.get(name) == after.get(name) {
+            continue;
+        }
+        let path = Path::new(name);
+        if let Some(bytes) = after.get(name) {
+            let old = index.get_path(path, 0);
+            index
+                .add(&git2::IndexEntry {
+                    ctime: git2::IndexTime::new(0, 0),
+                    mtime: git2::IndexTime::new(0, 0),
+                    dev: 0,
+                    ino: 0,
+                    mode: old.as_ref().map(|e| e.mode).unwrap_or(0o100644),
+                    uid: 0,
+                    gid: 0,
+                    file_size: bytes.len() as u32,
+                    id: repo.blob(bytes).map_err(|e| e.to_string())?,
+                    flags: 0,
+                    flags_extended: 0,
+                    path: name.as_bytes().to_vec(),
+                })
+                .map_err(|e| e.to_string())?;
+        } else if index.get_path(path, 0).is_some() {
+            index.remove_path(path).map_err(|e| e.to_string())?;
+        }
+    }
+    let oid = index.write_tree_to(repo).map_err(|e| e.to_string())?;
+    repo.find_tree(oid).map_err(|e| e.to_string())
+}
+
+pub(crate) fn incoming(
+    app: &Backend,
+    project: &str,
+    repo: &git2::Repository,
+    local: git2::Oid,
+    incoming: git2::Oid,
+    index: &git2::Index,
+) -> Result<Value, String> {
+    let current = projects::isolated_snapshot(repo.workdir().ok_or("Missing working directory")?)?;
+    let mut merged = Files::new();
+    let local_tree = repo
+        .find_commit(local)
+        .and_then(|c| c.tree())
+        .map_err(|e| e.to_string())?;
+    // Untracked local context is outside the incoming Git change.
+    for (name, bytes) in &current {
+        if local_tree.get_path(Path::new(name)).is_err() {
+            merged.insert(name.clone(), bytes.clone());
+        }
+    }
+    for entry in index.iter().filter(|e| ((e.flags >> 12) & 3) == 0) {
+        let name = String::from_utf8(entry.path).map_err(|e| e.to_string())?;
+        if crate::file_policy::Policy::IsolatedSnapshot.excludes_path(&name) {
+            continue;
+        }
+        merged.insert(
+            name,
+            repo.find_blob(entry.id)
+                .map_err(|e| e.to_string())?
+                .content()
+                .to_vec(),
+        );
+    }
+    let mut conflicts = Vec::new();
+    for entry in index.conflicts().map_err(|e| e.to_string())? {
+        let entry = entry.map_err(|e| e.to_string())?;
+        for side in [entry.our, entry.their, entry.ancestor]
+            .into_iter()
+            .flatten()
+        {
+            let name = String::from_utf8(side.path).map_err(|e| e.to_string())?;
+            if let Some(bytes) = current.get(&name) {
+                merged.insert(name.clone(), bytes.clone());
+            }
+            conflicts.push(name);
+        }
+    }
+    conflicts.sort();
+    conflicts.dedup();
+    let mut p = create(app, project, None, current, merged, None)?;
+    p.git = Some(GitProposal {
+        kind: "resolution".into(),
+        base: local.to_string(),
+        incoming: incoming.to_string(),
+        branch: None,
+        reviewed_commit: None,
+        scope: None,
+    });
+    p.conflicts = conflicts;
+    p.state = "conflicts".into();
+    let base = repo
+        .merge_base(local, incoming)
+        .map_err(|e| e.to_string())?;
+    for (label, oid) in [("base", base), ("local", local), ("incoming", incoming)] {
+        let dest = root(app, &p)?.join(".codexprism/merge-inputs").join(label);
+        fs::create_dir_all(&dest).map_err(|e| e.to_string())?;
+        let tree = repo
+            .find_commit(oid)
+            .and_then(|c| c.tree())
+            .map_err(|e| e.to_string())?;
+        let mut files = Files::new();
+        tree.walk(git2::TreeWalkMode::PreOrder, |dir, e| {
+            if e.kind() == Some(git2::ObjectType::Blob) {
+                if let Ok(b) = repo.find_blob(e.id()) {
+                    files.insert(
+                        format!("{dir}{}", e.name().unwrap_or("")),
+                        b.content().to_vec(),
+                    );
+                }
+            }
+            git2::TreeWalkResult::Ok
+        })
+        .map_err(|e| e.to_string())?;
+        write_files(&dest, &Files::new(), &files)?;
+    }
+    save(app, &p)?;
+    Ok(
+        json!({"proposalId":p.id,"prompt":format!("Resolve collaborator conflicts in this isolated workspace. Exact base, local and incoming files are in .codexprism/merge-inputs. Cleanly merged changes are already present. Preserve both contributors' intentions; ask about incompatible scientific claims instead of inventing evidence. Do not commit, push, or modify other workspaces. Leave the result for user review. Conflicts: {}",p.conflicts.join(", "))}),
+    )
+}
+
+pub(crate) fn attach(app: &Backend, project: &str, id: &str, chat: &str) -> Result<(), String> {
+    let _lock = app.inner.projects.0.lock().map_err(|e| e.to_string())?;
+    let mut p = load(app, id)?;
+    if p.project_id != project
+        || ["running", "repairing", "applying", "applied", "discarded"].contains(&p.state.as_str())
+    {
+        return Err("Proposal cannot be attached".into());
+    }
+    p.chat_id = Some(chat.into());
+    save(app, &p)
+}
+pub(crate) fn report(app: &Backend, project: &str, id: &str) -> Result<Value, String> {
+    let p = load(app, id)?;
+    if p.project_id != project {
+        return Err("Unknown review".into());
+    }
+    let r = snapshot(app, &p)?;
+    let prefix = reviewer::record_prefix(&p)?;
+    let report = r.after.get(&format!("{prefix}report.md"))
+        .map(|b| String::from_utf8_lossy(b).to_string()).unwrap_or_default();
+    Ok(json!({"report":report,"reviewedCommit":p.git.map(|g|g.reviewed_commit.unwrap_or(g.base))}))
+}
+fn resolution_prompt() -> &'static str {
+    "Resolve the collaborator conflict in this workspace. Exact base, local and incoming snapshots are in .codexprism/merge-inputs; any repair-intent snapshots preserve prior proposed changes. Preserve both contributors' intentions, and ask about incompatible scientific claims. Leave the result for review. Do not run Git commands, commit, push, or change other workspaces."
+}
+
+pub(crate) fn prepare_reviewer(
+    app: &Backend,
+    project: &str,
+    chat: &str,
+    scope: &str,
+) -> Result<Value, String> {
+    let _files = app.inner.projects.0.lock().map_err(|e| e.to_string())?;
+    crate::codex::assert_unlocked(app, project)?;
+    let main = projects::get(app, project)?;
+    let lock = workflow::mutex(&main.root.to_string_lossy());
+    let _history = lock.lock().map_err(|e| e.to_string())?;
+    let repo = git2::Repository::open(&main.root).map_err(|e| e.to_string())?;
+    workflow::safe(&repo)?;
+    let mut options = git2::StatusOptions::new();
+    options.include_untracked(false);
+    if !repo
+        .statuses(Some(&mut options))
+        .map_err(|e| e.to_string())?
+        .is_empty()
+    {
+        return Err("Save the manuscript before requesting review".into());
+    }
+    let base = repo
+        .head()
+        .and_then(|h| h.peel_to_commit())
+        .map_err(|e| e.to_string())?;
+    let files = projects::isolated_snapshot(&main.root)?;
+    let mut p = create(app, project, None, files.clone(), files.clone(), None)?;
+    p.chat_id = Some(chat.into());
+    let branch_name = format!("prism/reviews/{}", p.id);
+    let setup = (|| -> Result<(), String> {
+        let branch = repo
+            .branch(&branch_name, &base, false)
+            .map_err(|e| e.to_string())?;
+        let workspace = root(app, &p)?;
+        fs::remove_dir_all(&workspace).map_err(|e| e.to_string())?;
+        let mut options = git2::WorktreeAddOptions::new();
+        options.reference(Some(branch.get()));
+        repo.worktree(&p.id, &workspace, Some(&options))
+            .map_err(|e| e.to_string())?;
+        // A worktree checks out only tracked inputs. Preserve local contextual
+        // files in the proposal instead of presenting their absence as deletions.
+        let checked_out = projects::isolated_snapshot(&workspace)?;
+        write_files(&workspace, &checked_out, &files)?;
+        p.git = Some(GitProposal {
+            kind: "reviewer".into(),
+            base: base.id().to_string(),
+            incoming: base.id().to_string(),
+            branch: Some(branch_name),
+            reviewed_commit: Some(base.id().to_string()),
+            scope: Some(scope.into()),
+        });
+        save(app, &p)
+    })();
+    if let Err(error) = setup {
+        p.state = "discarded".into();
+        save(app, &p)?;
+        cleanup_resolved(app, &p);
+        return Err(error);
+    }
+    let report = format!(".prism-collab/reviews/{}/report.md", p.id);
+    Ok(
+        json!({"proposalId":p.id,"prompt":format!("Review this scientific manuscript for clarity, reasoning, consistency and supporting evidence. Scope: {scope}. Write your findings to {report}, with source paths and quoted context. Also propose justified manuscript improvements to already tracked document files directly in this workspace. Leave untracked local context unchanged. Findings are retained independently from manuscript edits. Do not invent evidence or measurements; ask when scientific intent is ambiguous. Do not edit any other collaboration records. Do not run Git commands, commit, push, or modify other workspaces. Leave all changes for user review and Keep. Reviewed revision: {}.",base.id())}),
+    )
+}
 fn checked(app: &Backend, project: &str, id: &str, generation: u64) -> Result<Proposal, String> {
     let p = load(app, id)?;
     if p.project_id != project || p.generation != generation {
@@ -504,6 +908,134 @@ fn record(app: &Backend, j: &Journal) -> Result<Option<String>, String> {
 fn record_with(app: &Backend, j: &Journal, target: Option<&str>) -> Result<Option<String>, String> {
     let root = projects::get(app, &j.proposal.project_id)?.root;
     let r = snapshot(app, &j.proposal)?;
+    if let Some(g) = &j.proposal.git {
+        let lock = workflow::mutex(&root.to_string_lossy());
+        let _history = lock.lock().map_err(|e| e.to_string())?;
+        let repo = git2::Repository::open(&root).map_err(|e| e.to_string())?;
+        let current = repo
+            .head()
+            .and_then(|h| h.peel_to_commit())
+            .map_err(|e| e.to_string())?;
+        if target
+            .is_some_and(|t| workflow::target(&root.to_string_lossy()).ok().as_deref() != Some(t))
+        {
+            return Err("Document revision changed; review again".into());
+        }
+        if projects::isolated_snapshot(&root)? != j.before {
+            return Err("Document changed; review again".into());
+        }
+        let incoming = repo
+            .find_commit(git2::Oid::from_str(&g.incoming).map_err(|e| e.to_string())?)
+            .map_err(|e| e.to_string())?;
+        // Keep incoming metadata and Git modes as well as reviewed source edits.
+        let mut merge_index = repo
+            .merge_commits(&current, &incoming, None)
+            .map_err(|e| e.to_string())?;
+        let conflict_paths: BTreeSet<_> = merge_index
+            .conflicts()
+            .map_err(|e| e.to_string())?
+            .filter_map(Result::ok)
+            .flat_map(|c| {
+                [c.our, c.their, c.ancestor]
+                    .into_iter()
+                    .flatten()
+                    .map(|e| e.path)
+            })
+            .collect();
+        for bytes in conflict_paths {
+            let name = String::from_utf8(bytes).map_err(|e| e.to_string())?;
+            if crate::file_policy::Policy::IsolatedSnapshot.excludes_path(&name) {
+                return Err(format!(
+                    "Shared metadata conflict requires inspection: {name}"
+                ));
+            }
+            merge_index
+                .conflict_remove(Path::new(&name))
+                .map_err(|e| e.to_string())?;
+        }
+        let merged_tree = merge_index
+            .write_tree_to(&repo)
+            .map_err(|e| e.to_string())?;
+        let baseline = repo.find_tree(merged_tree).map_err(|e| e.to_string())?;
+        let sig = repo.signature().map_err(|e| e.to_string())?;
+        let baseline_commit = repo
+            .commit(
+                None,
+                &sig,
+                &sig,
+                "Prepare reviewed integration",
+                &baseline,
+                &[&current],
+            )
+            .map_err(|e| e.to_string())?;
+        let baseline_parent = repo
+            .find_commit(baseline_commit)
+            .map_err(|e| e.to_string())?;
+        let current_tree = current.tree().map_err(|e| e.to_string())?;
+        let incoming_tree = incoming.tree().map_err(|e| e.to_string())?;
+        for (name, bytes) in &j.before {
+            if current_tree.get_path(Path::new(name)).is_err() && j.after.get(name) != Some(bytes) {
+                return Err(format!("Local context file {name} is not saved in history. Ask the agent to leave it unchanged, or discard this proposal and Save before requesting another review."));
+            }
+        }
+        let reviewed: Files = j
+            .after
+            .iter()
+            .filter(|(name, bytes)| {
+                j.before.get(*name) != Some(*bytes)
+                    || current_tree.get_path(Path::new(name)).is_ok()
+                    || incoming_tree.get_path(Path::new(name)).is_ok()
+            })
+            .map(|(name, bytes)| (name.clone(), bytes.clone()))
+            .collect();
+        let tree = proposal_tree(&repo, &baseline_parent, &Files::new(), &reviewed)?;
+        // Explicit deletions are part of the proposal, too.
+        let mut final_index = git2::Index::new().map_err(|e| e.to_string())?;
+        final_index.read_tree(&tree).map_err(|e| e.to_string())?;
+        for name in j.before.keys().filter(|n| !j.after.contains_key(*n)) {
+            if final_index.get_path(Path::new(name), 0).is_some() {
+                final_index
+                    .remove_path(Path::new(name))
+                    .map_err(|e| e.to_string())?;
+            }
+        }
+        let tree_id = final_index
+            .write_tree_to(&repo)
+            .map_err(|e| e.to_string())?;
+        let tree = repo.find_tree(tree_id).map_err(|e| e.to_string())?;
+        let sig = repo.signature().map_err(|e| e.to_string())?;
+        let oid = repo
+            .commit(
+                None,
+                &sig,
+                &sig,
+                &format!(
+                    "Accept {} proposal\n\nPrism-Operation: {}",
+                    g.kind, j.proposal.id
+                ),
+                &tree,
+                &[&current, &incoming],
+            )
+            .map_err(|e| e.to_string())?;
+        projects::save_json(&journal_path(app, &j.proposal)?, j)?;
+        crate::collaboration::integrate(&root, current.id(), oid)?;
+        let mut p = j.proposal.clone();
+        p.state = "applied".into();
+        save(app, &p)?;
+        if let Some(parent) = &p.parent {
+            let mut old = load(app, parent)?;
+            old.state = "superseded".into();
+            save(app, &old)?;
+            cleanup_resolved(app, &old);
+        }
+        fs::remove_file(journal_path(app, &p)?).map_err(|e| e.to_string())?;
+        app.inner.events.emit(crate::BackendEvent::HistoryChanged {
+            project_id: p.project_id.clone(),
+            warning: None,
+        });
+        cleanup_resolved(app, &p);
+        return Ok(None);
+    }
     let patch = j
         .before
         .keys()
@@ -579,8 +1111,11 @@ pub(crate) fn service(
         let _lock = app.inner.projects.0.lock().map_err(|e| e.to_string())?;
         return Ok(json!(all(app, project)?.into_iter().map(|p| {
             let r = snapshot(app, &p)?;
-            let changes: Vec<_> = r.before.keys().chain(r.after.keys()).collect::<BTreeSet<_>>().into_iter().filter(|n|r.before.get(*n)!=r.after.get(*n)).map(|n|json!({"path":n,"oldContent":r.before.get(n).and_then(|b|std::str::from_utf8(b).ok()),"newContent":r.after.get(n).and_then(|b|std::str::from_utf8(b).ok()),"kind":if !r.before.contains_key(n){"added"}else if !r.after.contains_key(n){"deleted"}else{"modified"},"binary":r.before.get(n).into_iter().chain(r.after.get(n)).any(|b|b.contains(&0)||std::str::from_utf8(b).is_err())})).collect();
-            Ok(json!({"id":p.id,"workspaceId":p.id,"projectId":project,"threadId":p.thread_id,"chatId":p.chat_id,"error":p.error,"turnId":p.turn_id,"generation":p.generation,"state":p.state,"conflicts":p.conflicts,"parent":p.parent,"changes":changes}))
+            let reviewer = p.git.as_ref().is_some_and(|g| g.kind == "reviewer");
+            let eligible = if reviewer { Some(reviewer::document_paths(app, &p, &r)?) } else { None };
+            let changes: Vec<_> = r.before.keys().chain(r.after.keys()).collect::<BTreeSet<_>>().into_iter().filter(|n|r.before.get(*n)!=r.after.get(*n) && eligible.as_ref().is_none_or(|paths| paths.contains(*n))).map(|n|json!({"path":n,"oldContent":r.before.get(n).and_then(|b|std::str::from_utf8(b).ok()),"newContent":r.after.get(n).and_then(|b|std::str::from_utf8(b).ok()),"kind":if !r.before.contains_key(n){"added"}else if !r.after.contains_key(n){"deleted"}else{"modified"},"binary":r.before.get(n).into_iter().chain(r.after.get(n)).any(|b|b.contains(&0)||std::str::from_utf8(b).is_err())})).collect();
+            let blocks_editing = ["running","repairing","applying"].contains(&p.state.as_str()) || (!p.review_deferred && changes.iter().any(|c| !c["path"].as_str().unwrap_or("").starts_with(".prism-collab/"))) || p.git.as_ref().is_some_and(|g| g.kind == "resolution");
+            Ok(json!({"id":p.id,"workspaceId":p.id,"projectId":project,"threadId":p.thread_id,"chatId":p.chat_id,"error":p.error,"turnId":p.turn_id,"generation":p.generation,"state":p.state,"conflicts":p.conflicts,"parent":p.parent,"changes":changes,"origin":p.git.as_ref().map(|g| &g.kind),"blocksEditing":blocks_editing,"reviewSaved":p.review_saved,"hasReview":reviewer && r.after.contains_key(&format!("{}report.md",reviewer::record_prefix(&p)?))}))
         }).collect::<Result<Vec<_>,String>>()?));
     }
     let id = args["proposalId"].as_str().ok_or("Missing proposalId")?;
@@ -601,8 +1136,61 @@ pub(crate) fn service(
             json!({"projectId":project,"threadId":p.thread_id,"workspaceId":p.id,"proposalId":id,"generation":generation,"files":files.keys().collect::<Vec<_>>(),"bytes":files.get(name)}),
         );
     }
+    if p.git.as_ref().is_some_and(|g| g.kind == "reviewer") && ["proposal_save_review", "proposal_apply"].contains(&operation) {
+        return reviewer::decide(app, project, id, generation, operation == "proposal_save_review", &args);
+    }
     let r = snapshot(app, &p)?;
     let main = projects::get(app, project)?;
+    if p.git.as_ref().is_some_and(|g| g.kind == "resolution") {
+        if let Some(latest) = crate::collaboration::incoming_revision(&main.root)? {
+            if p.git
+                .as_ref()
+                .is_some_and(|g| g.incoming != latest.to_string())
+            {
+                if operation == "proposal_apply" {
+                    return Err("New collaborator changes arrived. Use Repair to refresh this resolution before Keep.".into());
+                }
+                if operation == "proposal_repair" {
+                    let _files = app.inner.projects.0.lock().map_err(|e| e.to_string())?;
+                    checked(app, project, id, generation)?;
+                    let repo = git2::Repository::open(&main.root).map_err(|e| e.to_string())?;
+                    let local = repo
+                        .head()
+                        .and_then(|h| h.peel_to_commit())
+                        .map_err(|e| e.to_string())?;
+                    let remote = repo.find_commit(latest).map_err(|e| e.to_string())?;
+                    let index = repo
+                        .merge_commits(&local, &remote, None)
+                        .map_err(|e| e.to_string())?;
+                    let result = incoming(app, project, &repo, local.id(), latest, &index)?;
+                    let mut candidate = load(
+                        app,
+                        result["proposalId"].as_str().ok_or("Missing resolution")?,
+                    )?;
+                    candidate.chat_id = p.chat_id.clone();
+                    candidate.thread_id = p.thread_id.clone();
+                    candidate.parent = Some(p.id.clone());
+                    let previous = root(app, &candidate)?.join(".codexprism/previous-resolution");
+                    fs::create_dir_all(&previous).map_err(|e| e.to_string())?;
+                    write_files(&previous, &Files::new(), &r.after)?;
+                    save(app, &candidate)?;
+                    let mut old = p.clone();
+                    old.state = "original".into();
+                    save(app, &old)?;
+                    return Ok(
+                        json!({"proposalId":candidate.id,"prompt":format!("{} Preserve the user's prior reviewed intent from .codexprism/previous-resolution while integrating the newer incoming version.",resolution_prompt())}),
+                    );
+                }
+            }
+        }
+    }
+    if operation == "proposal_repair"
+        && p.git.as_ref().is_some_and(|g| g.kind == "resolution")
+        && root(app, &p)?.join(".codexprism/merge-inputs").exists()
+    {
+        checked(app, project, id, generation)?;
+        return Ok(json!({"proposalId":p.id,"prompt":resolution_prompt()}));
+    }
     if operation == "proposal_discard" {
         let _lock = app.inner.projects.0.lock().map_err(|e| e.to_string())?;
         let mut p = load(app, id)?;
@@ -645,6 +1233,37 @@ pub(crate) fn service(
     }
     match operation {
         "proposal_apply" => {
+            if p.git.as_ref().is_some_and(|g| g.kind == "reviewer") {
+                if let Some(error) = &p.error {
+                    return Err(error.clone());
+                }
+            }
+            if p.git.is_some() && conflicts.is_empty() && current != r.before && merged != r.after {
+                write_files(&root(app, &p)?, &r.after, &merged)?;
+                let mut revised = r.clone();
+                revised.before = current;
+                revised.after = merged;
+                if let Some(g) = &mut p.git {
+                    g.base = git2::Repository::open(&main.root)
+                        .and_then(|repo| {
+                            repo.head()
+                                .and_then(|h| h.peel_to_commit())
+                                .map(|c| c.id().to_string())
+                        })
+                        .map_err(|e| e.to_string())?;
+                }
+                p.generation += 1;
+                p.conflicts = conflicts;
+                p.state = if p.conflicts.is_empty() {
+                    "ready"
+                } else {
+                    "conflicts"
+                }
+                .into();
+                review_storage::save(&snapshot_path(app, &p)?, &revised)?;
+                save(app, &p)?;
+                return Ok(json!({"reviewAgain":true,"conflicts":p.conflicts}));
+            }
             if !conflicts.is_empty() {
                 p.state = "conflicts".into();
                 p.conflicts = conflicts;
@@ -660,7 +1279,12 @@ pub(crate) fn service(
             let warning = record_with(app, &j, Some(&target))?;
             let reused = crate::visual_review::promote_proposal_builds(app, &p.id, &main.root, &j.after);
             app.emit_review(json!({"projectId":project}))?;
-            Ok(json!({"conflicts":[],"historyWarning":warning,"reusedBuilds":reused}))
+            let source_changed = j.before.keys().chain(j.after.keys()).any(|name| {
+                !name.starts_with(".prism-collab/") && j.before.get(name) != j.after.get(name)
+            });
+            Ok(
+                json!({"conflicts":[],"historyWarning":warning,"reusedBuilds":reused,"sourceChanged":source_changed}),
+            )
         }
         "proposal_repair" => {
             let mut candidate = create(
@@ -672,6 +1296,9 @@ pub(crate) fn service(
                 Some(p.id.clone()),
             )?;
             candidate.chat_id = p.chat_id.clone();
+            candidate.git = p.git.clone();
+            candidate.review_deferred = p.review_deferred;
+            candidate.review_saved = p.review_saved;
             candidate.commit_subject = p.commit_subject.clone();
             let intended = root(app, &candidate)?.join(".codexprism/repair-intent");
             for (side, files) in [("before", &r.before), ("after", &r.after)] {
@@ -708,6 +1335,14 @@ fn recover_inner(app: &Backend, finish_runs: bool) {
         let Ok(p) = load(app, &e.file_name().to_string_lossy()) else {
             continue;
         };
+        if reviewer::pending(app, &p) {
+            if let Err(error) = reviewer::recover(app, &p) {
+                let mut failed = p.clone();
+                failed.error = Some(error);
+                let _ = save(app, &failed);
+            }
+            continue;
+        }
         let journal = e.path().join("application.json");
         if journal.exists() {
             let result = (|| -> Result<(), String> {
@@ -715,6 +1350,35 @@ fn recover_inner(app: &Backend, finish_runs: bool) {
                     serde_json::from_slice(&fs::read(&journal).map_err(|e| e.to_string())?)
                         .map_err(|e| e.to_string())?;
                 let main = projects::get(app, &p.project_id)?;
+                if j.proposal.git.is_some() {
+                    crate::collaboration::recover(&main.root)?;
+                    let repo = git2::Repository::open(&main.root).map_err(|e| e.to_string())?;
+                    let tip = repo
+                        .head()
+                        .and_then(|h| h.peel_to_commit())
+                        .map_err(|e| e.to_string())?;
+                    if tip
+                        .message()
+                        .unwrap_or("")
+                        .lines()
+                        .any(|l| l == format!("Prism-Operation: {}", p.id))
+                    {
+                        let mut completed = p.clone();
+                        completed.state = "applied".into();
+                        save(app, &completed)?;
+                        if let Some(parent) = &completed.parent {
+                            let mut old = load(app, parent)?;
+                            old.state = "superseded".into();
+                            save(app, &old)?;
+                            cleanup_resolved(app, &old);
+                        }
+                        fs::remove_file(&journal).map_err(|e| e.to_string())?;
+                        cleanup_resolved(app, &completed);
+                        return Ok(());
+                    }
+                    record_with(app, &j, j.target.as_deref())?;
+                    return Ok(());
+                }
                 if let Some(target) = &j.target {
                     if workflow::target(&main.root.to_string_lossy())? != *target
                         && !workflow::recorded(&main.root.to_string_lossy(), &p.id)?
@@ -754,7 +1418,7 @@ fn recover_inner(app: &Backend, finish_runs: bool) {
                 }
             }
         } else if finish_runs {
-            if p.state == "ready" && p.parent.is_none() {
+            if p.state == "ready" && p.parent.is_none() && p.git.is_none() {
                 // Upgrade older versions that left completed, unchanged turns
                 // pending. Keep repairs and any unrecorded workspace edits.
                 let _ = (|| -> Result<(), String> {
@@ -1358,5 +2022,14 @@ fn cleanup_resolved(app: &Backend, p: &Proposal) {
     // visual artifacts, but the resolved mutable execution copy is unreferenced.
     if let Ok(root) = root(app, p) {
         let _ = fs::remove_dir_all(root);
+    }
+    if p.git.as_ref().is_some_and(|g| g.branch.is_some()) {
+        if let Ok(main) = projects::get(app, &p.project_id) {
+            if let Ok(repo) = git2::Repository::open(main.root) {
+                if let Ok(worktree) = repo.find_worktree(&p.id) {
+                    let _ = worktree.prune(None);
+                }
+            }
+        }
     }
 }

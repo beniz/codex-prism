@@ -26,15 +26,32 @@ function ProposalReview() {
   const busy = useActivityStore(s => s.operations.some(o => o.proposalId === p.id && o.group === "operation"));
   const [expanded, setExpanded] = useState<string | null>(null);
   const running = ["running", "repairing", "applying"].includes(p.state);
-  const decide = async (action: "apply" | "discard" | "repair") => {
-    await decideProposal(action);
+  const isReviewer = p.origin === "reviewer";
+  const changes = isReviewer
+    ? p.changes.filter((change) => !change.path.startsWith(".prism-collab/"))
+    : p.changes;
+  const selectionKey = p.id;
+  const [selection, setSelection] = useState<{ key: string; paths: string[] }>({
+    key: "",
+    paths: [],
+  });
+  const selected =
+    selection.key === selectionKey
+      ? selection.paths.filter((path) => changes.some((change) => change.path === path))
+      : changes.map((change) => change.path);
+  const decide = async (
+    action: "apply" | "discard" | "repair" | "save_review",
+  ) => {
+    if (action === "apply" && isReviewer)
+      await decideProposal(action, selected);
+    else await decideProposal(action);
   };
   return (
     <section
       aria-label="Review chat proposal"
       className="max-h-72 overflow-auto border-t p-3 text-xs"
     >
-      <div className="flex gap-3">
+      <div className="flex flex-wrap items-center gap-3">
         <strong>
           {p.state === "conflicts"
             ? "Conflicts"
@@ -46,16 +63,41 @@ function ProposalReview() {
                   ? "Interrupted — captured edits retained"
                   : "Changes ready"}
         </strong>
-        <span>{p.changes.length} changed files</span>
-        {p.changes.length > 0 && (
+        <span>
+          {changes.length} {isReviewer ? "document files" : "changed files"}
+        </span>
+        {isReviewer && p.hasReview && (
           <button
             type="button"
-            disabled={busy || running || p.state === "invalid"}
+            disabled={busy || running || p.state === "invalid" || p.reviewSaved}
+            onClick={() => decide("save_review")}
+            className="rounded-full bg-purple-600 px-3 py-1 font-medium text-white disabled:opacity-50"
+          >
+            {p.reviewSaved ? "Review saved" : "Save review"}
+          </button>
+        )}
+        {changes.length > 0 && (
+          <button
+            type="button"
+            disabled={
+              busy ||
+              running ||
+              p.state === "invalid" ||
+              (isReviewer && !selected.length)
+            }
             onClick={() => decide("apply")}
-            title="Keep all changes from this chat"
+            title={
+              isReviewer
+                ? "Keep selected document changes"
+                : "Keep all changes from this chat"
+            }
             className="rounded-full bg-green-600 px-3 py-1 font-medium text-white hover:bg-green-700 focus-visible:outline focus-visible:outline-ring disabled:opacity-50"
           >
-            {busy ? "…" : "Keep"}
+            {busy
+              ? "…"
+              : isReviewer
+                ? `Keep selected (${selected.length})`
+                : "Keep"}
           </button>
         )}
         <button
@@ -63,7 +105,7 @@ function ProposalReview() {
           disabled={busy || running}
           onClick={() => decide("discard")}
         >
-          Discard changes
+          {isReviewer ? "Discard suggested changes" : "Discard changes"}
         </button>
         {p.conflicts.length > 0 && (
           <button
@@ -75,6 +117,14 @@ function ProposalReview() {
           </button>
         )}
       </div>
+      {isReviewer && (
+        <p className="mt-2 text-muted-foreground">
+          Findings are retained locally even if you discard suggestions. Save
+          review records only the findings for sharing; document changes remain
+          pending.{" "}
+          {p.reviewSaved && "You can now edit the manuscript independently."}
+        </p>
+      )}
       {p.conflicts.length > 0 && (
         <p role="alert">
           Conflicting files: {p.conflicts.join(", ")}. Main document was not
@@ -103,19 +153,38 @@ function ProposalReview() {
         </button>
       )}
       {error && <p role="alert">{error}</p>}
-      {p.changes.map((change) => (
-        <FileReview
-          key={change.path}
-          change={change}
-          expanded={expanded === change.path}
-          toggle={() =>
-            setExpanded(expanded === change.path ? null : change.path)
-          }
-          disabled={busy || running}
-          pending={false}
-          decide={async () => {}}
-          showActions={false}
-        />
+      {changes.map((change) => (
+        <div key={change.path}>
+          {isReviewer && (
+            <label className="mt-3 flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={selected.includes(change.path)}
+                disabled={busy || running}
+                onChange={(event) =>
+                  setSelection({
+                    key: selectionKey,
+                    paths: event.target.checked
+                      ? [...selected, change.path]
+                      : selected.filter((path) => path !== change.path),
+                  })
+                }
+              />
+              Include {change.path}
+            </label>
+          )}
+          <FileReview
+            change={change}
+            expanded={expanded === change.path}
+            toggle={() =>
+              setExpanded(expanded === change.path ? null : change.path)
+            }
+            disabled={busy || running}
+            pending={false}
+            decide={async () => {}}
+            showActions={false}
+          />
+        </div>
       ))}
     </section>
   );

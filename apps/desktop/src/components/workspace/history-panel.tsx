@@ -228,6 +228,10 @@ export function HistoryPanel({ maxHeight }: { maxHeight?: string }) {
                   <span className="font-mono">{snap.id.slice(0, 8)}</span> ·{" "}
                   {new Date(snap.timestamp * 1000).toLocaleString()} ·{" "}
                   {snap.changed_files.length} files
+                  {snap.author_name && (
+                    <span title={snap.author_email}> · {snap.author_name}</span>
+                  )}
+                  {(snap.parent_ids?.length ?? 0) > 1 && " · Combined changes"}
                 </p>
                 {!!snap.labels.length && (
                   <p className="mt-1 text-amber-700 dark:text-amber-400">

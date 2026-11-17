@@ -33,6 +33,7 @@ jobs:
     runs-on: macos-15
     timeout-minutes: 60
     env:
+      PRISM_GITHUB_CLIENT_ID: ${{ vars.PRISM_GITHUB_CLIENT_ID }}
       PRISM_MANUAL_RELEASE: ${{ !inputs.signed_updates && '1' || '0' }}
       PRISM_OFFICIAL_BUILD: ${{ inputs.release_tag != '' && '1' || '0' }}
       PRISM_UPDATE_PUBLIC_KEY: ${{ inputs.release_tag != '' && inputs.signed_updates && secrets.PRISM_UPDATE_PUBLIC_KEY || '' }}

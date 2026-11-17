@@ -5,6 +5,25 @@ and detailed release notes are in [docs/releases](docs/releases/README.md).
 
 ## Unreleased
 
+## 1.8.0-dev
+
+Development prerelease from `feat_init_git_collab`; 1.7.1 remains the stable release.
+
+- Keep the collaboration sidebar stable during synchronization: use the blue sync icon and the activity indicator below chat instead of temporary sync and cancel rows.
+- Open shared-project settings from the Collaboration heading, show the connected repository address in the sidebar, and manage existing connections and disconnection in the settings dialog.
+- Add a small gap between the outline and Collaboration section in the sidebar.
+- Consolidate manual synchronization into the Collaboration heading icon, removing the separate Sync now row; highlight the icon in blue during automatic or manual synchronization. Local projects use the icon to refresh reviews.
+
+- Use compact sidebar rows for collaboration actions, highlight Request review in purple, and list saved, local, and pending reviews directly for one-click opening.
+- Center the Collaboration sidebar heading and add a people icon to match neighboring sections.
+- Save reviewer findings independently of suggested manuscript edits. Keep selected tracked files, defer or discard other suggestions, and reopen locally retained reports even after discard; saved reviews allow independent editing and later conflict-aware acceptance.
+- Open reviewer findings in closable tabs beside the PDF, with readable Markdown, highlighted source references and quotes, tables, and equations for pending and saved reviews.
+- Mark reviewer chat tabs with a persistent purple dot and Review label, alongside the orange indicator for pending changes.
+- Give review instructions a wider dialog and a multiline field that grows with the text.
+- Add a unified GitHub/Gitea connection flow, API-based contributor identity, optional native credential storage, and independent HTTPS/SSH Git transport.
+- Synchronize connected repository-root projects after explicit Save or Keep, with offline/error status, isolated merges, and agent proposals for conflict resolution. Autosave remains local.
+- Add on-demand manuscript reviews on local branches/worktrees, with saved findings, proposed edits, ordinary diff/PDF review, and Keep acceptance. Review branches remain local.
+
 ## 1.7.1
 
 - Announce newer releases every 12 hours and link to manual downloads. Defer updater signing and in-app installation; release packages require no updater keys.

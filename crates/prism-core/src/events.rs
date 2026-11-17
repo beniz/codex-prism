@@ -3,6 +3,11 @@ use std::sync::Mutex;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum BackendEvent {
+    CollaborationChanged {
+        project_id: String,
+        operation_id: String,
+        state: String,
+    },
     Agent(Value),
     HistoryChanged {
         project_id: String,
@@ -19,6 +24,7 @@ impl BackendEvent {
     /// Existing desktop wire contract; network hosts may use their own envelope.
     pub fn name(&self) -> &'static str {
         match self {
+            Self::CollaborationChanged { .. } => "project-collaboration",
             Self::HistoryChanged { .. } => "project-history",
             Self::Agent(_) => "codex-event",
             Self::ProjectReview { .. } => "project-review",
@@ -29,6 +35,11 @@ impl BackendEvent {
     }
     pub fn payload(&self) -> Value {
         match self {
+            Self::CollaborationChanged {
+                project_id,
+                operation_id,
+                state,
+            } => json!({"projectId":project_id,"operationId":operation_id,"state":state}),
             Self::Agent(value) => value.clone(),
             Self::HistoryChanged {
                 project_id,

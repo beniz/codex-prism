@@ -1,3 +1,4 @@
+import { ConnectSharedProject } from "./collaboration";
 import { getMupdfClient } from "@/lib/mupdf/mupdf-client";
 import {
   loadSavedProjectPreview,
@@ -362,6 +363,7 @@ export function ProjectPicker() {
 
           {activeSection === "projects" && (
             <div className="flex min-w-0 flex-1 flex-nowrap items-center justify-end gap-2">
+              <ConnectSharedProject />
               <div className="relative flex min-w-40 flex-1 items-center sm:max-w-sm">
                 <SearchIcon className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
                 <input

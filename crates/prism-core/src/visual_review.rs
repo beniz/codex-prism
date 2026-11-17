@@ -46,7 +46,26 @@ pub(crate) fn capture(
 ) -> Result<String, String> {
     capture_variant(app, id, main, inputs, "v1:synctex=1;interaction=nonstopmode;existing-bibliography-passes")
 }
-fn capture_variant(app: &Backend, id: &str, main: &str, inputs: &BTreeMap<String, Vec<u8>>, options: &str) -> Result<String, String> {
+fn capture_variant(
+    app: &Backend,
+    id: &str,
+    main: &str,
+    inputs: &BTreeMap<String, Vec<u8>>,
+    options: &str,
+) -> Result<String, String> {
+    let source_inputs: std::borrow::Cow<'_, BTreeMap<String, Vec<u8>>> =
+        if inputs.keys().any(|p| p.starts_with(".prism-collab/")) {
+            std::borrow::Cow::Owned(
+                inputs
+                    .iter()
+                    .filter(|(p, _)| !p.starts_with(".prism-collab/"))
+                    .map(|(p, b)| (p.clone(), b.clone()))
+                    .collect(),
+            )
+        } else {
+            std::borrow::Cow::Borrowed(inputs)
+        };
+    let inputs = source_inputs.as_ref();
     let content = inputs
         .get(main)
         .ok_or("Main document missing from captured inputs")?;

@@ -2,6 +2,7 @@
 //! Construct once per application and call `shutdown().await` before dropping the host runtime.
 mod api;
 mod codex;
+mod collaboration;
 mod data_sources;
 mod source_completion;
 mod remote_sources;
@@ -43,6 +44,12 @@ pub trait DirectoryPreparer: Send + Sync {
     fn prepare(&self, target: &Path, ownership_root: &Path) -> Result<(), String>;
 }
 pub struct HeadlessDirectoryPreparer;
+/// Native hosts provide an OS credential store; headless use stays session-only.
+pub trait CredentialStore: Send + Sync {
+    fn get(&self, server: &str) -> Result<Option<String>, String>;
+    fn set(&self, server: &str, secret: &str) -> Result<(), String>;
+    fn remove(&self, server: &str) -> Result<(), String>;
+}
 impl DirectoryPreparer for HeadlessDirectoryPreparer {
     fn prepare(&self, target: &Path, _: &Path) -> Result<(), String> {
         Err(format!(
@@ -60,8 +67,11 @@ pub(crate) struct Inner {
     config: BackendConfig,
     events: Arc<dyn EventSink>,
     directory_preparer: Arc<dyn DirectoryPreparer>,
+    credential_store: Mutex<Option<Arc<dyn CredentialStore>>>,
+    git_askpass: Mutex<Option<PathBuf>>,
     projects: projects::Projects,
     codex: codex::CodexState,
+    collaboration: collaboration::State,
     remote: source_mcp::State,
     latex: latex::LatexCompilerState,
     templates: templates::TemplateState,
@@ -111,6 +121,17 @@ pub(crate) struct OperationContext {
     events: Arc<dyn EventSink>,
 }
 impl Backend {
+    /// Host executable that handles PRISM_GIT_ASKPASS before normal startup.
+    pub fn set_git_askpass(&self, executable: PathBuf) {
+        if let Ok(mut current) = self.inner.git_askpass.lock() {
+            *current = Some(executable);
+        }
+    }
+    pub fn set_credential_store(&self, store: Arc<dyn CredentialStore>) {
+        if let Ok(mut current) = self.inner.credential_store.lock() {
+            *current = Some(store);
+        }
+    }
     pub fn new(config: BackendConfig, events: Arc<dyn EventSink>) -> Result<Self, String> {
         Self::with_directory_preparer(config, events, Arc::new(HeadlessDirectoryPreparer))
     }
@@ -132,8 +153,11 @@ impl Backend {
                 config,
                 events,
                 directory_preparer,
+                credential_store: Mutex::new(None),
+                git_askpass: Mutex::new(None),
                 projects: Default::default(),
                 codex: Default::default(),
+                collaboration: Default::default(),
                 remote: Default::default(),
                 latex: Default::default(),
                 templates: Default::default(),
@@ -238,6 +262,7 @@ impl Backend {
             state.stopping = true;
         }
         self.inner.cancel.send_replace(true);
+        collaboration::shutdown(self);
         loop {
             let idle = self.inner.idle.notified();
             if self

@@ -1,0 +1,47 @@
+.review-findings-markdown {
+  font-size: 0.9375rem;
+  line-height: 1.8;
+  overflow-wrap: anywhere;
+}
+.review-findings-markdown :is(h1, h2, h3, h4, h5, h6) {
+  font-weight: 650;
+  line-height: 1.4;
+  margin: 1.75em 0 0.65em;
+}
+.review-findings-markdown h1 { font-size: 1.5rem; }
+.review-findings-markdown h2 {
+  font-size: 1.2rem;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 0.5em;
+}
+.review-findings-markdown h3 {
+  font-size: 1.05rem;
+  border-left: 3px solid var(--color-purple-500);
+  padding-left: 0.75em;
+}
+.review-findings-markdown :is(p, ul, ol, blockquote, pre, table) { margin: 0.8em 0; }
+.review-findings-markdown ul { list-style: disc; padding-left: 1.5em; }
+.review-findings-markdown ol { list-style: decimal; padding-left: 1.5em; }
+.review-findings-markdown li { padding-left: 0.25em; margin: 0.45em 0; }
+.review-findings-markdown strong { font-weight: 700; color: var(--foreground); }
+.review-findings-markdown blockquote {
+  border-left: 3px solid var(--color-purple-400);
+  border-radius: 0 0.5rem 0.5rem 0;
+  background: var(--muted);
+  padding: 0.25em 1em;
+}
+.review-findings-markdown code {
+  background: var(--muted);
+  border-radius: 0.25rem;
+  padding: 0.15em 0.35em;
+  font-family: var(--font-mono);
+  font-size: 0.85em;
+}
+.review-findings-markdown pre { overflow: auto; background: var(--muted); padding: 1em; border-radius: 0.5rem; }
+.review-findings-markdown pre code { padding: 0; }
+.review-findings-markdown table { width: 100%; border-collapse: collapse; font-size: 0.875rem; }
+.review-findings-markdown :is(th, td) { border: 1px solid var(--border); padding: 0.6em 0.8em; text-align: left; }
+.review-findings-markdown th { background: var(--muted); font-weight: 650; }
+.review-findings-markdown a { color: var(--primary); text-decoration: underline; text-underline-offset: 3px; }
+.review-findings-markdown hr { border-color: var(--border); margin: 1.75em 0; }
+.review-findings-markdown .katex-display { overflow-x: auto; overflow-y: hidden; padding: 0.25em 0; }

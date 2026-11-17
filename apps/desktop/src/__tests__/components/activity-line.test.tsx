@@ -98,6 +98,35 @@ it("does not rerender on draft or transcript changes", async () => {
   });
   expect(rendered).toHaveBeenCalledTimes(before);
 });
+it("shows sync alongside agent work and errors, scoped to the current project", async () => {
+  await act(async () =>
+    root.render(<ActivityLine attaching={false} onConnect={connect} />),
+  );
+  let sync!: ReturnType<typeof beginActivity>;
+  await act(async () => {
+    beginActivity({ projectPath: "/another-paper" }, "syncing");
+  });
+  expect(host.textContent).toBe("Project context included");
+  await act(async () => {
+    sync = beginActivity({ projectPath: "/paper" }, "syncing");
+  });
+  expect(host.textContent).toBe("Synchronizing…");
+  await act(async () => {
+    useAgentChatStore.setState((s) => ({
+      tabs: s.tabs.map((t) => ({ ...t, isStreaming: t.id === "a" })),
+    }));
+  });
+  expect(host.textContent).toBe("Codex is working… · Synchronizing…");
+  await act(async () =>
+    useAgentChatStore.setState({ error: "Agent failed" }),
+  );
+  expect(host.textContent).toBe(
+    "Action failed — see error details · Synchronizing…",
+  );
+  expect(host.querySelector('[data-activity-tone="error"]')).not.toBeNull();
+  await act(async () => sync.finish());
+  expect(host.textContent).toBe("Action failed — see error details");
+});
 it("prioritizes active-chat questions and errors and shows review readiness", async () => {
   beginActivity({ projectPath: "/paper", chatId: "b" }, "apply", {
     projectWide: true,

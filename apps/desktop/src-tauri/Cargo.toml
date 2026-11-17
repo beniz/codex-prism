@@ -1,6 +1,6 @@
 [package]
 name = "codex-prism-desktop"
-version = "1.7.1"
+version = "1.8.0-dev"
 description = "AI-powered LaTeX writing workspace"
 edition = "2021"
 
@@ -28,6 +28,7 @@ serde_json = "1"
 tokio = { version = "1", features = ["full"] }
 dirs = "5"
 which = "7"
+keyring = { version = "3.6.3", features = ["apple-native", "windows-native", "sync-secret-service", "crypto-rust"] }
 
 [lints.clippy]
 unwrap_used = "deny"

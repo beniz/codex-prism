@@ -7,6 +7,9 @@ export interface SnapshotInfo {
   id: string;
   message: string;
   timestamp: number;
+  author_name?: string;
+  author_email?: string;
+  parent_ids?: string[];
   labels: string[];
   changed_files: string[];
 }

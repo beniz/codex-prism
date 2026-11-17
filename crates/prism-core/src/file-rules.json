@@ -1,6 +1,46 @@
 {
-  "application_directories": [".git", ".codexprism", ".claudeprism", ".prism"],
-  "environment_directories": [".venv", "venv", "env", "__pycache__", "node_modules", "target"],
-  "auxiliary_suffixes": [".aux", ".log", ".out", ".toc", ".lof", ".lot", ".fls", ".fdb_latexmk", ".synctex", ".synctex.gz", ".blg", ".bbl", ".nav", ".snm", ".vrb", ".run.xml", ".bcf", ".pyc"],
-  "navigator_binary_suffixes": [".pyo", ".pyd", ".o", ".obj", ".so", ".dylib", ".dll"]
+  "application_directories": [
+    ".git",
+    ".codexprism",
+    ".claudeprism",
+    ".prism",
+    ".prism-collab"
+  ],
+  "environment_directories": [
+    ".venv",
+    "venv",
+    "env",
+    "__pycache__",
+    "node_modules",
+    "target"
+  ],
+  "auxiliary_suffixes": [
+    ".aux",
+    ".log",
+    ".out",
+    ".toc",
+    ".lof",
+    ".lot",
+    ".fls",
+    ".fdb_latexmk",
+    ".synctex",
+    ".synctex.gz",
+    ".blg",
+    ".bbl",
+    ".nav",
+    ".snm",
+    ".vrb",
+    ".run.xml",
+    ".bcf",
+    ".pyc"
+  ],
+  "navigator_binary_suffixes": [
+    ".pyo",
+    ".pyd",
+    ".o",
+    ".obj",
+    ".so",
+    ".dylib",
+    ".dll"
+  ]
 }

@@ -137,14 +137,14 @@ History records explicit saves, checkpoints before agent turns, and accepted age
 
 Acceptance commit titles use the first prompt for that proposal, shortened to a single line. Commit bodies summarize the accepted file changes, with text excerpts where available. Follow-up prompts refine the same proposal; after Keep or Discard, the next proposal starts a new commit subject. Git can therefore contain prompt-derived information even when full prompt inclusion is disabled.
 
-**Include prompt in commits** is a per-document option in History, off by default. It applies to future turns and includes only user prompts, not attachments or tool output. Included prompts travel with remote pushes. Configure remotes and push with your usual Git tools from the document directory; codex-prism does not push automatically.
+**Include prompt in commits** is a per-document option in History, off by default. It applies to future turns and includes only user prompts, not attachments or tool output. Included prompts travel with remote pushes. Use **Connect shared project** for GitHub/Gitea collaboration. Connected repository-root projects synchronize explicit Save checkpoints and accepted agent changes; autosave stays local. See [collaboration setup](docs/collaboration.md) for credentials, SSH transport, and reviewer branches.
 
 Externally staged changes, detached HEAD and ongoing merges/rebases pause automatic history recording without blocking document edits or acceptance. History displays the reason and offers Retry using captured content. Application state and generated outputs are excluded from new history commits; already tracked files remain tracked.
 
 History also includes local images referenced by literal `\includegraphics` paths, including PDF figures excluded by `*.pdf` ignore rules. It supports `\graphicspath`, omitted image extensions, and included `.tex` sources. Accepting agent changes includes existing untracked figures referenced by the accepted source. Compiled document PDFs stay excluded. Missing, external, or symlinked figures produce a history error; copy them into the project and correct their references before creating a new checkpoint. Filenames computed by TeX macros are not resolved automatically.
 
 
-The application is currently local and single-user. Browser hosting and simultaneous multi-user editing are not included. “Git-collaborative” describes working with agents through ordinary Git history.
+The application runs locally, with asynchronous Git collaboration for connected projects. Browser hosting and simultaneous multi-user editing are not included. Review agents use local branches/worktrees; review branches are not automatically published.
 
 ## LaTeX compilation
 
@@ -295,7 +295,7 @@ For development or running directly from a repository checkout on Ubuntu 26.04 L
 
 1. Install Node.js 22+, Corepack, Git, and the Linux Tauri development libraries (Ubuntu/Debian):
    ```sh
-   sudo apt install build-essential pkg-config libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libssl-dev
+   sudo apt install build-essential pkg-config libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libssl-dev libdbus-1-dev
    ```
 2. Install Rust with rustup. This checkout pins Rust 1.90.0.
 3. Clone the repository and start the app:

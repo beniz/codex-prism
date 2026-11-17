@@ -51,9 +51,10 @@ Avoid sweeping formatting changes and preserve unrelated working-tree files.
 
 ## Behavior to preserve
 
-- Each chat edits its own application-managed copy. Keep accepts that chat's whole proposal through a three-way merge against the latest main document. Conflicts leave main untouched. Follow-ups refine pending proposals; they do not implicitly accept another chat's work.
+- Each chat edits its own application-managed copy. For ordinary chats, Keep accepts that chat's whole proposal through a three-way merge against the latest main document. Conflicts leave main untouched. Follow-ups refine pending proposals; they do not implicitly accept another chat's work.
 - Route turns, approvals, cancellation, build results, and recovery by their owning chat/workspace and generation. Do not grant isolated agents write access to main or another chat's workspace.
-- Manual source editing remains locked while agents run or proposals remain unresolved. Closing a tab must not discard pending work. Chats without pending work show main; pending chats show their own PDF through the ordinary preview panel.
+- Reviewer findings can be saved independently of document edits. Accept only selected tracked files; preserve unselected suggestions and locally retained reports. Never merge unaccepted reviewer history just to save findings.
+- Manual source editing remains locked while agents run or proposals remain unresolved, except for idle reviewer proposals whose suggestions were deferred by saving the review. Closing a tab must not discard pending work. Chats without pending work show main; pending chats show their own PDF through the ordinary preview panel.
 - Preserve the visible PDF while agents work. Keep source mappings, errors, and PDFs tied to the same build. Reuse accepted PDFs only when build inputs match, including assets; otherwise compile. Never substitute another chat's build after a failure.
 - Document acceptance records ordinary Git history and must preserve unrelated working-tree/staged changes. Retain durable application journals and visible history warning/retry behavior.
 - Native Plan mode uses app-server collaboration modes. Shift+Tab toggles it only in the idle composer. Empty planning workspaces must not leave Keep controls or locks; existing changes remain recoverable.
