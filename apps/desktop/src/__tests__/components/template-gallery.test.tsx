@@ -1,3 +1,4 @@
+import { open as pickFolder } from "@tauri-apps/plugin-dialog";
 import { saveSourcesWithFiles } from "@/lib/data-sources";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
@@ -49,7 +50,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   vi.spyOn(backend.projects, "register").mockResolvedValue({ id: "new-project", root: "/work/new-paper", name: "New paper" } as any);
   useTemplateStore.getState().reset();
-  useProjectStore.setState({ lastProjectFolder: "/work" });
+  useProjectStore.setState({ lastProjectFolder: "/previous" });
   vi.mocked(getTemplatePdfBuffer).mockRejectedValue(
     new Error("Missing TeX Live"),
   );
@@ -140,6 +141,10 @@ it.each([
     if (!customInstructions)
       fill(document.querySelector("textarea")!, "Write about proteins");
   });
+  vi.mocked(pickFolder).mockResolvedValueOnce(null).mockResolvedValueOnce("/work");
+  await act(async () => button(customInstructions ? "Create Project" : "Create & Generate with AI").click());
+  expect(create).not.toHaveBeenCalled();
+  expect(pickFolder).toHaveBeenCalledWith(expect.objectContaining({ directory: true }));
   if (customInstructions) {
     vi.spyOn(console, "error").mockImplementation(() => {});
     vi.mocked(saveSourcesWithFiles).mockRejectedValueOnce(new Error("Source unavailable"));

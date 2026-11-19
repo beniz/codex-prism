@@ -66,7 +66,7 @@ export function TemplatePreview() {
   const { purpose, setPurpose, attachments, setAttachments, sourceSettings, setSourceSettings,
     projectFolder, projectName, setProjectName, projectNameError, setProjectNameError,
     isCreating, isDragOver, handleChooseFolder, handleCreate, resetCreation } = useProjectCreation(template, modalStep === "details");
-  const [locationOpen, setLocationOpen] = useState(false);
+  const [locationOpen, setLocationOpen] = useState(true);
   const projectNameRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -96,7 +96,7 @@ export function TemplatePreview() {
     if (previewTemplateId) {
       setModalStep("preview");
       resetCreation();
-      setLocationOpen(false);
+      setLocationOpen(true);
     }
   }, [previewTemplateId, resetCreation]);
 
@@ -271,7 +271,7 @@ export function TemplatePreview() {
   }, [previewTemplateId, modalStep, goToPrevPage, goToNextPage]);
 
   const canCreate = Boolean(
-    template && projectFolder && !getProjectNameError(projectName),
+    template && !getProjectNameError(projectName),
   );
 
   if (!template) return null;
@@ -503,7 +503,7 @@ export function TemplatePreview() {
                           <p className="min-w-0 flex-1 truncate rounded-md bg-muted/30 px-2.5 py-1.5 font-mono text-[11px] text-muted-foreground/60">
                             {projectFolder
                               ? `${projectFolder}/${normalizeProjectName(projectName) || "..."}`
-                              : "Choose a location"}
+                              : "Choose the parent folder for this project"}
                           </p>
                           <Button
                             variant="outline"

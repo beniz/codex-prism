@@ -138,7 +138,6 @@ export async function createProject(
     }
     chat.setPendingInitialPrompt(prompt);
   }
-  useProjectStore.getState().setLastProjectFolder(request.parentDirectory);
   useProjectStore.getState().addRecentProject(path);
   await useDocumentStore.getState().openProject(path, template.mainFileName);
 }

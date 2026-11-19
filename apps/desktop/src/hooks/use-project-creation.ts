@@ -2,9 +2,6 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import {
   getCurrentWebview,
-  homeDir,
-  join,
-  mkdir,
   open,
 } from "@/lib/backend/desktop-host";
 import { type ProjectSettings } from "@/lib/data-sources";
@@ -14,7 +11,6 @@ import {
   type CreationAttempt,
 } from "@/lib/project-creation";
 import type { TemplateCatalogItem } from "@/lib/template-catalog";
-import { useProjectStore } from "@/stores/project-store";
 
 const emptySources = (): ProjectSettings => ({
   revision: 0,
@@ -37,37 +33,14 @@ export function useProjectCreation(
   const [isDragOver, setIsDragOver] = useState(false);
   const attempt = useRef<CreationAttempt>({});
   const busy = useRef(false);
-  const lastProjectFolder = useProjectStore((s) => s.lastProjectFolder);
-
-  useEffect(() => {
-    if (projectFolder) return;
-    let cancelled = false;
-    if (lastProjectFolder) setProjectFolder(lastProjectFolder);
-    else
-      void homeDir()
-        .then((home) => join(home, "Documents", "codex-prism"))
-        .then(async (dir) => {
-          await mkdir(dir, { recursive: true }).catch(() => {});
-          if (!cancelled) setProjectFolder(dir);
-        })
-        .catch((err) =>
-          console.warn("Failed to resolve default project folder:", err),
-        );
-    return () => {
-      cancelled = true;
-    };
-  }, [projectFolder, lastProjectFolder]);
-
   const handleChooseFolder = useCallback(async () => {
     const selected = await open({
       directory: true,
       multiple: false,
-      title: "Choose Location for New Project",
+      title: "Choose the parent folder for the new project",
     });
-    if (selected) {
-      setProjectFolder(selected);
-      useProjectStore.getState().setLastProjectFolder(selected);
-    }
+    if (selected) setProjectFolder(selected);
+    return selected;
   }, []);
 
   useEffect(() => {
@@ -99,6 +72,7 @@ export function useProjectCreation(
 
   const resetCreation = useCallback(() => {
     attempt.current = {};
+    setProjectFolder(null);
     setPurpose("");
     setAttachments([]);
     setSourceSettings(emptySources());
@@ -108,14 +82,16 @@ export function useProjectCreation(
   }, []);
 
   const handleCreate = async (): Promise<boolean> => {
-    if (!template || !projectFolder || busy.current) return false;
+    if (!template || busy.current) return false;
     busy.current = true;
     setIsCreating(true);
     try {
+      const parentDirectory = projectFolder ?? await handleChooseFolder();
+      if (!parentDirectory) return false;
       await createProject(
         {
           template,
-          parentDirectory: projectFolder,
+          parentDirectory,
           name: projectName,
           purpose,
           settings: sourceSettings,
@@ -127,6 +103,7 @@ export function useProjectCreation(
           setAttachments([]);
         },
       );
+      setProjectFolder(null);
       return true;
     } catch (error) {
       if (error instanceof ProjectCreationNameError)

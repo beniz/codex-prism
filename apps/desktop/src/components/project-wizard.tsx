@@ -63,7 +63,7 @@ function ScratchForm({ onBack }: { onBack: () => void }) {
   const { purpose, setPurpose, attachments, setAttachments, sourceSettings, setSourceSettings,
     projectFolder, projectName, setProjectName, projectNameError, setProjectNameError,
     isCreating, isDragOver, handleChooseFolder, handleCreate } = useProjectCreation(template);
-  const [locationOpen, setLocationOpen] = useState(false);
+  const [locationOpen, setLocationOpen] = useState(true);
   const projectNameRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -73,7 +73,7 @@ function ScratchForm({ onBack }: { onBack: () => void }) {
   }, []);
 
   const canCreate = Boolean(
-    template && projectFolder && !getProjectNameError(projectName),
+    template && !getProjectNameError(projectName),
   );
 
   return (
@@ -177,7 +177,7 @@ function ScratchForm({ onBack }: { onBack: () => void }) {
                     <p className="min-w-0 flex-1 truncate rounded-md bg-muted/30 px-2.5 py-1.5 font-mono text-[11px] text-muted-foreground/60">
                       {projectFolder
                         ? `${projectFolder}/${normalizeProjectName(projectName) || "..."}`
-                        : "Choose a location"}
+                        : "Choose the parent folder for this project"}
                     </p>
                     <Button
                       variant="outline"

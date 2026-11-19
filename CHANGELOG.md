@@ -5,6 +5,8 @@ and detailed release notes are in [docs/releases](docs/releases/README.md).
 
 ## Unreleased
 
+- Choose a parent folder for every new project, including projects created from private templates.
+
 ## 1.8.0
 
 - Add built-in asynchronous Git collaboration through GitHub and Gitea: connect or open shared repositories, configure contributor identity, and use HTTPS credentials or existing SSH configuration.
