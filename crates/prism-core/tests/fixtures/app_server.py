@@ -16,6 +16,7 @@ threads = {}
 thread_id = "thread-1"
 next_thread = 1
 approvals = {}
+questions = {}
 def send(value):
     print(json.dumps(value), flush=True)
 def event(method, params):
@@ -29,6 +30,10 @@ for line in sys.stdin:
     method = request.get("method")
     args = request.get("params", {})
     if method is None:
+        if request.get("id") in questions:
+            thread_id = questions.pop(request["id"])
+            event("serverRequest/resolved", {"threadId":thread_id, "requestId":901})
+            complete()
         if request.get("id") in approvals:
             thread_id = approvals.pop(request["id"])
             root = threads[thread_id]
@@ -44,6 +49,8 @@ for line in sys.stdin:
     result = {}
     if method == "account/read":
         result = {"account":None,"requiresOpenaiAuth":False}
+    elif method == "collaborationMode/list":
+        result = {"data":[{"mode":"plan"}]}
     elif method == "model/list":
         result = {"data":[]}
     elif method in ("thread/start", "thread/resume"):
@@ -55,7 +62,7 @@ for line in sys.stdin:
             thread_id = f"thread-{next_thread}"
             next_thread += 1
         threads[thread_id] = root
-        result = {"thread":{"id":thread_id}}
+        result = {"thread":{"id":thread_id}, "model":"fixture-model"}
     elif method == "turn/start":
         mode = args["input"][0]["text"]
         if mode == "exit":
@@ -69,7 +76,13 @@ for line in sys.stdin:
     if method == "turn/start":
         event("turn/started", {"threadId":thread_id,"turn":{"id":"turn-1"}})
         event("item/agentMessage/delta", {"threadId":thread_id,"delta":"hello"})
-        if mode == "approval":
+        if mode == "plan-question" and args.get("collaborationMode", {}).get("mode") == "plan":
+            questions[901] = thread_id
+            send({"id":901,"method":"item/tool/requestUserInput","params":{"threadId":thread_id,
+                "turnId":"turn-1","itemId":"question-1","isBlocking":True,"autoResolutionMs":None,
+                "questions":[{"id":"audience","header":"Audience","question":"Who will read it?",
+                "isOther":True,"isSecret":False,"options":[{"label":"Students","description":"Introductory"}]}]}})
+        elif mode == "approval":
             approvals[900] = thread_id
             send({"id":900,"method":"item/commandExecution/requestApproval","params":{"threadId":thread_id,"turnId":"turn-1","command":"fixture","sandboxPermissions":"use_default"}})
         else:

@@ -58,6 +58,26 @@ async fn send(backend: &Backend, id: &str, prompt: &str) -> Result<Value, String
         .await
 }
 #[tokio::test]
+async fn plan_only_preset_asks_and_receives_a_structured_answer() {
+    let (dir, backend, project, events) = setup().await;
+    let turn = backend.codex_send_for_chat_mode(
+        project.id, None, "plan-question".into(), None, None, None, None, None,
+        Some("planning-chat".into()), Some("plan".into()),
+    ).await.unwrap();
+    let request = event(&events, "item/tool/requestUserInput").await;
+    assert_eq!(request["params"]["threadId"], turn["threadId"]);
+    assert_eq!(request["params"]["turnId"], turn["turn"]["id"]);
+    let answer = json!({"answers":{"audience":{"answers":["Students"]}}});
+    backend.codex_respond(request["id"].clone(), answer.clone()).await.unwrap();
+    event(&events, "turn/completed").await;
+    let log = fs::read_to_string(dir.path().join("requests.jsonl")).unwrap();
+    assert!(log.lines().map(|line| serde_json::from_str::<Value>(line).unwrap())
+        .any(|entry| entry["id"] == request["id"] && entry["result"] == answer));
+    assert_eq!(fs::read(project.root.join("main.tex")).unwrap(), b"original");
+    backend.shutdown().await;
+}
+
+#[tokio::test]
 async fn agent_streams_approvals_and_persists_sessions_and_reviews() {
     let (dir, backend, p, events) = setup().await;
     assert!(

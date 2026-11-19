@@ -175,7 +175,7 @@ it("shows questions in the composer, retains choices across chats, and submits o
   const respond = vi.fn(() => new Promise<void>(resolve => { finish = resolve; }));
   useAgentSetupStore.setState({ status: "ready", checkStatus: vi.fn(async () => {}) });
   useAgentChatStore.setState({
-    respond, requests: [request, other], activeTabId: "a", pendingAttachments: [],
+    respond, requests: [], activeTabId: "a", pendingAttachments: [],
     tabs: ["a", "b"].map(id => ({ ...original.tabs[0], id, sessionId: `plan-${id}`, mode: "plan", isStreaming: true, draft: `Draft ${id}`, messages: [] })),
   });
   const host = document.createElement("div");
@@ -183,6 +183,10 @@ it("shows questions in the composer, retains choices across chats, and submits o
   const root = createRoot(host);
   try {
     await act(async () => root.render(<AgentChatDrawer />));
+    await act(async () => {
+      useAgentChatStore.getState().handleEvent(request);
+      useAgentChatStore.getState().handleEvent(other);
+    });
     const composer = host.querySelector('[data-chat-composer]')!;
     const forms = Array.from(host.querySelectorAll<HTMLFormElement>('form[aria-label="Plan questions"]'));
     const form = forms[0];
