@@ -5,6 +5,8 @@ and detailed release notes are in [docs/releases](docs/releases/README.md).
 
 ## Unreleased
 
+- Add file data sources from project settings while another chat is working or awaiting review. New chat workspaces include the saved files.
+
 - Label the automatic model choice “Codex default” so the selected model appears only once in the chat menu.
 
 - Plan mode uses composer questions for unresolved choices that would change the plan, including with Codex servers that advertise only the Plan preset.

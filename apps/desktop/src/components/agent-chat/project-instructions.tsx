@@ -17,6 +17,8 @@ export function ProjectInstructions({ projectId, projectName, renameProject }: {
   }, [projectId]);
   const [files, setFiles] = useState<string[]>([]);
   const locked = useAgentChatStore(s => s.locked);
+  const filesLocked = useAgentChatStore(s => s.review.active || s.review.changes.length > 0 ||
+    s.proposals.some(p => p.state === "applying"));
   const [name, setName] = useState(projectName ?? "");
   const [renaming, setRenaming] = useState(false);
   const [renameError, setRenameError] = useState<string | null>(null);
@@ -69,7 +71,7 @@ export function ProjectInstructions({ projectId, projectName, renameProject }: {
         </div>}
         <section className="space-y-2" aria-label="Data sources">
           <h3 ref={sourcesHeading} tabIndex={-1} className="font-medium text-sm">Data sources</h3>
-          <DataSourceEditor projectId={projectId} settings={settings} setSettings={setSettings} files={files} setFiles={setFiles} disabled={loading || busy} filesLocked={locked} />
+          <DataSourceEditor projectId={projectId} settings={settings} setSettings={setSettings} files={files} setFiles={setFiles} disabled={loading || busy} filesLocked={filesLocked} />
         </section>
         <label htmlFor="project-shared-prompt" className="text-sm font-medium">Shared project prompt</label>
         <textarea id="project-shared-prompt" aria-label="Project instructions" className="min-h-48 w-full rounded-md border bg-background p-3 text-sm" disabled={loading || busy || renaming} value={text} onChange={e => setText(e.target.value)} placeholder="Base this presentation on references/paper-draft.pdf. Target a 20-minute research talk and distinguish validated results from proposed work." />

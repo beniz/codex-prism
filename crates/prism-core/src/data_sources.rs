@@ -165,7 +165,13 @@ pub(crate) fn settings(
         let managed = fs::canonicalize(&managed).unwrap_or(managed);
         let mut rollback = ImportRollback::default();
         if !next.pending_imports.is_empty() {
-            crate::codex::assert_unlocked(app, id)?;
+            // Imports only register existing files or create new ones under the
+            // project mutex. Isolated turns continue using their own snapshots.
+            if crate::codex::review_path(app, id)?.exists()
+                || crate::proposals::all(app, id)?.iter().any(|p| p.state == "applying")
+            {
+                return Err("Resolve the legacy review or interrupted application before importing files".into());
+            }
         }
         for import in std::mem::take(&mut next.pending_imports) {
             let source = fs::canonicalize(&import.path).map_err(|e| e.to_string())?;
@@ -610,13 +616,5 @@ mod tests {
         });
         assert!(settings(&app, &project.id, Some(stale)).is_err());
         assert!(!root.join("attachments/stale.txt").exists());
-        crate::proposals::begin_for_chat(&app, &project.id, None, None, None).unwrap();
-        let mut draft = saved;
-        draft.pending_imports.push(FileImport {
-            path: input.to_string_lossy().into(),
-            destination: "attachments/locked.txt".into(),
-        });
-        assert!(settings(&app, &project.id, Some(draft)).is_err());
-        assert!(!root.join("attachments/locked.txt").exists());
     }
 }

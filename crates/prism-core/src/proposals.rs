@@ -1561,6 +1561,42 @@ mod tests {
         assert_eq!(fs::read(root(&app, &p).unwrap().join("main.tex")).unwrap(), b"pending");
     }
     #[test]
+    fn file_sources_added_during_a_turn_are_isolated_and_survive_keep() {
+        use crate::data_sources::{settings, FileImport};
+        let (temp, app, main) = fixture();
+        let first = begin(&app, &main.id, Some("first"), None).unwrap();
+        let workspace = root(&app, &first).unwrap();
+        fs::write(workspace.join("main.tex"), "edited").unwrap();
+        let external = temp.path().join("asset.png");
+        fs::write(&external, b"reference").unwrap();
+        let import = || FileImport {
+            path: external.to_string_lossy().into(),
+            destination: "asset.png".into(),
+        };
+        let mut draft = settings(&app, &main.id, None).unwrap();
+        draft.pending_imports.push(import());
+        let mut saved = settings(&app, &main.id, Some(draft)).unwrap();
+        assert_eq!(saved.sources[0].path, "asset-1.png");
+        assert!(!workspace.join("asset-1.png").exists());
+        assert_eq!(fs::read(main.root.join("asset.png")).unwrap(), [0, 1, 2]);
+
+        finish(&app, &first.id, false).unwrap();
+        saved.pending_imports.push(import());
+        settings(&app, &main.id, Some(saved)).unwrap();
+        let second = begin(&app, &main.id, Some("second"), None).unwrap();
+        let second_workspace = root(&app, &second).unwrap();
+        for name in ["asset-1.png", "asset-2.png"] {
+            assert_eq!(fs::read(second_workspace.join(name)).unwrap(), b"reference");
+            assert!(!workspace.join(name).exists());
+        }
+        let ready = load(&app, &first.id).unwrap();
+        assert_eq!(ready.state, "ready");
+        op(&app, &ready, "apply");
+        assert_eq!(fs::read(main.root.join("main.tex")).unwrap(), b"edited");
+        assert_eq!(fs::read(main.root.join("asset-1.png")).unwrap(), b"reference");
+        assert_eq!(fs::read(main.root.join("asset-2.png")).unwrap(), b"reference");
+    }
+    #[test]
     fn unchanged_chat_returns_to_main_after_another_chat_is_kept() {
         let (_d, app, main) = fixture();
         let question = begin(&app, &main.id, Some("question"), None).unwrap();

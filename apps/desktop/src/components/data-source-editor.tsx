@@ -26,7 +26,7 @@ export function DataSourceEditor({ projectId = "", settings, setSettings, files,
       {settings.completionAliases?.[source.kind === "file" ? `files:${source.path.includes("/") ? source.path.split("/")[0] : ""}` : source.id] && <p className="text-xs text-muted-foreground">Completion: @{settings.completionAliases[source.kind === "file" ? `files:${source.path.includes("/") ? source.path.split("/")[0] : ""}` : source.id]}:/</p>}
     </div>)}
     {files.map(path => <div key={path} className="flex items-center gap-2 text-xs"><span className="min-w-0 flex-1 break-all">{path} · to be copied</span><Button disabled={disabled} variant="ghost" onClick={() => setFiles(old => old.filter(p => p !== path))}>Remove</Button></div>)}
-    <p className="text-xs text-muted-foreground">Files are copied into the project when saved. Directories stay external. Removing a file source keeps its file in the project.{filesLocked && " Adding files is available after running work and pending proposals are resolved."}</p>
+    <p className="text-xs text-muted-foreground">Files are copied into the project when saved. Directories stay external. Removing a file source keeps its file in the project.{filesLocked && " Resolve the legacy review or interrupted application to add files."}</p>
     {error && <p role="alert" className="text-xs text-destructive">{error}</p>}
   </div>;
 }

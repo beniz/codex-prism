@@ -213,8 +213,8 @@ source does not automatically insert content or citations into your document.
 
 The sidebar groups file sources into **Files · N** with an availability indicator;
 click it to manage individual files in settings. Removing a registration keeps
-the project file. Delete files separately through the Files navigator. Adding
-files is disabled while running work or pending proposals lock the document.
+the project file. Delete files separately through the Files navigator. Files added while a chat is working are available to new chat workspaces.
+Existing proposal workspaces retain their original files.
 
 Existing files under `attachments/` are registered once, without following
 symlinks. Removed registrations are not rediscovered. Older images elsewhere can

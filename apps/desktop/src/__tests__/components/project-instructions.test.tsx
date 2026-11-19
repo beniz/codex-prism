@@ -43,6 +43,7 @@ it("opens settings from the title and renames through the existing project actio
     expect(rename).toHaveBeenCalledWith('New paper');
     await act(async () => useAgentChatStore.setState({ locked: true }));
     expect(input.disabled).toBe(true);
+    expect([...document.querySelectorAll("button")].find(b => b.textContent === "Add files")!.disabled).toBe(false);
     expect(document.querySelector('textarea')!.disabled).toBe(false);
   } finally { await act(async () => root.unmount()); host.remove(); useAgentChatStore.setState({ locked: previous }); }
 });
