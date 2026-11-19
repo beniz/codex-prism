@@ -20,6 +20,11 @@ export function DataSourceEditor({ projectId = "", settings, setSettings, files,
   }
   return <div className="space-y-2">
     <SshDataSources projectId={projectId} settings={settings} setSettings={setSettings} disabled={disabled} onAddDirectory={() => void add(true)} fileAction={<Button variant="outline" disabled={disabled || filesLocked} onClick={() => void add(false)}>Add files</Button>} />
+    <label className="flex items-center gap-2 text-xs">
+      <input type="checkbox" checked={settings.optimizeImportedImages ?? true} disabled={disabled || filesLocked}
+        onChange={e => { const checked = e.target.checked; setSettings(old => ({ ...old, optimizeImportedImages: checked })); }} />
+      Import PNG and BMP images as JPEG copies (quality 90). Images with transparency or animation keep their format.
+    </label>
     {settings.sources.filter(s => !s.connectionId).map(source => <div key={source.id} className="rounded border p-2">
       <div className="flex gap-2"><input aria-label="Source name" className="min-w-0 flex-1 rounded border bg-background p-1" disabled={disabled} value={source.name} onChange={e => setSettings(old => ({ ...old, sources: old.sources.map(s => s.id === source.id ? { ...s, name: e.target.value } : s) }))} /><Button variant="ghost" disabled={disabled} onClick={() => setSettings(old => ({ ...old, sources: old.sources.filter(s => s.id !== source.id) }))}>Remove</Button></div>
       <p className="break-all text-xs text-muted-foreground">{source.kind === "file" ? "File" : "Directory"} · {source.path}</p>

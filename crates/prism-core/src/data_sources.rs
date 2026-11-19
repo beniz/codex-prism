@@ -41,6 +41,8 @@ impl Drop for ImportRollback {
 pub(crate) struct Settings {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub pending_imports: Vec<FileImport>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub optimize_imported_images: Option<bool>,
     #[serde(default)]
     pub completion_aliases: BTreeMap<String, String>,
     pub revision: u64,
@@ -58,6 +60,31 @@ fn validate_file_path(path: &str) -> Result<(), String> {
         );
     }
     Ok(())
+}
+
+// Keep alpha channels and animations intact. JPEGs and other formats pass through.
+fn jpeg_import_pixels(source: &Path) -> image::ImageResult<Option<image::RgbImage>> {
+    use image::{DynamicImage, ImageDecoder, ImageReader, Limits};
+    let extension = source.extension().and_then(|s| s.to_str()).unwrap_or("");
+    let pixels = if extension.eq_ignore_ascii_case("png") {
+        let reader = std::io::BufReader::new(fs::File::open(source)?);
+        let decoder = image::codecs::png::PngDecoder::with_limits(reader, Limits::default())?;
+        if decoder.is_apng()? || decoder.color_type().has_alpha() {
+            return Ok(None);
+        }
+        Limits::default().reserve(decoder.total_bytes())?;
+        DynamicImage::from_decoder(decoder)?
+    } else if extension.eq_ignore_ascii_case("bmp") {
+        let decoder = ImageReader::open(source)?.into_decoder()?;
+        if decoder.color_type().has_alpha() {
+            return Ok(None);
+        }
+        Limits::default().reserve(decoder.total_bytes())?;
+        DynamicImage::from_decoder(decoder)?
+    } else {
+        return Ok(None);
+    };
+    Ok(Some(pixels.into_rgb8()))
 }
 
 pub(crate) fn settings(
@@ -178,11 +205,20 @@ pub(crate) fn settings(
             if !source.is_file() {
                 return Err("Select a regular file".into());
             }
-            let relative = if let Ok(relative) = source.strip_prefix(&root) {
+            let local = source.strip_prefix(&root).ok();
+            let pixels = if next.optimize_imported_images.unwrap_or(true) {
+                jpeg_import_pixels(&source).map_err(|e| format!("Cannot convert {} to JPEG: {e}", source.display()))?
+            } else {
+                None
+            };
+            let relative = if let Some(relative) = local.filter(|_| pixels.is_none()) {
                 relative.to_string_lossy().replace('\\', "/")
             } else {
-                validate_file_path(&import.destination)?;
-                let requested = projects::resolve(&root, &import.destination)?;
+                let destination = local.unwrap_or_else(|| Path::new(&import.destination));
+                let destination = if pixels.is_some() { destination.with_extension("jpg") } else { destination.to_owned() };
+                let destination = destination.to_string_lossy().replace('\\', "/");
+                validate_file_path(&destination)?;
+                let requested = projects::resolve(&root, &destination)?;
                 let parent = requested.parent().ok_or("Invalid import destination")?;
                 fs::create_dir_all(parent).map_err(|e| e.to_string())?;
                 let stem = requested
@@ -207,8 +243,17 @@ pub(crate) fn settings(
                     {
                         Ok(mut output) => {
                             rollback.files.push(target.clone());
-                            let mut input = fs::File::open(&source).map_err(|e| e.to_string())?;
-                            std::io::copy(&mut input, &mut output).map_err(|e| e.to_string())?;
+                            if let Some(rgb) = &pixels {
+                                use std::io::Write;
+                                let mut writer = std::io::BufWriter::new(&mut output);
+                                image::codecs::jpeg::JpegEncoder::new_with_quality(&mut writer, 90)
+                                    .encode(rgb, rgb.width(), rgb.height(), image::ExtendedColorType::Rgb8)
+                                    .map_err(|e| e.to_string())?;
+                                writer.flush().map_err(|e| e.to_string())?;
+                            } else {
+                                let mut input = fs::File::open(&source).map_err(|e| e.to_string())?;
+                                std::io::copy(&mut input, &mut output).map_err(|e| e.to_string())?;
+                            }
                             output.sync_all().map_err(|e| e.to_string())?;
                             break target
                                 .strip_prefix(&root)
@@ -231,7 +276,7 @@ pub(crate) fn settings(
             {
                 next.sources.push(Source {
                     id: uuid::Uuid::new_v4().to_string(),
-                    name: source
+                    name: Path::new(&relative)
                         .file_name()
                         .ok_or("Invalid filename")?
                         .to_string_lossy()
@@ -566,6 +611,37 @@ mod tests {
         assert!(super::settings(&app, &project.id, Some(next)).is_err());
         assert_eq!(saved.sources.len(), 1);
     }
+    #[test]
+    fn imports_jpeg_copies_and_preserves_originals_and_alpha() {
+        let (temp, app) = crate::test_backend();
+        let root = temp.path().join("document");
+        fs::create_dir(&root).unwrap();
+        let project = projects::project_register(app.clone(), root.to_string_lossy().into()).unwrap();
+        let opaque = temp.path().join("frame.png");
+        image::RgbImage::new(12, 8).save(&opaque).unwrap();
+        let alpha = temp.path().join("overlay.png");
+        image::RgbaImage::new(12, 8).save(&alpha).unwrap();
+        let original = fs::read(&opaque).unwrap();
+        let request = |p: &Path| FileImport {
+            path: p.to_string_lossy().into_owned(),
+            destination: format!("img/{}", p.file_name().unwrap().to_string_lossy()),
+        };
+        let mut draft = settings(&app, &project.id, None).unwrap();
+        fs::create_dir(root.join("img")).unwrap();
+        fs::write(root.join("img/frame.jpg"), b"existing").unwrap();
+        draft.pending_imports = vec![request(&opaque), request(&alpha)];
+        let mut saved = settings(&app, &project.id, Some(draft)).unwrap();
+        assert!(saved.sources.iter().any(|s| s.path == "img/frame-1.jpg" && s.name == "frame-1.jpg"));
+        assert_eq!(image::image_dimensions(root.join("img/frame-1.jpg")).unwrap(), (12, 8));
+        assert_eq!(fs::read(root.join("img/frame.jpg")).unwrap(), b"existing");
+        assert_eq!(fs::read(root.join("img/overlay.png")).unwrap(), fs::read(alpha).unwrap());
+        assert_eq!(fs::read(&opaque).unwrap(), original);
+        saved.optimize_imported_images = Some(false);
+        saved.pending_imports = vec![request(&opaque)];
+        settings(&app, &project.id, Some(saved)).unwrap();
+        assert_eq!(fs::read(root.join("img/frame.png")).unwrap(), original);
+    }
+
     #[test]
     fn file_imports_migrate_rollback_and_unregister_without_deletion() {
         let (temp, app) = crate::test_backend();

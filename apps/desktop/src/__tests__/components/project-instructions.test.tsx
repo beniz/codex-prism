@@ -17,9 +17,12 @@ it("loads project instructions and saves them through project metadata", async (
     expect(host.textContent).toContain("Instructions configured");
     await act(async () => host.querySelector('button')!.click());
     expect(document.querySelector('textarea')!.value).toBe("Use the paper");
+    const optimize = document.querySelector<HTMLInputElement>('input[type="checkbox"]')!;
+    expect(optimize.checked).toBe(true);
+    await act(async () => optimize.click());
     const save = [...document.querySelectorAll('button')].find(b => b.textContent === 'Save')!;
     await act(async () => save.click());
-    expect(saveProjectSettings).toHaveBeenCalledWith("project-a", { revision: 0, instructions: "Use the paper", sources: [] });
+    expect(saveProjectSettings).toHaveBeenCalledWith("project-a", { revision: 0, instructions: "Use the paper", sources: [], optimizeImportedImages: false });
   } finally { await act(async () => root.unmount()); host.remove(); }
 });
 

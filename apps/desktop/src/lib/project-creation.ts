@@ -103,6 +103,7 @@ export async function createProject(
     {
       ...current,
       instructions: request.settings.instructions,
+      optimizeImportedImages: request.settings.optimizeImportedImages,
       sources,
       connections: request.settings.connections ?? [],
     },

@@ -1574,6 +1574,7 @@ mod tests {
             destination: "asset.png".into(),
         };
         let mut draft = settings(&app, &main.id, None).unwrap();
+        draft.optimize_imported_images = Some(false);
         draft.pending_imports.push(import());
         let mut saved = settings(&app, &main.id, Some(draft)).unwrap();
         assert_eq!(saved.sources[0].path, "asset-1.png");
