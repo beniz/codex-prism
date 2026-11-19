@@ -761,9 +761,7 @@ export function AgentChatDrawer({
                       })
                     }
                   >
-                    <option value="">
-                      {model?.displayName || "Codex default"}
-                    </option>
+                    <option value="">Codex default</option>
                     {setup.models.map((m) => (
                       <option key={m.id} value={m.model}>
                         {m.displayName}

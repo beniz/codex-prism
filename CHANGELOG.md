@@ -5,6 +5,8 @@ and detailed release notes are in [docs/releases](docs/releases/README.md).
 
 ## Unreleased
 
+- Label the automatic model choice “Codex default” so the selected model appears only once in the chat menu.
+
 - Plan mode uses composer questions for unresolved choices that would change the plan, including with Codex servers that advertise only the Plan preset.
 
 - Keep chat drafts editable while history loads. Project file operations run off the native UI thread, and the desktop preview transfers PDF bytes in binary form.
