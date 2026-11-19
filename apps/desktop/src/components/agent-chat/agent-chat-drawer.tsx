@@ -597,7 +597,6 @@ export function AgentChatDrawer({
                 <textarea
                   ref={input}
                   rows={2}
-                  disabled={s.restoringChats}
                   aria-label="Message Codex"
                   className="block min-h-14 w-full resize-none border-0 bg-transparent px-2 py-1.5 text-sm outline-none placeholder:text-muted-foreground/70"
                   placeholder={

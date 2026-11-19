@@ -818,7 +818,7 @@ fn result_index_from_hashes(
         projects::revision(&serde_json::to_vec(&(main, hashes)).map_err(|e| e.to_string())?);
     Ok(directory(app, workspace)?.join(format!("result-{fingerprint}.json")))
 }
-pub(crate) fn read_build(app: &Backend, workspace: &str, key: &str) -> Result<Value, String> {
+pub(crate) fn read_build(app: &Backend, workspace: &str, key: &str) -> Result<crate::ProjectPdf, String> {
     let dir = artifact(app, workspace, key)?;
     // output.pdf is the commit marker, written after all navigation metadata.
     let bytes = fs::read(dir.join("output.pdf")).map_err(|e| e.to_string())?;
@@ -828,7 +828,7 @@ pub(crate) fn read_build(app: &Backend, workspace: &str, key: &str) -> Result<Va
     let locations: Vec<latex::SourceBox> =
         serde_json::from_slice(&fs::read(dir.join("locations.json")).map_err(|e| e.to_string())?)
             .map_err(|e| e.to_string())?;
-    Ok(json!({"artifactId":key,"bytes":bytes,"locations":locations}))
+    Ok(crate::ProjectPdf { bytes, metadata: json!({"artifactId":key,"locations":locations}) })
 }
 /// Read-only with respect to compilation: even full-build mode can reuse a PDF on navigation.
 pub(crate) fn load_proposal_pdf(
@@ -836,15 +836,14 @@ pub(crate) fn load_proposal_pdf(
     workspace: &str,
     main: &str,
     files: &BTreeMap<String, Vec<u8>>,
-) -> Result<Value, String> {
+) -> Result<Option<crate::ProjectPdf>, String> {
     let _pin = pin_workspace(app, workspace)?;
     let index = result_index(app, workspace, main, files)?;
     let _index = RESULT_INDEX_LOCK.lock().map_err(|e| e.to_string())?;
     if let Ok(bytes) = fs::read(&index) {
         if let Ok(key) = serde_json::from_slice::<Option<String>>(&bytes) {
             return Ok(key
-                .and_then(|key| read_build(app, workspace, &key).ok())
-                .unwrap_or(Value::Null));
+                .and_then(|key| read_build(app, workspace, &key).ok()));
         }
     }
     // Upgrade older caches once per immutable input set, including full-build artifacts.
@@ -869,7 +868,7 @@ pub(crate) fn load_proposal_pdf(
     }
     fs::create_dir_all(index.parent().ok_or("Invalid build index")?).map_err(|e| e.to_string())?;
     projects::save_json(&index, &found.as_ref().map(|(key, _)| key))?;
-    Ok(found.map(|(_, build)| build).unwrap_or(Value::Null))
+    Ok(found.map(|(_, build)| build))
 }
 pub(crate) async fn proposal_pdf_policy(
     app: &Backend,
@@ -878,7 +877,7 @@ pub(crate) async fn proposal_pdf_policy(
     files: &BTreeMap<String, Vec<u8>>,
     incremental: bool,
     check: &(dyn Fn() -> Result<(), String> + Sync),
-) -> Result<Value, String> {
+) -> Result<crate::ProjectPdf, String> {
     let _pin = pin_workspace(app, workspace)?;
     // Deduplicate full-build requests too, without reusing an artifact on an explicit rebuild.
     let index = result_index(app, workspace, main, files)?;
@@ -894,8 +893,7 @@ pub(crate) async fn proposal_pdf_policy(
     };
     check()?;
     if fs::read(&index).ok() != previous {
-        let cached = load_proposal_pdf(app, workspace, main, files)?;
-        if !cached.is_null() {
+        if let Some(cached) = load_proposal_pdf(app, workspace, main, files)? {
             return Ok(cached);
         }
     }
@@ -1133,9 +1131,9 @@ mod concurrent_build_tests {
         );
         assert!(received.recv_timeout(Duration::from_secs(1)).is_ok());
         assert!(work_survived, "Cleanup deleted active attempt directories");
-        assert_eq!(cached["artifactId"], cached_key);
+        assert_eq!(cached.unwrap().metadata["artifactId"], cached_key);
         assert_eq!(
-            load_proposal_pdf(&app, &workspace, "main.tex", &cached_files).unwrap()["artifactId"],
+            load_proposal_pdf(&app, &workspace, "main.tex", &cached_files).unwrap().unwrap().metadata["artifactId"],
             cached_key
         );
     }
@@ -1150,34 +1148,34 @@ mod concurrent_build_tests {
         let input = files("Full-build proposal");
         assert!(load_proposal_pdf(&app, &workspace, "main.tex", &input)
             .unwrap()
-            .is_null());
+            .is_none());
         let check = || Ok(());
         let (a, b) = tokio::join!(
             proposal_pdf_policy(&app, &workspace, "main.tex", &input, false, &check),
             proposal_pdf_policy(&app, &workspace, "main.tex", &input, false, &check),
         );
         let a = a.unwrap();
-        assert_eq!(a["artifactId"], b.unwrap()["artifactId"]);
+        assert_eq!(a.metadata["artifactId"], b.unwrap().metadata["artifactId"]);
         let cached = load_proposal_pdf(&app, &workspace, "main.tex", &input).unwrap();
-        assert_eq!(cached, a);
+        assert_eq!(cached.unwrap(), a);
         let rebuilt = proposal_pdf_policy(&app, &workspace, "main.tex", &input, false, &check)
             .await
             .unwrap();
         assert_ne!(
-            rebuilt["artifactId"], a["artifactId"],
+            rebuilt.metadata["artifactId"], a.metadata["artifactId"],
             "An explicit later full rebuild must run again"
         );
         let main = tmp.path().join("accepted-project");
         fs::create_dir(&main).unwrap();
         let promoted = promote_proposal_builds(&app, &workspace, &main, &input);
-        assert_eq!(promoted["main.tex"], rebuilt["artifactId"].as_str().unwrap());
+        assert_eq!(promoted["main.tex"], rebuilt.metadata["artifactId"].as_str().unwrap());
         let accepted = latex::load_existing_pdf(&app.inner.latex, main.to_string_lossy().into(), "main.tex".into())
             .await.unwrap().unwrap();
-        assert_eq!(serde_json::json!(accepted), rebuilt["bytes"]);
+        assert_eq!(accepted, rebuilt.bytes);
         let pin = pin_workspace(&app, &workspace).unwrap();
         cleanup(&app, &workspace).await.unwrap();
         assert_eq!(
-            load_proposal_pdf(&app, &workspace, "main.tex", &input).unwrap(),
+            load_proposal_pdf(&app, &workspace, "main.tex", &input).unwrap().unwrap(),
             rebuilt
         );
         drop(pin);
@@ -1200,6 +1198,6 @@ mod concurrent_build_tests {
         assert_eq!(result.unwrap_err(), "Stale proposal build");
         assert!(load_proposal_pdf(&app, &workspace, "main.tex", &input)
             .unwrap()
-            .is_null());
+            .is_none());
     }
 }

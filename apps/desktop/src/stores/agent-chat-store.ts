@@ -315,12 +315,15 @@ export const useAgentChatStore = create<ChatState>((set, get) => ({
     resetActivities();
     clearDeltas();
     const saved = root ? readChatTabs(root) : null;
-    const t = tab();
+    // Show local drafts immediately. Discovering sessions and reading transcripts
+    // can take longer, and neither operation owns the user's input.
+    const initialTabs = saved?.tabs.map(item => ({ ...tab(), ...item, projectPath: root })) ?? [tab()];
+    const t = initialTabs.find(item => item.id === saved?.activeTabId) ?? initialTabs[0];
     set({
       restoringChats: !!root,
       selectedModel: saved?.selectedModel ?? "gpt-5.6-sol",
       effortLevel: saved?.effortLevel ?? "xhigh",
-      tabs: [t],
+      tabs: initialTabs,
       activeTabId: t.id,
       activeProjectPath: root,
       projectId: null,
@@ -337,15 +340,24 @@ export const useAgentChatStore = create<ChatState>((set, get) => ({
         await ensureAgentEvents();
         const sessions = await backend.agent.sessions(p.id);
         const candidates = saved?.tabs ?? (sessions.length ? [{
-          id: crypto.randomUUID(), title: sessions[0].title,
+          id: t.id, title: sessions[0].title,
           sessionId: sessions[0].id, draft: "",
         }] : []);
         if (generation !== projectGeneration) return;
-        const restored = candidates
-          .filter(t => !t.sessionId || sessions.some(s => s.id === t.sessionId))
-          .map(savedTab => ({ ...tab(), ...savedTab, projectPath: root, restoring: !!savedTab.sessionId }));
-        const tabs = restored.length ? restored : [t];
-        const active = tabs.find(t => t.id === saved?.activeTabId) ?? tabs[0];
+        const current = get();
+        const tabs: TabState[] = [];
+        for (const candidate of candidates) {
+          const local = current.tabs.find(item => item.id === candidate.id);
+          const draft = local?.draft ?? candidate.draft;
+          if (candidate.sessionId && !sessions.some(session => session.id === candidate.sessionId)) {
+            // An archived thread cannot be resumed. Retain its unsent draft in a fresh chat.
+            if (draft) tabs.push({ ...tab(), id: candidate.id, projectPath: root, draft });
+          } else {
+            tabs.push({ ...tab(), ...candidate, draft, projectPath: root, restoring: !!candidate.sessionId });
+          }
+        }
+        if (!tabs.length) tabs.push({ ...tab(), id: t.sessionId ? crypto.randomUUID() : t.id, projectPath: root, draft: current.tabs[0]?.draft ?? "" });
+        const active = tabs.find(item => item.id === current.activeTabId) ?? tabs[0];
         set({ tabs, activeTabId: active.id, projectId: p.id });
         // Recover ownership before enabling any new editing or agent work.
         await get().refreshReview();
@@ -1031,7 +1043,11 @@ let draftSaveTimer: ReturnType<typeof setTimeout> | undefined;
 let draftMaxWaitTimer: ReturnType<typeof setTimeout> | undefined;
 const savedDraft = (t: TabState) => t.draft || t.submittedDraft || "";
 function chatTabsSnapshot(state: ChatState) {
-  if (!state.activeProjectPath || !state.projectId || state.restoringChats) return null;
+  if (!state.activeProjectPath) return null;
+  // Before registration, only persist real work. An empty placeholder must
+  // never displace the newest session lookup on a project's first opening.
+  if (!state.projectId && (!state.restoringChats ||
+    !state.tabs.some(t => t.projectPath || t.draft))) return null;
   return {
     root: state.activeProjectPath,
     saved: {

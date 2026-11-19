@@ -696,6 +696,17 @@ describe("project chat restoration", () => {
     expect(restored.tabs.every((t) => !t.isStreaming && t.turnId === null)).toBe(true);
     expect(backend.agent.send).not.toHaveBeenCalled();
   });
+  it("preserves typing and deliberate draft clearing during project discovery", async () => {
+    writeChatTabs("/drafting", { activeTabId: "active", tabs: [
+      { id: "active", title: "Research", sessionId: "thread1", draft: "Saved question" },
+    ] });
+    useAgentChatStore.getState().resetForProject("/drafting");
+    expect(useAgentChatStore.getState().tabs[0].draft).toBe("Saved question");
+    useAgentChatStore.setState(s => ({ tabs: s.tabs.map(t => ({ ...t, draft: "" })) }));
+    await waitForRestore();
+    expect(useAgentChatStore.getState().tabs[0]).toMatchObject({ id: "active", sessionId: "thread1", draft: "" });
+  });
+
   it("makes the active conversation usable while background history is delayed", async () => {
     writeChatTabs("/priority", { activeTabId: "active", tabs: [
       { id: "background", sessionId: "thread1", title: "Background", draft: "" },

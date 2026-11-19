@@ -31,6 +31,24 @@ use std::{
     sync::{Arc, Mutex},
 };
 
+/// PDF bytes stay opaque across desktop IPC. Headless JSON callers retain the
+/// original byte-array response, with navigation metadata for proposal builds.
+#[derive(Debug, PartialEq)]
+pub struct ProjectPdf {
+    pub bytes: Vec<u8>,
+    pub metadata: serde_json::Value,
+}
+
+impl ProjectPdf {
+    fn into_json(self) -> serde_json::Value {
+        let bytes = serde_json::json!(self.bytes);
+        let mut metadata = self.metadata;
+        if metadata.is_null() { return bytes; }
+        metadata["bytes"] = bytes;
+        metadata
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct BackendConfig {
     pub data_dir: PathBuf,

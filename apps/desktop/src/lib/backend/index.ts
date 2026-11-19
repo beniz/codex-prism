@@ -35,10 +35,11 @@ export async function invoke<T>(
     const result = await nativeInvoke<any>("project_service", {
       projectId: project.id,
       operation: command,
+      ...(command === "compile_latex" || command === "load_existing_pdf" ? { binaryPdf: true } : {}),
       args: data,
     });
     return (
-      command === "compile_latex" ? new Uint8Array(result).buffer : result
+      command === "compile_latex" && !(result instanceof ArrayBuffer) ? new Uint8Array(result).buffer : result
     ) as T;
   }
   return nativeInvoke<T>(command, args);
@@ -306,13 +307,25 @@ export { convertFileSrc } from "@tauri-apps/api/core";
 export type { UnlistenFn } from "@tauri-apps/api/event";
 
 export interface ProposalPdfBuild {
-  bytes: number[];
+  bytes: ArrayBuffer | number[];
   artifactId: string;
   locations: import("@/lib/visual-review").SourceBox[];
 }
+async function proposalPdf<T>(request: Record<string, unknown>): Promise<T> {
+  const reply = await nativeInvoke<ArrayBuffer | T>("project_service", { ...request, binaryPdf: true });
+  // Tauri can fall back to a number array when custom-protocol IPC is unavailable.
+  if (!(reply instanceof ArrayBuffer) && !Array.isArray(reply)) return reply;
+  const buffer = reply instanceof ArrayBuffer ? reply : new Uint8Array(reply).buffer;
+  if (buffer.byteLength < 4) throw new Error("Incomplete proposal PDF");
+  const length = new DataView(buffer).getUint32(0, true);
+  if (length > buffer.byteLength - 4) throw new Error("Incomplete proposal PDF");
+  const metadata = JSON.parse(new TextDecoder().decode(new Uint8Array(buffer, 4, length)));
+  return { ...metadata, bytes: buffer.slice(4 + length) };
+}
+
 export const proposals = {
   loadBuild: (p: Proposal, mainFile: string) =>
-    nativeInvoke<ProposalPdfBuild | null>("project_service", {
+    proposalPdf<ProposalPdfBuild | null>({
       projectId: p.projectId,
       operation: "proposal_load_build",
       args: { proposalId: p.id, generation: p.generation, mainFile, side: "result" },
@@ -344,10 +357,12 @@ export const proposals = {
       | "recover"
       | "save_review",
     extra: Record<string, unknown> = {},
-  ) =>
-    nativeInvoke<T>("project_service", {
+  ) => {
+    const request = {
       projectId: p.projectId,
       operation: `proposal_${action}`,
       args: { proposalId: p.id, generation: p.generation, ...extra },
-    }),
+    };
+    return action === "compile" ? proposalPdf<T>(request) : nativeInvoke<T>("project_service", request);
+  },
 };

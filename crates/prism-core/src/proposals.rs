@@ -1455,7 +1455,7 @@ fn build_proposal(
     }
     Ok(p)
 }
-pub(crate) async fn compile(app: Backend, project: String, args: Value) -> Result<Value, String> {
+pub(crate) async fn compile(app: Backend, project: String, args: Value) -> Result<Option<crate::ProjectPdf>, String> {
     let id = args["proposalId"].as_str().ok_or("Missing proposalId")?;
     let generation = args["generation"].as_u64().ok_or("Missing generation")?;
     let check = || build_proposal(&app, &project, id, generation).map(|_| ());
@@ -1480,14 +1480,14 @@ pub(crate) async fn compile(app: Backend, project: String, args: Value) -> Resul
         None
     };
     let mut result = if let Some(build) = cached {
-        build
+        Some(build)
     } else {
         let r = snapshot(&app, &p)?;
         let files = if side == "base" { &r.before } else { &r.after };
         if args["loadOnly"] == true {
             crate::visual_review::load_proposal_pdf(&app, id, main, files)?
         } else {
-            crate::visual_review::proposal_pdf_policy(
+            Some(crate::visual_review::proposal_pdf_policy(
                 &app,
                 id,
                 main,
@@ -1495,21 +1495,21 @@ pub(crate) async fn compile(app: Backend, project: String, args: Value) -> Resul
                 args["incremental"].as_bool().unwrap_or(false),
                 &check,
             )
-            .await?
+            .await?)
         }
     };
     let _project = app.inner.projects.0.lock().map_err(|e| e.to_string())?;
     check()?;
-    if !result.is_null() {
+    if let Some(build) = &mut result {
         // A slow cache lookup must not replace a concurrently completed explicit rebuild.
         if args["loadOnly"] != true || fs::read(&reference).ok() == previous_reference {
-            projects::save_json(&reference, &result["artifactId"])?;
+            projects::save_json(&reference, &build.metadata["artifactId"])?;
         }
-        result["projectId"] = json!(project);
-        result["proposalId"] = json!(id);
-        result["generation"] = json!(generation);
-        result["threadId"] = json!(p.thread_id);
-        result["workspaceId"] = json!(p.id);
+        build.metadata["projectId"] = json!(project);
+        build.metadata["proposalId"] = json!(id);
+        build.metadata["generation"] = json!(generation);
+        build.metadata["threadId"] = json!(p.thread_id);
+        build.metadata["workspaceId"] = json!(p.id);
     }
     Ok(result)
 }

@@ -43,7 +43,7 @@ export async function loadExistingPdf(
   projectDir: string,
   mainFile: string,
 ): Promise<Uint8Array | null> {
-  const bytes = await invoke<number[] | null>("load_existing_pdf", {
+  const bytes = await invoke<ArrayBuffer | number[] | null>("load_existing_pdf", {
     projectDir,
     mainFile,
   });

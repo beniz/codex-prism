@@ -327,6 +327,17 @@ impl Backend {
         )
         .map_err(|e| e.to_string())
     }
+    pub async fn project_pdf(
+        &self, project_id: String, operation: String, args: Value,
+    ) -> Result<Option<crate::ProjectPdf>, String> {
+        let admitted = self.enter()?;
+        let backend = self.clone();
+        tokio::spawn(async move {
+            let _operation = admitted;
+            services::project_pdf(backend, project_id, &operation, args).await
+        }).await.map_err(|e| e.to_string())?
+    }
+
     pub async fn project_service(
         &self,
         project_id: String,

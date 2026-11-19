@@ -5,6 +5,8 @@ and detailed release notes are in [docs/releases](docs/releases/README.md).
 
 ## Unreleased
 
+- Keep chat drafts editable while history loads. Project file operations run off the native UI thread, and the desktop preview transfers PDF bytes in binary form.
+
 - Keep preserves the reviewed PDF and its scroll position when the accepted inputs match. If a merge requires compilation, the reviewed PDF stays visible until the replacement is ready.
 
 - Choose a parent folder for every new project, including projects created from private templates.

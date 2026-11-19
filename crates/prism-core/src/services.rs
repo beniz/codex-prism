@@ -54,10 +54,9 @@ pub(crate) async fn project_service(
         .await
         .map_err(|e| e.to_string())?;
     }
-    if operation == "proposal_compile" || operation == "proposal_load_build" {
-        let mut args = args;
-        args["loadOnly"] = json!(operation == "proposal_load_build");
-        return crate::proposals::compile(app, project_id, args).await;
+    if matches!(operation.as_str(), "compile_latex" | "load_existing_pdf" | "proposal_compile" | "proposal_load_build") {
+        return Ok(project_pdf(app, project_id, &operation, args).await?
+            .map(crate::ProjectPdf::into_json).unwrap_or(Value::Null));
     }
     if operation.starts_with("proposal_") {
         let worker = app.clone();
@@ -82,24 +81,6 @@ pub(crate) async fn project_service(
     }
     if operation.starts_with("visual_") {
         return crate::visual_review::service(&app, &project_id, &operation, args).await;
-    }
-    if operation == "compile_latex" || operation == "load_existing_pdf" {
-        let project = projects::get(&app, &project_id)?;
-        let main = args["mainFile"]
-            .as_str()
-            .ok_or("Missing mainFile")?
-            .to_owned();
-        projects::resolve(&project.root, &main)?;
-        let root = project.root.to_string_lossy().to_string();
-        return if operation == "compile_latex" {
-            Ok(json!(
-                latex::compile_latex_policy(&app.inner.latex, root, main, args["incremental"].as_bool().unwrap_or(false)).await?
-            ))
-        } else {
-            Ok(json!(
-                latex::load_existing_pdf(&app.inner.latex, root, main).await?
-            ))
-        };
     }
     let state = &app.inner.codex;
     let _services = state.service_lock.lock().await;
@@ -237,18 +218,6 @@ pub(crate) async fn project_service(
         crate::codex::assert_unlocked(&app, &project_id)?;
     }
     match operation.as_str() {
-        "load_existing_pdf" => {
-            let main = str_arg("mainFile")?;
-            projects::resolve(&project.root, &main)?;
-            let state = &app.inner.latex;
-            Ok(json!(latex::load_existing_pdf(&state, root, main).await?))
-        }
-        "compile_latex" => {
-            let main = str_arg("mainFile")?;
-            projects::resolve(&project.root, &main)?;
-            let state = &app.inner.latex;
-            Ok(json!(latex::compile_latex_policy(&state, root, main, args["incremental"].as_bool().unwrap_or(false)).await?))
-        }
         "synctex_view" => {
             let main = str_arg("mainFile")?;
             let file = str_arg("filePath")?;
@@ -287,4 +256,29 @@ pub(crate) async fn project_service(
         "setup_project_venv" => Ok(json!(uv::setup_project_venv(app.clone(), root).await?)),
         _ => Err("Unsupported project service".into()),
     }
+}
+
+pub(crate) async fn project_pdf(
+    app: crate::Backend,
+    project_id: String,
+    operation: &str,
+    mut args: Value,
+) -> Result<Option<crate::ProjectPdf>, String> {
+    if matches!(operation, "proposal_compile" | "proposal_load_build") {
+        args["loadOnly"] = json!(operation == "proposal_load_build");
+        return crate::proposals::compile(app, project_id, args).await;
+    }
+    let project = projects::get(&app, &project_id)?;
+    let main = args["mainFile"].as_str().ok_or("Missing mainFile")?.to_owned();
+    projects::resolve(&project.root, &main)?;
+    let root = project.root.to_string_lossy().into_owned();
+    let bytes = match operation {
+        "compile_latex" => {
+            let incremental = args["incremental"].as_bool().unwrap_or(false);
+            Some(latex::compile_latex_policy(&app.inner.latex, root, main, incremental).await?)
+        }
+        "load_existing_pdf" => latex::load_existing_pdf(&app.inner.latex, root, main).await?,
+        _ => return Err("Unknown PDF operation".into()),
+    };
+    Ok(bytes.map(|bytes| crate::ProjectPdf { bytes, metadata: Value::Null }))
 }

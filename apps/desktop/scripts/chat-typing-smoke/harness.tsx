@@ -1,3 +1,4 @@
+import { beginActivity } from "../../src/stores/activity-store";
 import { Profiler } from "react";
 import { createRoot } from "react-dom/client";
 import { AgentChatDrawer } from "../../src/components/agent-chat/agent-chat-drawer";
@@ -92,7 +93,15 @@ const frame = () => new Promise((resolve) => requestAnimationFrame(resolve));
   const input = document.querySelector<HTMLTextAreaElement>(
     'textarea[aria-label="Message Codex"]',
   )!;
+  // Reproduce a proposal build overlapping the selected tab's history restore.
+  const work = beginActivity({ projectPath: "/typing-smoke-fixture", chatId: "a" }, "preparingPdf", { group: "build" });
+  useAgentChatStore.setState(s => ({ tabs: s.tabs.map(t => t.id === "a" ? { ...t, restoring: true } : t) }));
+  await frame();
+  const box = input.getBoundingClientRect();
+  const target = document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2);
+  if (target !== input || input.disabled) throw new Error("The busy chat composer cannot receive clicks");
   input.focus();
+  if (document.activeElement !== input) throw new Error("The busy chat composer cannot receive focus");
   await frame();
   observing = true;
   const handlers: number[] = [];
@@ -118,6 +127,7 @@ const frame = () => new Promise((resolve) => requestAnimationFrame(resolve));
       throw new Error("Typed text was delayed or lost");
   }
   observing = false;
+  work.finish();
   const percentile = (values: number[], p: number) =>
     [...values].sort((a, b) => a - b)[Math.floor((values.length - 1) * p)];
   const result = {
