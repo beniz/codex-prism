@@ -1283,7 +1283,7 @@ pub(crate) fn service(
                 !name.starts_with(".prism-collab/") && j.before.get(name) != j.after.get(name)
             });
             Ok(
-                json!({"conflicts":[],"historyWarning":warning,"reusedBuilds":reused,"sourceChanged":source_changed}),
+                json!({"conflicts":[],"historyWarning":warning,"reusedArtifacts":reused,"reusedBuilds":reused.keys().collect::<Vec<_>>(),"sourceChanged":source_changed}),
             )
         }
         "proposal_repair" => {

@@ -1,3 +1,4 @@
+import { acceptedViewer } from "@/lib/chat-pdf-handoff";
 import { useFirstChangedPage } from "@/hooks/use-first-changed-page";
 import { useChatPdf, safeChatSource, chatHeadingLocation } from "@/hooks/use-chat-pdf";
 import { ProposalReport } from "../proposal-preview";
@@ -180,14 +181,15 @@ export function PdfPreview() {
   const pdfData = artifact?.bytes ?? mainPdfData;
   const compileError = chatPdf.proposal ? chatPdf.error : mainCompileError;
   const isCompiling = chatPdf.proposal ? chatPdf.busy : mainIsCompiling;
+  const accepted = acceptedViewer(mainPdfData);
   const currentRootFileId = JSON.stringify([
     projectRoot,
-    artifact?.proposal.id ?? "main",
+    artifact?.proposal.id ?? accepted?.proposalId ?? "main",
     sourceRootFileId,
   ]);
   const viewerData = useRef(new Map<string, { bytes: Uint8Array; artifactId?: string }>());
-  if (pdfData) viewerData.current.set(currentRootFileId, { bytes: pdfData, artifactId: artifact?.build.artifactId });
-  const visual = useVisualReview(mainFile, !chatPdf.proposal);
+  if (pdfData) viewerData.current.set(currentRootFileId, { bytes: pdfData, artifactId: artifact?.build.artifactId ?? accepted?.artifactId });
+  const visual = useVisualReview(mainFile, !chatPdf.proposal && !artifact);
   useEffect(() => {
     setPdfError(null);
     setPdfSelection(null);
@@ -770,7 +772,7 @@ export function PdfPreview() {
   }, [chatPdf.key, chatPdf.proposal?.id, chatPdf.proposal?.generation]);
 
   useAutoRecompile({
-    enabled: autoRecompile && !chatPdf.proposal,
+    enabled: autoRecompile && !chatPdf.proposal && !artifact,
     documentKey: projectRoot
       ? JSON.stringify([projectRoot, currentRootFileId])
       : null,

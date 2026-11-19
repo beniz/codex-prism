@@ -1,3 +1,4 @@
+import { artifacts, artifactKey, clearCachedChatPdfs, useHeldPdf, type ChatPdfArtifact } from "@/lib/chat-pdf-handoff";
 import { beginActivity } from "@/stores/activity-store";
 import { clearFirstChangedPageCache } from "./use-first-changed-page";
 import { useSettingsStore } from "@/stores/settings-store";
@@ -9,14 +10,7 @@ import { proposals, type Proposal, type ProposalPdfBuild } from "@/lib/backend";
 import type { SourceBox } from "@/lib/visual-review";
 
 export type ChatPdfBuild = ProposalPdfBuild;
-export interface ChatPdfArtifact {
-  proposal: Proposal;
-  main: string;
-  build: ChatPdfBuild;
-  bytes: Uint8Array;
-}
-// Shared by the workspace coordinator and every viewer, including across viewer remounts.
-const artifacts = new Map<string, ChatPdfArtifact>();
+export type { ChatPdfArtifact } from "@/lib/chat-pdf-handoff";
 type Job = { busy: boolean; error: string | null; activity: ReturnType<typeof beginActivity> };
 const jobs = new Map<string, Job>();
 const listeners = new Set<() => void>();
@@ -32,13 +26,12 @@ function notify() { revision++; listeners.forEach((listener) => listener()); }
 export function useChatPdfBusy() { useBuildRevision(); return hasChatPdfWork(); }
 export function hasChatPdfWork() { return [...jobs.values()].some(job => job.busy); }
 function useBuildRevision() { return useSyncExternalStore(subscribe, snapshot); }
-const artifactKey = (p: Proposal, main: string) => JSON.stringify([p.projectId, p.id, main]);
 const jobKey = (p: Proposal, main: string) => JSON.stringify([p.projectId, p.id, p.generation, main]);
 const eligible = (p: Proposal) => ["ready", "conflicts", "interrupted"].includes(p.state);
 export function clearChatPdfCache() {
   clearFirstChangedPageCache();
   epoch++;
-  artifacts.clear();
+  clearCachedChatPdfs();
   for (const job of jobs.values()) job.activity.finish();
   jobs.clear();
   selectedKey = undefined;
@@ -122,6 +115,8 @@ export function useChatPdf(main: string | undefined) {
   const title = useAgentChatStore(s => s.tabs.find(t => t.id === s.activeTabId)?.title ?? "Chat");
   const project = useDocumentStore((s) => s.projectId);
   const p = proposal?.projectId === project ? proposal : undefined;
+  const chat = useAgentChatStore(s => s.activeTabId);
+  const held = useHeldPdf(project, chat, main);
   const version = useBuildRevision();
   const key = p && main ? artifactKey(p, main) : undefined;
   const job = p && main ? jobs.get(jobKey(p, main)) : undefined;
@@ -134,7 +129,7 @@ export function useChatPdf(main: string | undefined) {
     if (p && main && eligible(p) && p.changes.length > 0) void ensureBuild(p, main, false, true);
   }, [key, p?.generation, p?.state, version]);
   const artifact = (key ? artifacts.get(key) : undefined) ??
-    (p?.parent && main ? artifacts.get(artifactKey({ ...p, id: p.parent }, main)) : undefined);
+    (p?.parent && main ? artifacts.get(artifactKey({ ...p, id: p.parent }, main)) : undefined) ?? (p ? undefined : held);
   const current = !!artifact && artifact.proposal.id === p?.id && artifact.proposal.generation === p?.generation;
   const label = artifact ? title : "Main document";
   return {

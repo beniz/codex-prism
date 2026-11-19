@@ -329,6 +329,7 @@ export const proposals = {
       historyWarning?: string;
       prompt?: string;
       reusedBuilds?: string[];
+      reusedArtifacts?: Record<string, string>;
       reviewAgain?: boolean;
       sourceChanged?: boolean;
     },

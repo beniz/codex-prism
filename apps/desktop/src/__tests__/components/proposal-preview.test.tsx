@@ -1,3 +1,4 @@
+import { acceptedViewer, holdReviewedPdfs } from "@/lib/chat-pdf-handoff";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { beforeEach, afterEach, expect, it, vi } from "vitest";
@@ -149,6 +150,31 @@ it("drops obsolete build results and builds the completed generation", async () 
   await render();
   await act(async () => old.resolve(build(1)));
   expect(host.textContent).toBe("A:2:");
+});
+it("keeps the reviewed viewer through acceptance and hands off only its verified build", async () => {
+  vi.mocked(proposals.operate).mockResolvedValueOnce(build(1));
+  await render();
+  const reviewed = current.artifact!;
+  let held!: ReturnType<typeof holdReviewedPdfs>;
+  act(() => { held = holdReviewedPdfs(proposal, "a"); });
+  chatState.proposals = [];
+  await render();
+  expect(current.artifact).toBe(reviewed);
+  chatState.activeTabId = "b";
+  await render();
+  expect(current.artifact).toBeUndefined();
+  chatState.activeTabId = "a";
+  await render();
+  expect(current.artifact).toBe(reviewed);
+  expect(held.acceptedBytes(mainFile, "other")).toBeUndefined();
+  const accepted = held.acceptedBytes(mainFile, "pdf-1");
+  expect(accepted).toBe(reviewed.bytes);
+  expect(acceptedViewer(accepted!)).toEqual({ proposalId: "a", artifactId: "pdf-1" });
+  const merged = held.replacementBytes(mainFile, new Uint8Array([3]));
+  expect(acceptedViewer(merged)).toEqual({ proposalId: "a" });
+  act(() => held.finish());
+  expect(current.artifact).toBeUndefined();
+  expect(proposals.operate).toHaveBeenCalledTimes(1);
 });
 it("returns to main after resolution without changing another chat's cache", async () => {
   vi.mocked(proposals.operate).mockResolvedValue(build(1));

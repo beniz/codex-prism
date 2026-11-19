@@ -1,3 +1,4 @@
+import { holdReviewedPdfs } from "@/lib/chat-pdf-handoff";
 import { useActivityStore, endStoppingActivity, beginActivity, proposalActivityBusy, startActivityTurn, updateActivityItem, finishActivityTurn, resetActivities, disconnectActivities } from "./activity-store";
 import { sourcePromptText, sourceRequest } from "@/lib/source-completion";
 import { readChatTabs, writeChatTabs, type SavedChatTabs } from "@/lib/chat-tabs";
@@ -100,6 +101,8 @@ const tab = (): TabState => ({
 });
 const first = tab();
 let projectGeneration = 0;
+let acceptedRevision = 0;
+const acceptanceCompiles = new Set<number>();
 const submissions = new Set<string>();
 const reviewQueue = coalescedRefresh();
 // One notification per batch, regardless of how many fragments/items arrived.
@@ -175,6 +178,7 @@ export const useAgentChatStore = create<ChatState>((set, get) => ({
       { projectWide: action === "apply" || action === "save_review" },
     );
     const generation = projectGeneration;
+    const held = action === "apply" ? holdReviewedPdfs(p, owner?.id ?? state.activeTabId) : undefined;
     let checkpointToShare: string | null = null;
     set((s) => ({
       error: null,
@@ -194,6 +198,10 @@ export const useAgentChatStore = create<ChatState>((set, get) => ({
           ? await proposals.operate(p, action)
           : await proposals.operate(p, action, { paths });
       if (generation !== projectGeneration) return;
+      const accepted = (action === "apply" || action === "save_review") &&
+        !result?.conflicts?.length && !result?.reviewAgain;
+      const revision = accepted && result?.sourceChanged !== false ? ++acceptedRevision : acceptedRevision;
+      const currentPdf = () => generation === projectGeneration && revision === acceptedRevision;
       activity.update("refreshing");
       await get().refreshReview();
       if (generation !== projectGeneration) return;
@@ -217,12 +225,7 @@ export const useAgentChatStore = create<ChatState>((set, get) => ({
         activity.update("repair");
         await get().sendPrompt(result.prompt);
       }
-      if (
-        (action === "apply" || action === "save_review") &&
-        !result?.conflicts?.length &&
-        !result?.reviewAgain &&
-        get().projectId === p.projectId
-      ) {
+      if (accepted && get().projectId === p.projectId) {
         const doc = useDocumentStore.getState();
         if (!result?.historyWarning) checkpointToShare = p.projectId;
         // Report-only reviews allow manual editing while pending. Their Keep
@@ -231,29 +234,38 @@ export const useAgentChatStore = create<ChatState>((set, get) => ({
         await doc.refreshFiles();
         const { compileLatex, loadExistingPdf, resolveCompileTarget, formatCompileError } =
           await import("@/lib/latex-compiler");
+        if (!currentPdf()) return;
+        const refreshed = useDocumentStore.getState();
         const target = resolveCompileTarget(
-          getCurrentPdfRootId() ?? doc.activeFileId,
-          doc.files,
+          refreshed.files.find(f => f.id === refreshed.activeFileId)?.type === "tex"
+            ? refreshed.activeFileId : getCurrentPdfRootId() ?? refreshed.activeFileId,
+          refreshed.files,
         );
         if (target && doc.projectRoot) {
           activity.update("updatingPdf");
           if (result?.reusedBuilds?.includes(target.targetPath)) {
-            const pdf = await loadExistingPdf(doc.projectRoot, target.targetPath).catch(() => null);
-            if (pdf && get().projectId === p.projectId) {
+            const pdf = held?.acceptedBytes(target.targetPath, result.reusedArtifacts?.[target.targetPath])
+              ?? await loadExistingPdf(doc.projectRoot, target.targetPath).catch(() => null);
+            if (!currentPdf()) return;
+            if (pdf) {
               doc.setPdfData(pdf, target.rootId);
               return;
             }
           }
+          acceptanceCompiles.add(activity.id);
           doc.setIsCompiling(true);
           try {
             const pdf = await compileLatex(doc.projectRoot, target.targetPath);
-            if (get().projectId === p.projectId)
-              doc.setPdfData(pdf, target.rootId);
+            if (currentPdf())
+              doc.setPdfData(held?.replacementBytes(target.targetPath, pdf) ?? pdf, target.rootId);
           } catch (e) {
-            if (get().projectId === p.projectId)
+            if (currentPdf()) {
+              doc.setPdfData(null, target.rootId);
               doc.setCompileError(formatCompileError(e), target.rootId);
+            }
           } finally {
-            if (get().projectId === p.projectId) doc.setIsCompiling(false);
+            acceptanceCompiles.delete(activity.id);
+            if (generation === projectGeneration && !acceptanceCompiles.size) doc.setIsCompiling(false);
           }
         }
       }
@@ -266,6 +278,7 @@ export const useAgentChatStore = create<ChatState>((set, get) => ({
           ),
         }));
     } finally {
+      held?.finish();
       activity.finish();
       if (checkpointToShare) {
         const { shareCheckpoint } = await import("@/lib/collaboration");
@@ -298,6 +311,7 @@ export const useAgentChatStore = create<ChatState>((set, get) => ({
   resetForProject: (root) => {
     if (get().activeProjectPath === root) return;
     const generation = ++projectGeneration;
+    acceptanceCompiles.clear();
     resetActivities();
     clearDeltas();
     const saved = root ? readChatTabs(root) : null;

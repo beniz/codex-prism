@@ -38,6 +38,15 @@ fn artifact(app: &Backend, project: &str, id: &str) -> Result<PathBuf, String> {
     }
     Ok(directory(app, project)?.join(id))
 }
+// Collaboration records travel with proposals but are never compiler inputs.
+fn build_inputs(files: &BTreeMap<String, Vec<u8>>) -> impl Iterator<Item = (&String, &Vec<u8>)> {
+    files.iter().filter(|(path, _)| !path.starts_with(".prism-collab/"))
+}
+
+fn input_hashes(files: &BTreeMap<String, Vec<u8>>) -> BTreeMap<String, String> {
+    build_inputs(files).map(|(path, bytes)| (path.clone(), projects::revision(bytes))).collect()
+}
+
 pub(crate) fn capture(
     app: &Backend,
     id: &str,
@@ -53,29 +62,13 @@ fn capture_variant(
     inputs: &BTreeMap<String, Vec<u8>>,
     options: &str,
 ) -> Result<String, String> {
-    let source_inputs: std::borrow::Cow<'_, BTreeMap<String, Vec<u8>>> =
-        if inputs.keys().any(|p| p.starts_with(".prism-collab/")) {
-            std::borrow::Cow::Owned(
-                inputs
-                    .iter()
-                    .filter(|(p, _)| !p.starts_with(".prism-collab/"))
-                    .map(|(p, b)| (p.clone(), b.clone()))
-                    .collect(),
-            )
-        } else {
-            std::borrow::Cow::Borrowed(inputs)
-        };
-    let inputs = source_inputs.as_ref();
     let content = inputs
         .get(main)
         .ok_or("Main document missing from captured inputs")?;
     let manifest = Manifest {
         project: id.into(),
         main: main.into(),
-        inputs: inputs
-            .iter()
-            .map(|(p, b)| (p.clone(), projects::revision(b)))
-            .collect(),
+        inputs: input_hashes(inputs),
         engine: match latex::detect_tex_engine(&String::from_utf8_lossy(content)) {
             Some(latex::TexEngine::XeLaTeX) => "xelatex",
             Some(latex::TexEngine::LuaLaTeX) => "lualatex",
@@ -96,7 +89,7 @@ fn capture_variant(
     fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     let work = dir.join("inputs");
     fs::create_dir_all(&work).map_err(|e| e.to_string())?;
-    for (path, bytes) in inputs {
+    for (path, bytes) in build_inputs(inputs) {
         let dest = projects::resolve(&work, path)?;
         fs::create_dir_all(dest.parent().ok_or("Invalid input path")?)
             .map_err(|e| e.to_string())?;
@@ -815,10 +808,12 @@ fn result_index(
     main: &str,
     files: &BTreeMap<String, Vec<u8>>,
 ) -> Result<PathBuf, String> {
-    let hashes: BTreeMap<_, _> = files
-        .iter()
-        .map(|(p, b)| (p, projects::revision(b)))
-        .collect();
+    result_index_from_hashes(app, workspace, main, &input_hashes(files))
+}
+
+fn result_index_from_hashes(
+    app: &Backend, workspace: &str, main: &str, hashes: &BTreeMap<String, String>,
+) -> Result<PathBuf, String> {
     let fingerprint =
         projects::revision(&serde_json::to_vec(&(main, hashes)).map_err(|e| e.to_string())?);
     Ok(directory(app, workspace)?.join(format!("result-{fingerprint}.json")))
@@ -853,10 +848,7 @@ pub(crate) fn load_proposal_pdf(
         }
     }
     // Upgrade older caches once per immutable input set, including full-build artifacts.
-    let hashes: BTreeMap<_, _> = files
-        .iter()
-        .map(|(p, b)| (p.clone(), projects::revision(b)))
-        .collect();
+    let hashes = input_hashes(files);
     let mut found = None;
     if let Ok(entries) = fs::read_dir(directory(app, workspace)?) {
         for entry in entries.flatten() {
@@ -942,8 +934,8 @@ fn rebase_synctex(data: &str, original: &str, destination: &std::path::Path) -> 
 
 /// Promote only complete immutable builds whose entire input set matches acceptance.
 /// Failure is an optimization miss: the caller will compile normally.
-pub(crate) fn promote_proposal_builds(app: &Backend, workspace: &str, root: &std::path::Path, files: &BTreeMap<String, Vec<u8>>) -> Vec<String> {
-    let mut promoted = Vec::new();
+pub(crate) fn promote_proposal_builds(app: &Backend, workspace: &str, root: &std::path::Path, files: &BTreeMap<String, Vec<u8>>) -> BTreeMap<String, String> {
+    let mut promoted = BTreeMap::new();
     let Ok(_pin) = pin_workspace(app, workspace) else {
         return promoted;
     };
@@ -953,15 +945,21 @@ pub(crate) fn promote_proposal_builds(app: &Backend, workspace: &str, root: &std
     let Ok(entries) = fs::read_dir(base) else {
         return promoted;
     };
-    let hashes: BTreeMap<_, _> = files
-        .iter()
-        .map(|(p, b)| (p.clone(), projects::revision(b)))
-        .collect();
+    let hashes = input_hashes(files);
     for entry in entries.flatten() {
-        let attempt = || -> Result<String, String> {
+        let attempt = || -> Result<(String, String), String> {
             let dir = entry.path();
             let manifest: Manifest = serde_json::from_slice(&fs::read(dir.join("manifest.json")).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
             if manifest.inputs != hashes || manifest.project != workspace { return Err("Different inputs".into()); }
+            let key = entry.file_name().to_string_lossy().into_owned();
+            // Full builds can produce several artifacts for the same inputs. Prefer
+            // the result actually returned to the chat over an older matching PDF.
+            let index = result_index_from_hashes(app, workspace, &manifest.main, &hashes)?;
+            if let Ok(bytes) = fs::read(index) {
+                if serde_json::from_slice::<Option<String>>(&bytes).ok().flatten().is_some_and(|selected| selected != key) {
+                    return Err("Superseded build".into());
+                }
+            }
             let pdf = fs::read(dir.join("output.pdf")).map_err(|e| e.to_string())?;
             if !pdf.starts_with(b"%PDF-") { return Err("Invalid PDF".into()); }
             let original = fs::read_to_string(dir.join("build-root.txt")).map_err(|e| e.to_string())?;
@@ -973,7 +971,7 @@ pub(crate) fn promote_proposal_builds(app: &Backend, workspace: &str, root: &std
             let dest = projects::resolve(root, &relative)?;
             fs::create_dir_all(&dest).map_err(|e| e.to_string())?;
             let dest = fs::canonicalize(dest).map_err(|e| e.to_string())?;
-            for (name, bytes) in files {
+            for (name, bytes) in build_inputs(files) {
                 let path = projects::resolve(&dest, name)?;
                 fs::create_dir_all(path.parent().ok_or("Invalid source")?).map_err(|e|e.to_string())?;
                 fs::write(path, bytes).map_err(|e|e.to_string())?;
@@ -983,9 +981,9 @@ pub(crate) fn promote_proposal_builds(app: &Backend, workspace: &str, root: &std
             fs::write(dest.join(format!("{stem}.pdf")), pdf).map_err(|e|e.to_string())?;
             let pointer = projects::resolve(root, &format!(".prism/accepted-{}.json", projects::revision(manifest.main.as_bytes())))?;
             projects::save_json(&pointer, &format!("{relative}/{stem}.pdf"))?;
-            Ok(manifest.main)
+            Ok((manifest.main, key))
         };
-        if let Ok(main) = attempt() { promoted.push(main); }
+        if let Ok((main, key)) = attempt() { promoted.insert(main, key); }
     }
     promoted
 }
@@ -1014,8 +1012,9 @@ mod promotion_tests {
         let root = tmp.path().join("document");
         fs::create_dir(&root).unwrap();
         let workspace = uuid::Uuid::new_v4().to_string();
-        let files = BTreeMap::from([("main.tex".into(), b"\\section{Title}\n".to_vec()), ("image.png".into(), vec![1,2,3])]);
+        let mut files = BTreeMap::from([("main.tex".into(), b"\\section{Title}\n".to_vec()), ("image.png".into(), vec![1,2,3])]);
         let key = capture(&app, &workspace, "main.tex", &files).unwrap();
+        files.insert(".prism-collab/checkpoint.json".into(), b"metadata".to_vec());
         let dir = artifact(&app, &workspace, &key).unwrap();
         assert!(promote_proposal_builds(&app, &workspace, &root, &files).is_empty());
         fs::write(dir.join("output.pdf"), b"%PDF-1.4 reviewed").unwrap();
@@ -1027,7 +1026,7 @@ mod promotion_tests {
         let mut merged = files.clone();
         merged.insert("image.png".into(), vec![4]);
         assert!(promote_proposal_builds(&app, &workspace, &root, &merged).is_empty());
-        assert_eq!(promote_proposal_builds(&app, &workspace, &root, &files), vec!["main.tex"]);
+        assert_eq!(promote_proposal_builds(&app, &workspace, &root, &files), BTreeMap::from([("main.tex".into(), key.clone())]));
         let pdf = latex::load_existing_pdf(&app.inner.latex, root.to_string_lossy().into(), "main.tex".into()).await.unwrap().unwrap();
         assert_eq!(pdf, b"%PDF-1.4 reviewed");
         let pointer: String = serde_json::from_slice(&fs::read(root.join(format!(".prism/accepted-{}.json", projects::revision(b"main.tex")))).unwrap()).unwrap();
@@ -1146,7 +1145,7 @@ mod concurrent_build_tests {
         if which::which("pdflatex").is_err() {
             return;
         }
-        let (_tmp, app) = crate::test_backend();
+        let (tmp, app) = crate::test_backend();
         let workspace = uuid::Uuid::new_v4().to_string();
         let input = files("Full-build proposal");
         assert!(load_proposal_pdf(&app, &workspace, "main.tex", &input)
@@ -1168,6 +1167,13 @@ mod concurrent_build_tests {
             rebuilt["artifactId"], a["artifactId"],
             "An explicit later full rebuild must run again"
         );
+        let main = tmp.path().join("accepted-project");
+        fs::create_dir(&main).unwrap();
+        let promoted = promote_proposal_builds(&app, &workspace, &main, &input);
+        assert_eq!(promoted["main.tex"], rebuilt["artifactId"].as_str().unwrap());
+        let accepted = latex::load_existing_pdf(&app.inner.latex, main.to_string_lossy().into(), "main.tex".into())
+            .await.unwrap().unwrap();
+        assert_eq!(serde_json::json!(accepted), rebuilt["bytes"]);
         let pin = pin_workspace(&app, &workspace).unwrap();
         cleanup(&app, &workspace).await.unwrap();
         assert_eq!(

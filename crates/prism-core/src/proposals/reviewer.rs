@@ -327,7 +327,12 @@ pub(super) fn decide(
         return Err(error);
     }
     complete(app, &decision)?;
-    Ok(json!({"conflicts":[],"sourceChanged":source_changed,"reusedBuilds":[]}))
+    let reused = if source_changed {
+        crate::visual_review::promote_proposal_builds(app, id, &main.root, &merged)
+    } else {
+        Default::default()
+    };
+    Ok(json!({"conflicts":[],"sourceChanged":source_changed,"reusedArtifacts":reused,"reusedBuilds":reused.keys().collect::<Vec<_>>()}))
 }
 fn copy_entry(dest: &mut Files, name: &str, source: &Files) {
     if let Some(bytes) = source.get(name) {

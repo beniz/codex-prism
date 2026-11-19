@@ -1,3 +1,4 @@
+import { artifacts, artifactKey } from "@/lib/chat-pdf-handoff";
 import { resetActivities, useActivityStore } from "@/stores/activity-store";
 import { readChatTabs, writeChatTabs } from "@/lib/chat-tabs";
 import { beforeEach, describe, it, expect, vi } from "vitest";
@@ -797,6 +798,39 @@ it.each([true, false])("Keep reuses a matching reviewed build (%s), otherwise co
   }
 });
 
+
+it("a later Keep publishes its rendered PDF even if the earlier merged build finishes last", async () => {
+  const first = { id: "first", projectId: "p1", chatId: "tab1", state: "ready", generation: 1 } as any;
+  const second = { ...first, id: "second", chatId: "tab2" };
+  const bytes = new Uint8Array([2]);
+  const key = artifactKey(second, "main.tex");
+  artifacts.set(key, { proposal: second, main: "main.tex", bytes,
+    build: { artifactId: "second-build", bytes: [2], locations: [] } });
+  const setPdfData = vi.fn();
+  vi.mocked(useDocumentStore.getState).mockReturnValue({ ...useDocumentStore.getState(), setPdfData,
+    setIsCompiling: vi.fn() } as any);
+  vi.mocked(resolveCompileTarget).mockReturnValue({ rootId: "main.tex", targetPath: "main.tex" });
+  let complete!: (pdf: Uint8Array) => void;
+  vi.mocked(compileLatex).mockReset().mockImplementationOnce(() => new Promise(resolve => { complete = resolve; }));
+  vi.mocked(proposals.operate).mockResolvedValueOnce({ conflicts: [] })
+    .mockResolvedValueOnce({ conflicts: [], reusedBuilds: ["main.tex"], reusedArtifacts: { "main.tex": "second-build" } });
+  const tab = useAgentChatStore.getState().tabs[0];
+  useAgentChatStore.setState({ tabs: [tab, { ...tab, id: "tab2" }], proposals: [first, second] });
+  try {
+    const pending = useAgentChatStore.getState().decideProposal("apply");
+    await vi.waitFor(() => expect(complete).toBeDefined());
+    useAgentChatStore.setState({ activeTabId: "tab2", proposals: [second] });
+    await useAgentChatStore.getState().decideProposal("apply");
+    complete(new Uint8Array([1]));
+    await pending;
+    expect(setPdfData).toHaveBeenCalledTimes(1);
+    expect(setPdfData.mock.calls[0][0]).toBe(bytes);
+    expect(loadExistingPdf).not.toHaveBeenCalled();
+    expect(compileLatex).toHaveBeenCalledTimes(1);
+  } finally {
+    artifacts.delete(key);
+  }
+});
 
 describe("project model preferences", () => {
   it("persists choices and restores them without leaking across projects", async () => {
