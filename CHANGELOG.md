@@ -5,6 +5,8 @@ and detailed release notes are in [docs/releases](docs/releases/README.md).
 
 ## Unreleased
 
+- SSH data sources automatically locate Codex in common installation folders, including nvm, when the SSH shell cannot find it on PATH.
+
 ## 1.8.1
 
 - The chat indicator distinguishes starting a turn from connecting to the local Codex server.

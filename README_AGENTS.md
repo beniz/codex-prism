@@ -257,9 +257,11 @@ starts or upgrades that server. If needed, connect the host through **ChatGPT
 Settings → Connections** first. Prism does not read ChatGPT's private connection
 registry; enter the SSH alias in Prism as well.
 
-The default transport attaches through `codex app-server proxy`. Under
-**Connection options**, provide an absolute remote Codex executable path if it
-is absent from the noninteractive SSH PATH, and optionally a control-socket path.
+The default transport attaches through `codex app-server proxy`. Leave both
+connection options blank for automatic setup. Prism checks the non-interactive
+SSH PATH and common Codex installation folders, including nvm. The remote CLI
+selects its default control socket. Use **Connection options** to override the
+executable or specify a custom socket.
 Alternatively, select an existing WebSocket listener's remote loopback port;
 Prism tunnels it through SSH. An optional remote token-file path is supported;
 the token stays in memory and is never saved in project settings.

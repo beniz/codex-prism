@@ -85,12 +85,11 @@ impl SshConnection {
         cmd
     }
     fn proxy_command(&self) -> String {
-        let executable = if self.executable.is_empty() {
-            "codex"
+        let mut command = if self.executable.is_empty() {
+            format!("exec sh -c {} prism-proxy", quote(include_str!("remote-codex-proxy.sh")))
         } else {
-            &self.executable
+            format!("exec {} app-server proxy", quote(&self.executable))
         };
-        let mut command = format!("exec {} app-server proxy", quote(executable));
         if !self.socket.is_empty() {
             command.push_str(&format!(" --sock {}", quote(&self.socket)));
         }
@@ -189,9 +188,18 @@ impl Remote {
         let config = WebSocketConfig::default()
             .max_message_size(Some(24 * 1024 * 1024))
             .max_frame_size(Some(24 * 1024 * 1024));
-        let (ws, _) = tokio_tungstenite::client_async_with_config(request, io, Some(config))
-            .await
-            .map_err(|e| format!("Cannot attach to Codex: {e}"))?;
+        let (ws, _) = match tokio_tungstenite::client_async_with_config(request, io, Some(config)).await {
+            Ok(connected) => connected,
+            Err(e) => {
+                if profile.port.is_none()
+                    && matches!(tokio::time::timeout(Duration::from_millis(500), child.wait()).await,
+                        Ok(Ok(status)) if status.code() == Some(127))
+                {
+                    return Err("SSH connected, but the remote Codex executable or its interpreter was not found. Set Remote Codex executable under Connection options".into());
+                }
+                return Err(format!("Cannot attach to Codex: {e}"));
+            }
+        };
         let mut remote = Self {
             ws,
             _child: Some(child),
@@ -313,6 +321,34 @@ mod tests {
         for path in ["relative", "/data/../secret", "/data/./x", "/bad\0path"] {
             assert!(!unix_path(path));
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn discovers_nvm_proxy_with_its_node_and_forwards_socket_verbatim() {
+        use std::{fs, os::unix::fs::PermissionsExt};
+        let dir = tempfile::tempdir().unwrap();
+        let bin = dir.path().join("custom nvm/versions/node/v22/bin");
+        fs::create_dir_all(&bin).unwrap();
+        for (name, script) in [
+            ("codex", "#!/bin/sh\nexec node \"$@\""),
+            ("node", "#!/bin/sh\nprintf '%s\\n' \"$@\""),
+        ] {
+            let path = bin.join(name);
+            fs::write(&path, script).unwrap();
+            fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let mut p = profile();
+        p.socket = "/remote folder/it's a socket".into();
+        let output = std::process::Command::new("sh")
+            .args(["-c", &p.proxy_command()])
+            .env("HOME", dir.path())
+            .env("NVM_DIR", dir.path().join("custom nvm"))
+            .env("PATH", "/usr/bin:/bin")
+            .output().unwrap();
+        assert!(output.status.success());
+        assert_eq!(String::from_utf8(output.stdout).unwrap(),
+            format!("app-server\nproxy\n--sock\n{}\n", p.socket));
     }
 
     #[tokio::test]
