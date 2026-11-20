@@ -5,6 +5,10 @@ and detailed release notes are in [docs/releases](docs/releases/README.md).
 
 ## Unreleased
 
+## 1.8.1
+
+- The chat indicator distinguishes starting a turn from connecting to the local Codex server.
+
 - File data sources import opaque PNG and BMP images as quality-90 JPEG copies by default. Turn off conversion in the data source editor to keep their original format.
 
 - Add file data sources from project settings while another chat is working or awaiting review. New chat workspaces include the saved files.

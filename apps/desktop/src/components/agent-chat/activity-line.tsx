@@ -47,6 +47,7 @@ export const ActivityLine = memo(function ActivityLine({
     }),
   );
   const operations = useActivityStore((s) => s.operations);
+  const connecting = useActivityStore((s) => s.connecting);
   const setup = useAgentSetupStore((s) => s.status);
   const opening = useDocumentStore((s) => s.openingPhase);
   const compiling = useDocumentStore((s) => s.isCompiling);
@@ -101,6 +102,9 @@ export const ActivityLine = memo(function ActivityLine({
         ? "Waiting for your answer"
         : "Waiting for approval";
     tone = "waiting";
+  } else if (connecting) {
+    text = "Connecting to Codex…";
+    tone = "busy";
   } else if (opening) {
     text = opening === "registering" ? "Opening project…" : opening === "scanning" ? "Discovering project files…" : "Reading document sources…";
     tone = "busy";

@@ -849,6 +849,10 @@ export const useAgentChatStore = create<ChatState>((set, get) => ({
       void get().refreshReview();
       return;
     }
+    if (e.method === "prism/connecting") {
+      useActivityStore.setState({ connecting: p.active === true });
+      return;
+    }
     if (e.method === "connection/closed") {
       disconnectActivities();
       set((s) => ({

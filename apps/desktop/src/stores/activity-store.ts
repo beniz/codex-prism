@@ -2,7 +2,7 @@ import { create } from "zustand";
 
 export const activityLabels = {
   preparing: "Preparing prompt…",
-  starting: "Starting Codex…",
+  starting: "Starting turn…",
   steering: "Sending guidance…",
   working: "Codex is working…",
   command: "Running a command…",
@@ -38,8 +38,9 @@ export interface Activity extends ActivityOwner {
   group: "operation" | "agent" | "build";
   projectWide: boolean;
 }
-export const useActivityStore = create<{ operations: Activity[] }>(() => ({
+export const useActivityStore = create<{ operations: Activity[]; connecting: boolean }>(() => ({
   operations: [],
+  connecting: false,
 }));
 let nextId = 0;
 export function beginActivity(

@@ -161,12 +161,23 @@ fn executable(app: &crate::Backend) -> Result<String, String> {
     }
     Err("Codex was not found automatically. Set its executable path in Settings.".into())
 }
+// The startup mutex serializes these notifications. Dropping the guard also
+// clears the indicator on a spawn error, handshake failure, or cancelled call.
+struct ConnectionAttempt<'a>(&'a crate::Backend);
+impl Drop for ConnectionAttempt<'_> {
+    fn drop(&mut self) {
+        let _ = self.0.emit_agent(json!({"method":"prism/connecting","params":{"active":false}}));
+    }
+}
+
 async fn connection(app: &crate::Backend) -> Result<Arc<Connection>, String> {
     let state = &app.inner.codex;
     let _start = state.startup.lock().await;
     if let Some(c) = state.inner.lock().await.as_ref() {
         return Ok(c.clone());
     }
+    let _attempt = ConnectionAttempt(app);
+    let _ = app.emit_agent(json!({"method":"prism/connecting","params":{"active":true}}));
     let mut cmd = Command::new(executable(app)?);
     #[cfg(target_os = "windows")]
     cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW

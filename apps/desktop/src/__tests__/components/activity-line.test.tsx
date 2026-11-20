@@ -74,6 +74,16 @@ it("reports the originating chat across tab switches and returns to idle without
   await act(async () => operation.finish());
   expect(host.textContent).toBe("Project context included");
 });
+it("shows the shared connection attempt only while the server is starting", async () => {
+  beginActivity({ projectPath: "/paper", chatId: "a" }, "starting");
+  await act(async () => root.render(<ActivityLine attaching={false} onConnect={connect} />));
+  expect(host.textContent).toBe("Starting turn…");
+  const handleEvent = useAgentChatStore.getState().handleEvent;
+  await act(async () => handleEvent({ method: "prism/connecting", params: { active: true } }));
+  expect(host.textContent).toBe("Connecting to Codex…");
+  await act(async () => handleEvent({ method: "prism/connecting", params: { active: false } }));
+  expect(host.textContent).toBe("Starting turn…");
+});
 it("does not rerender on draft or transcript changes", async () => {
   const rendered = vi.fn();
   await act(async () =>
