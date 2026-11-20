@@ -7,7 +7,7 @@
 
 Work on several parts of a document at once, review the results, and keep the changes you want. codex-prism brings your local files, AI conversations, compiled PDF, and Git history into one desktop workspace.
 
-[Download](https://github.com/beniz/codex-prism/releases/latest) · [Quickstart](#quickstart) · [Features](#features) · [Technical reference](README_AGENTS.md)
+[Download](https://github.com/beniz/codex-prism/releases/latest) · [Quickstart](#quickstart) · [Migrate from OpenAI Prism](docs/openai-prism-migration.md) · [Features](#features) · [Technical reference](README_AGENTS.md)
 
 ## Quickstart
 
