@@ -78,6 +78,7 @@ pub struct RepairOutcome {
     pub proposal_id: String,
     pub prompt: String,
 }
+pub(crate) mod cache_cleanup;
 mod reviewer;
 pub(crate) use reviewer::local_reviews;
 type Files = BTreeMap<String, Vec<u8>>;
@@ -1276,6 +1277,8 @@ pub(crate) fn service(
                 after: merged,
                 target: Some(target.clone()),
             };
+            // Recording may queue cleanup before promotion copies the PDF and SyncTeX.
+            let _handoff = crate::visual_review::pin_workspace(app, &p.id)?;
             let warning = record_with(app, &j, Some(&target))?;
             let reused = crate::visual_review::promote_proposal_builds(app, &p.id, &main.root, &j.after);
             app.emit_review(json!({"projectId":project}))?;
@@ -1459,8 +1462,8 @@ pub(crate) async fn compile(app: Backend, project: String, args: Value) -> Resul
     let id = args["proposalId"].as_str().ok_or("Missing proposalId")?;
     let generation = args["generation"].as_u64().ok_or("Missing generation")?;
     let check = || build_proposal(&app, &project, id, generation).map(|_| ());
-    let p = build_proposal(&app, &project, id, generation)?;
     let _pin = crate::visual_review::pin_workspace(&app, id)?;
+    let p = build_proposal(&app, &project, id, generation)?;
     let main = args["mainFile"].as_str().ok_or("Missing mainFile")?;
     let side = if args["side"] == "base" {
         "base"
@@ -1711,6 +1714,28 @@ mod tests {
             "Stale proposal build"
         );
     }
+    #[tokio::test]
+    async fn keep_reclaims_cache_after_promoting_reviewed_pdf() {
+        if which::which("pdflatex").is_err() { return; }
+        let (_temp, app, main) = fixture();
+        let p = edit(&app, &main.id, "pdf", "main.tex",
+            br"\documentclass{article}\begin{document}Reviewed\end{document}");
+        let pdf = compile(app.clone(), main.id.clone(),
+            json!({"proposalId":p.id,"generation":p.generation,"mainFile":"main.tex"}))
+            .await.unwrap().unwrap();
+        let cache = projects::data_dir(&app).unwrap().join("visual-reviews").join(&p.id);
+        assert!(cache.is_dir());
+        let result = op(&app, &p, "apply");
+        assert_eq!(result["reusedArtifacts"]["main.tex"], pdf.metadata["artifactId"]);
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            while cache.exists() { tokio::time::sleep(std::time::Duration::from_millis(10)).await; }
+        }).await.unwrap();
+        let accepted = crate::latex::load_existing_pdf(&app.inner.latex,
+            main.root.to_string_lossy().into_owned(), "main.tex".into()).await.unwrap().unwrap();
+        assert_eq!(accepted, pdf.bytes);
+        assert!(snapshot_path(&app, &p).unwrap().is_file());
+    }
+
     #[test]
     fn commit_subject_uses_first_prompt_and_resets_after_keep_or_discard() {
         let (_d, app, main) = fixture();
@@ -2044,6 +2069,10 @@ pub(crate) fn set_turn(app: &Backend, id: &str, turn: &str) -> Result<(), String
 fn cleanup_resolved(app: &Backend, p: &Proposal) {
     if !["applied", "discarded", "superseded"].contains(&p.state.as_str()) {
         return;
+    }
+    let _ = app.inner.cache_cleanup.send(p.id.clone());
+    if let Some(parent) = &p.parent {
+        let _ = app.inner.cache_cleanup.send(parent.clone());
     }
     if all(app, &p.project_id)
         .map(|pending| {

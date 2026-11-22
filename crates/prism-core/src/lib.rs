@@ -88,6 +88,7 @@ pub(crate) struct Inner {
     credential_store: Mutex<Option<Arc<dyn CredentialStore>>>,
     git_askpass: Mutex<Option<PathBuf>>,
     projects: projects::Projects,
+    cache_cleanup: std::sync::mpsc::Sender<String>,
     codex: codex::CodexState,
     collaboration: collaboration::State,
     remote: source_mcp::State,
@@ -166,6 +167,7 @@ impl Backend {
         std::fs::create_dir_all(&config.data_dir).map_err(|e| e.to_string())?;
         std::fs::create_dir_all(&config.temp_dir).map_err(|e| e.to_string())?;
         let (cancel, _) = tokio::sync::watch::channel(false);
+        let (cache_cleanup, cache_jobs) = std::sync::mpsc::channel();
         let backend = Self {
             inner: Arc::new(Inner {
                 config,
@@ -174,6 +176,7 @@ impl Backend {
                 credential_store: Mutex::new(None),
                 git_askpass: Mutex::new(None),
                 projects: Default::default(),
+                cache_cleanup,
                 codex: Default::default(),
                 collaboration: Default::default(),
                 remote: Default::default(),
@@ -187,6 +190,7 @@ impl Backend {
         };
         codex::recover(&backend);
         proposals::recover(&backend);
+        proposals::cache_cleanup::start(&backend, cache_jobs);
         Ok(backend)
     }
     pub(crate) fn enter(&self) -> Result<OperationGuard, String> {

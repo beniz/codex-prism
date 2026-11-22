@@ -114,6 +114,21 @@ fn capture_lock(path: PathBuf) -> Result<Arc<std::sync::Mutex<()>>, String> {
 }
 static ACTIVE_BUILDS: std::sync::Mutex<BTreeMap<PathBuf, usize>> =
     std::sync::Mutex::new(BTreeMap::new());
+// Register retries while holding ACTIVE_BUILDS so the last release cannot be missed.
+static RETRY_CLEANUP: std::sync::Mutex<BTreeMap<PathBuf, std::sync::mpsc::Sender<String>>> =
+    std::sync::Mutex::new(BTreeMap::new());
+
+pub(crate) fn detach_cache(app: &Backend, workspace: &std::path::Path, trash: &std::path::Path) -> std::io::Result<bool> {
+    let pins = ACTIVE_BUILDS.lock().map_err(|_| std::io::Error::other("Build lock poisoned"))?;
+    if pins.keys().any(|key| key.starts_with(workspace)) {
+        RETRY_CLEANUP.lock().map_err(|_| std::io::Error::other("Retry lock poisoned"))?
+            .insert(workspace.to_owned(), app.inner.cache_cleanup.clone());
+        return Ok(false);
+    }
+    fs::rename(workspace, trash)?;
+    Ok(true)
+}
+
 pub(crate) struct BuildPin(PathBuf);
 impl BuildPin {
     fn new(path: PathBuf) -> Result<Self, String> {
@@ -132,6 +147,17 @@ impl Drop for BuildPin {
                 *count -= 1;
                 if *count == 0 {
                     active.remove(&self.0);
+                    if let Ok(mut retries) = RETRY_CLEANUP.lock() {
+                        for path in self.0.ancestors().take(2) {
+                            if retries.contains_key(path) && !active.keys().any(|key| key.starts_with(path)) {
+                                if let Some(tx) = retries.remove(path) {
+                                    if let Some(id) = path.file_name().and_then(|s| s.to_str()) {
+                                        let _ = tx.send(id.to_owned());
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }

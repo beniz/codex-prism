@@ -5,6 +5,8 @@ and detailed release notes are in [docs/releases](docs/releases/README.md).
 
 ## Unreleased
 
+- Reclaim cached proposal PDFs and build inputs after Keep or Discard, including older resolved proposals on startup.
+
 - SSH data sources automatically locate Codex in common installation folders, including nvm, when the SSH shell cannot find it on PATH.
 
 - Add a [migration guide for OpenAI Prism projects](docs/openai-prism-migration.md).
