@@ -769,6 +769,18 @@ export function CollaborationPanel({ projectId }: { projectId: string }) {
       <div className="space-y-0.5 px-1 pb-1.5">
         {status.connected && (
           <>
+            <CollaborationRow
+              icon={GitBranchIcon}
+              onClick={() =>
+                window.dispatchEvent(
+                  new CustomEvent("prism-browse-remote-work", {
+                    detail: projectId,
+                  }),
+                )
+              }
+            >
+              Browse remote work
+            </CollaborationRow>
             <div
               className="flex min-w-0 items-center gap-2 px-2 py-1"
               role="status"

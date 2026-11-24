@@ -1,4 +1,5 @@
 //! Repository collaboration. Network work never owns the document mutation lock.
+mod remote_work;
 use crate::{history::workflow, projects, Backend};
 use git2::{Oid, Repository};
 use serde::{Deserialize, Serialize};
@@ -12,6 +13,7 @@ use std::{
 
 #[derive(Default)]
 pub(crate) struct State {
+    previews: Mutex<HashMap<(String, String), std::sync::Arc<remote_work::Preview>>>,
     tokens: Mutex<HashMap<String, Credential>>,
     refresh_lock: tokio::sync::Mutex<()>,
     jobs: Mutex<HashMap<String, tokio::sync::watch::Sender<bool>>>,
@@ -1311,6 +1313,10 @@ pub(crate) async fn service(
     operation: &str,
     args: Value,
 ) -> Result<Value, String> {
+    if operation.starts_with("remote_work_") {
+        let project = project.as_deref().ok_or("Missing project")?;
+        return remote_work::service(&app, project, operation, args).await;
+    }
     let key = project.as_deref().unwrap_or("setup");
     if operation == "cancel" {
         if let Some(tx) = app
@@ -1579,6 +1585,113 @@ mod tests {
         .unwrap();
         (dir, app, project, b)
     }
+    #[tokio::test]
+    async fn remote_review_pins_refreshes_and_preserves_writing_state() {
+        let (_dir, app, p, other) = setup();
+        command(&other, &["checkout", "-b", "draft/slides"]);
+        let manuscript =
+            "\\documentclass{article}\n\\begin{document}\nCollaborator draft.\n\\end{document}\n";
+        commit(&other, "main.tex", manuscript);
+        command(&other, &["push", "origin", "draft/slides"]);
+        command(&other, &["checkout", "main"]);
+        commit(&other, "accepted.tex", "Accepted on main only");
+        command(&other, &["push", "origin", "main"]);
+
+        std::fs::write(p.root.join("main.tex"), "staged").unwrap();
+        command(&p.root, &["add", "main.tex"]);
+        std::fs::write(p.root.join("main.tex"), "unstaged").unwrap();
+        let head = command(&p.root, &["rev-parse", "HEAD"]);
+        let connection = || read_connection(&p.root).unwrap().unwrap();
+        let branches =
+            remote_work::browse(&app, &p.id, "remote_work_branches", json!({}), connection())
+                .await
+                .unwrap();
+        let draft = branches
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|b| b["name"] == "draft/slides")
+            .unwrap();
+        let first =
+            remote_work::browse(&app, &p.id, "remote_work_open", draft.clone(), connection())
+                .await
+                .unwrap();
+        assert_eq!(first["sha"], draft["sha"]);
+        assert_eq!(first["sources"]["main.tex"], manuscript);
+        assert!(!first["diff"].as_str().unwrap().contains("accepted.tex"));
+        command(&other, &["checkout", "draft/slides"]);
+        commit(&other, "new.tex", "Another paragraph.");
+        command(&other, &["push", "origin", "draft/slides"]);
+        assert!(
+            remote_work::browse(&app, &p.id, "remote_work_open", draft.clone(), connection())
+                .await
+                .unwrap_err()
+                .contains("revision changed")
+        );
+        let mut request = draft.clone();
+        request["refresh"] = json!(true);
+        let second = remote_work::browse(&app, &p.id, "remote_work_open", request, connection())
+            .await
+            .unwrap();
+        assert_ne!(first["sha"], second["sha"]);
+        assert_eq!(second["sources"]["new.tex"], "Another paragraph.");
+        let original = json!({"id":first["id"], "main":"main.tex"});
+        if which::which("pdflatex").is_ok()
+            && which::which("kpsewhich").is_ok()
+            && std::process::Command::new("kpsewhich")
+                .arg("article.cls")
+                .output()
+                .is_ok_and(|out| out.status.success())
+        {
+            let build = remote_work::service(&app, &p.id, "remote_work_compile", original.clone())
+                .await
+                .unwrap();
+            assert!(build["pdf"].as_str().unwrap().starts_with("JVBER"));
+            assert!(build["locations"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|b| b["file"] == "main.tex"));
+        }
+        remote_work::service(&app, &p.id, "remote_work_close", original.clone())
+            .await
+            .unwrap();
+        assert!(
+            remote_work::service(&app, &p.id, "remote_work_compile", original)
+                .await
+                .unwrap_err()
+                .contains("expired")
+        );
+        assert_eq!(command(&p.root, &["rev-parse", "HEAD"]), head);
+        assert_eq!(command(&p.root, &["show", ":main.tex"]), "staged");
+        assert_eq!(
+            std::fs::read_to_string(p.root.join("main.tex")).unwrap(),
+            "unstaged"
+        );
+        assert_eq!(connection().branch, "main");
+    }
+
+    #[tokio::test]
+    async fn remote_pull_review_uses_the_advertised_head_and_pr_target() {
+        let (_dir, app, p, other) = setup();
+        command(&other, &["checkout", "-b", "conference"]);
+        commit(&other, "template.tex", "Conference template");
+        command(&other, &["push", "origin", "conference"]);
+        commit(&other, "paper.tex", "Proposed content");
+        command(&other, &["push", "origin", "HEAD:refs/pull/7/head"]);
+        let metadata = json!({"number":7, "name":"Conference paper", "base":"conference", "sha":command(&other, &["rev-parse", "HEAD"])});
+        let connection = read_connection(&p.root).unwrap().unwrap();
+        let review =
+            remote_work::open_revision(&app, &p.id, metadata.clone(), &connection, Some(metadata))
+                .await
+                .unwrap();
+        assert_eq!(review["base"], "conference");
+        let patch = review["diff"].as_str().unwrap();
+        assert!(patch.contains("Proposed content"));
+        assert!(!patch.contains("Conference template"));
+        assert!(!p.root.join("paper.tex").exists());
+    }
+
     #[tokio::test]
     async fn two_clones_integrate_then_push_without_rewriting_history() {
         let (_dir, app, p, other) = setup();

@@ -6,6 +6,7 @@ rust-version = "1.88"
 publish = false
 
 [dependencies]
+tempfile = "3"
 base64 = "0.22"
 futures-util = { version = "0.3", features = ["sink"] }
 tokio-tungstenite = "0.28"
@@ -26,9 +27,6 @@ image = { version = "=0.25.9", default-features = false, features = ["png", "jpe
 [lints.clippy]
 unwrap_used = "deny"
 expect_used = "deny"
-
-[dev-dependencies]
-tempfile = "3"
 
 [target.'cfg(target_os = "windows")'.dependencies]
 winreg = "0.55"

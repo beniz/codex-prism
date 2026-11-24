@@ -5,6 +5,8 @@ and detailed release notes are in [docs/releases](docs/releases/README.md).
 
 ## Unreleased
 
+- Browse remote branches and open GitHub or Gitea pull requests from Collaboration, inspect their changes, and compile a pinned revision independently of the writing project.
+
 - Reclaim cached proposal PDFs and build inputs after Keep or Discard, including older resolved proposals on startup.
 
 - SSH data sources automatically locate Codex in common installation folders, including nvm, when the SSH shell cannot find it on PATH.

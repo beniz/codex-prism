@@ -38,6 +38,21 @@ sign-in. Configure SSH trust/key access beforehand, or use HTTPS. Select SSH in
 the dialog or paste an SSH clone URL; Prism does not change a supplied SSH URL
 to HTTPS.
 
+## Review a collaborator’s branch or pull request
+
+In **Collaboration → Browse remote work**, select a branch or an open pull request.
+The review opens at the displayed commit. **Diff** shows changes since the common
+ancestor with the connected branch, or with the pull request’s target branch.
+**Refresh review** fetches the latest revision on demand.
+
+Use **Source** to read the TeX, or choose a root document and **Compile PDF** to
+build it locally. Only compile sources you trust. Double-click a source line or
+the PDF to navigate when SyncTeX has a matching location. **Writing** returns
+to your document and keeps the review available. Reviewing leaves your edits,
+staging area and connected branch untouched. Use **Open pull request** for
+discussion or merging on the host. Private PR listings need API credentials
+even when Git uses SSH.
+
 ## Save, sync, and resolve
 
 - **Autosave** writes local files without creating a sharing checkpoint.
