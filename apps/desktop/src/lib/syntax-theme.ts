@@ -17,7 +17,7 @@ export const scientificLatexLanguage = latexLanguage.configure({
   ],
 });
 export function scientificLatex() {
-  const support = latex({ enableLinting: false });
+  const support = latex({ enableLinting: false, enableAutocomplete: false });
   return new LanguageSupport(scientificLatexLanguage, support.support);
 }
 

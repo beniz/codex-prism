@@ -15,6 +15,7 @@
     "check:unused": "node scripts/check-unused-exports.mjs"
   },
   "dependencies": {
+    "@codemirror/autocomplete": "^6.20.0",
     "@codemirror/commands": "^6.10.1",
     "@codemirror/language": "^6.12.1",
     "@codemirror/lint": "^6.8.4",

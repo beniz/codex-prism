@@ -1,3 +1,4 @@
+import { latexAutocomplete } from "@/lib/latex-autocomplete";
 import { guardEditorTransaction } from "@/lib/editor-edit-lock";
 import { EditorLockNotice } from "./editor-lock-notice";
 import { usePdfNavigationStore } from "@/stores/pdf-navigation-store";
@@ -701,6 +702,7 @@ export function LatexEditor() {
               lintGutter(),
             ]
           : []),
+        ...(/\.(tex|sty|cls)$/i.test(activeFileId ?? "") ? [latexAutocomplete()] : []),
         themeCompartmentRef.current.of(
           scientificEditorTheme(resolvedTheme === "dark"),
         ),
