@@ -1,3 +1,4 @@
+import { projectCompletionIndex } from "@/lib/latex-completion-project";
 import { latexAutocomplete } from "@/lib/latex-autocomplete";
 import { guardEditorTransaction } from "@/lib/editor-edit-lock";
 import { EditorLockNotice } from "./editor-lock-notice";
@@ -121,6 +122,7 @@ export function LatexEditor() {
   const viewRef = useRef<EditorView | null>(null);
 
   const files = useDocumentStore((s) => s.files);
+  const openingGeneration = useDocumentStore(s => s.openingGeneration);
   const activeFileId = useDocumentStore((s) => s.activeFileId);
   const projectRoot = useDocumentStore((s) => s.projectRoot);
   const setContent = useDocumentStore((s) => s.setContent);
@@ -640,6 +642,7 @@ export function LatexEditor() {
       ]),
     );
 
+    const completionIndex = projectCompletionIndex();
     const state = EditorState.create({
       doc: currentContent,
       extensions: [
@@ -702,7 +705,7 @@ export function LatexEditor() {
               lintGutter(),
             ]
           : []),
-        ...(/\.(tex|sty|cls)$/i.test(activeFileId ?? "") ? [latexAutocomplete()] : []),
+        ...(/\.(tex|sty|cls)$/i.test(activeFileId ?? "") ? [latexAutocomplete(activeFileId!, completionIndex.query)] : []),
         themeCompartmentRef.current.of(
           scientificEditorTheme(resolvedTheme === "dark"),
         ),
@@ -839,11 +842,13 @@ export function LatexEditor() {
         cursor: view.state.selection.main.head,
         scrollTop: view.scrollDOM.scrollTop,
       });
+      completionIndex.destroy();
       view.destroy();
       viewRef.current = null;
     };
   }, [
     activeFileId,
+    openingGeneration,
     isTextFile,
     setContent,
     setCursorPosition,

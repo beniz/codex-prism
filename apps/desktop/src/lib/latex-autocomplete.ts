@@ -1,3 +1,4 @@
+import type { IndexQuery, IndexResult } from "./latex-completion-index";
 import {
   acceptCompletion,
   autocompletion,
@@ -142,7 +143,15 @@ function ignored(context: CompletionContext) {
   }
   return false;
 }
-function complete(context: CompletionContext): CompletionResult | null {
+type ProjectLookup = (
+  query: IndexQuery,
+  aborted: () => boolean,
+) => Promise<IndexResult | null>;
+async function complete(
+  context: CompletionContext,
+  active: string,
+  lookup?: ProjectLookup,
+): Promise<CompletionResult | null> {
   if (ignored(context)) return null;
   const token = context.matchBefore(/\\[A-Za-z@]*$/);
   if (!token)
@@ -156,16 +165,41 @@ function complete(context: CompletionContext): CompletionResult | null {
     previous.text.slice(0, token.from - previous.from).match(/\\+$/)?.[0]
       .length ?? 0;
   if (precedingSlashes % 2) return null;
+  const index = await lookup?.(
+    { active, kind: "commands" },
+    () => context.aborted,
+  );
+  if (context.aborted) return null;
+  const packages = new Set(index?.packages);
+  const options = new Map(
+    builtins.map((c) => [
+      c.label,
+      packages.has(c.detail!) ? { ...c, boost: 3 } : c,
+    ]),
+  );
+  for (const [label, defined] of index?.commands ?? []) {
+    if (label === token.text && !defined) continue;
+    if (defined || !options.has(label))
+      options.set(
+        label,
+        commandOption(
+          label,
+          0,
+          defined ? "Project definition" : "Used in project",
+          defined ? 8 : 0,
+        ),
+      );
+  }
   return {
     from: token.from,
-    options: [...builtins, ...snippets],
+    options: [...options.values(), ...snippets],
     validFor: /^\\[A-Za-z@]*$/,
   };
 }
-export function latexAutocomplete() {
+export function latexAutocomplete(active = "", lookup?: ProjectLookup) {
   return [
     autocompletion({
-      override: [complete],
+      override: [(context) => complete(context, active, lookup)],
       activateOnCompletion: (c) => commands.has(c.label),
     }),
     Prec.high(keymap.of([{ key: "Tab", run: acceptCompletion }])),
