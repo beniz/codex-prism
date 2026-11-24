@@ -38,60 +38,6 @@ fn web_url(url: &str) -> Result<reqwest::Url, String> {
     reqwest::Url::parse(web.trim_end_matches('/').trim_end_matches(".git"))
         .map_err(|e| e.to_string())
 }
-async fn pulls(app: &Backend, url: &str, page: u64, number: Option<u64>) -> Result<Value, String> {
-    let web = web_url(url)?;
-    let github = web.host_str() == Some("github.com");
-    let (prefix, repo) = web.path().rsplit_once('/').ok_or("Missing repository")?;
-    let (base, owner) = prefix.rsplit_once('/').ok_or("Missing repository owner")?;
-    let server = web.origin().ascii_serialization();
-    let api = if github {
-        format!("https://api.github.com/repos/{owner}/{repo}/pulls")
-    } else {
-        format!("{server}{base}/api/v1/repos/{owner}/{repo}/pulls")
-    };
-    let mut request = if let Some(n) = number {
-        http()?.get(format!("{api}/{n}"))
-    } else {
-        http()?.get(api).query(&[
-            ("state", "open"),
-            (if github { "per_page" } else { "limit" }, "50"),
-            ("page", &page.to_string()),
-        ])
-    };
-    if let Some(c) = credential(app, &server).await? {
-        request = request.bearer_auth(c.token);
-    }
-    let body = request.send().await.map_err(|e| e.to_string())?
-        .error_for_status().map_err(|e| format!("Could not read pull requests. Check repository API access in Connection settings. {e}"))?
-        .text().await.map_err(|e| e.to_string())?;
-    let data: Value = serde_json::from_str(&body).map_err(|e| e.to_string())?;
-    let entry = |r: &Value| -> Result<Value, String> {
-        let n = r["number"].as_u64().ok_or("Invalid pull request number")?;
-        let sha = r["head"]["sha"]
-            .as_str()
-            .ok_or("Missing pull request revision")?;
-        let base = r["base"]["ref"]
-            .as_str()
-            .ok_or("Missing pull request target")?;
-        let route = if github { "pull" } else { "pulls" };
-        Ok(
-            json!({"number":n,"name":r["title"],"author":r["user"]["login"],"draft":r["draft"],"base":base,"sha":sha,"link":format!("{web}/{route}/{n}")}),
-        )
-    };
-    if number.is_some() {
-        if data["state"] != "open" {
-            return Err("This pull request is closed".into());
-        }
-        return entry(&data);
-    }
-    let entries = data
-        .as_array()
-        .ok_or("Invalid pull request list")?
-        .iter()
-        .map(entry)
-        .collect::<Result<Vec<_>, _>>()?;
-    Ok(json!(entries))
-}
 fn branch_ref(name: &str) -> Result<String, String> {
     let r = format!("refs/heads/{name}");
     if !git2::Reference::is_valid_name(&r) {
@@ -264,55 +210,55 @@ pub(super) async fn browse(
     args: Value,
     c: Connection,
 ) -> Result<Value, String> {
-    if op == "remote_work_pulls" {
-        return pulls(app, &c.url, args["page"].as_u64().unwrap_or(1), None).await;
-    }
-    if op == "remote_work_branches" {
+    if matches!(op, "remote_work_branches" | "remote_work_pulls") {
         let directory = temp(app)?;
         let mut cancel = app.inner.cancel.subscribe();
-        let output = git(
-            app,
-            directory.path(),
-            &["ls-remote", "--heads", &c.url],
-            Some(&c.url),
-            &mut cancel,
-        )
-        .await?;
+        let mut command = vec!["ls-remote", "--refs", &c.url, "refs/heads/*"];
+        let include_pulls = op == "remote_work_pulls";
+        if include_pulls {
+            command.push("refs/pull/*/head");
+        }
+        let output = git(app, directory.path(), &command, Some(&c.url), &mut cancel).await?;
         let mut branches = Vec::new();
+        let mut pulls = BTreeMap::new();
+        let web = web_url(&c.url).ok();
         for line in output.lines() {
             let (sha, reference) = line.split_once('\t').ok_or("Invalid remote reference")?;
             if let Some(name) = reference.strip_prefix("refs/heads/") {
                 branches.push(json!({"name": name, "sha": sha, "base": c.branch}));
+            } else if let Some(number) = reference
+                .strip_prefix("refs/pull/")
+                .and_then(|r| r.strip_suffix("/head"))
+                .and_then(|r| r.parse::<u64>().ok())
+            {
+                let link = web.as_ref().map(|url| {
+                    let route = if url.host_str() == Some("github.com") {
+                        "pull"
+                    } else {
+                        "pulls"
+                    };
+                    format!("{url}/{route}/{number}")
+                });
+                pulls.insert(number, json!({"number":number, "sha":sha, "base":c.branch, "name":format!("PR #{number}"), "link":link}));
             }
+        }
+        if include_pulls {
+            let entries: Vec<_> = pulls.into_values().rev().collect();
+            return Ok(json!({"entries":entries, "branches":branches, "defaultBase":c.branch}));
         }
         return Ok(json!(branches));
     }
     if op != "remote_work_open" {
         return Err("Unknown review operation".into());
     }
-    let pr = if let Some(number) = args["number"].as_u64() {
-        Some(pulls(app, &c.url, 1, Some(number)).await?)
-    } else {
-        None
-    };
-    open_revision(app, project, args, &c, pr).await
-}
-
-pub(super) async fn open_revision(
-    app: &Backend,
-    project: &str,
-    args: Value,
-    c: &Connection,
-    pr: Option<Value>,
-) -> Result<Value, String> {
     let directory = temp(app)?;
     Repository::init_bare(directory.path()).map_err(|e| e.to_string())?;
     let refresh = args["refresh"] == true;
     let mut cancel = app.inner.cancel.subscribe();
-    let (reference, base) = if let Some(meta) = &pr {
+    let (reference, base) = if let Some(number) = args["number"].as_u64() {
         (
-            format!("refs/pull/{}/head", meta["number"]),
-            meta["base"].as_str().ok_or("Missing PR target")?,
+            format!("refs/pull/{number}/head"),
+            args["base"].as_str().unwrap_or(&c.branch),
         )
     } else {
         (
@@ -320,16 +266,11 @@ pub(super) async fn open_revision(
             c.branch.as_str(),
         )
     };
-    let expected = if refresh && pr.is_none() {
+    let expected = if refresh {
         None
     } else {
-        let data = if refresh {
-            pr.as_ref().unwrap_or(&args)
-        } else {
-            &args
-        };
         Some(
-            Oid::from_str(data["sha"].as_str().ok_or("Missing revision")?)
+            Oid::from_str(args["sha"].as_str().ok_or("Missing revision")?)
                 .map_err(|e| e.to_string())?,
         )
     };
@@ -375,7 +316,7 @@ pub(super) async fn open_revision(
         .map_err(|e| e.to_string())?
         .insert((project.into(), id.clone()), Arc::new(preview));
     result["base"] = json!(base);
-    result["entry"] = pr.unwrap_or(args);
+    result["entry"] = args;
     result["id"] = json!(id);
     Ok(result)
 }

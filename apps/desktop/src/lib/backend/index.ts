@@ -61,11 +61,14 @@ export interface TemplateLibrary {
   issues: { folder: string; message: string }[];
 }
 export interface Project {
+  checkoutBranch?: string | null;
+  legacyBranch?: string | null;
   id: string;
   root: string;
   name: string;
 }
 export interface FileRef {
+  expectedBranch?: string;
   projectId: string;
   path: string;
 }
@@ -189,6 +192,7 @@ export interface PrismBackend {
       historyPrompt?: string,
       chatId?: string,
       mode?: "plan" | "default",
+      expectedBranch?: string,
     ): Promise<any>;
     control(
       projectId: string,
@@ -255,6 +259,7 @@ export const backend: PrismBackend = {
       historyPrompt,
       chatId,
       mode,
+      expectedBranch,
     ) =>
       invoke("codex_send", {
         projectId,
@@ -267,6 +272,7 @@ export const backend: PrismBackend = {
         historyPrompt: historyPrompt ?? null,
         chatId: chatId ?? null,
         mode: mode ?? "default",
+        ...(expectedBranch ? { expectedBranch } : {}),
       }),
     control: (projectId, threadId, turnId, prompt) =>
       invoke("codex_control", {

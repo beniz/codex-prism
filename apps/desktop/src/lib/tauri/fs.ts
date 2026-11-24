@@ -70,8 +70,8 @@ export interface ScanResult {
 
 const projects = new Map<string, Project>();
 const revisions = new Map<string, string | null>();
-export async function registerProjectRoot(root: string) {
-  const project = await backend.projects.register(root);
+export async function registerProjectRoot(root: string, registered?:Project) {
+  const project = registered ?? await backend.projects.register(root);
   for (const [key, value] of projects)
     if (value.id === project.id) projects.delete(key);
   projects.set(root.replace(/[\\/]+$/, ""), project);
@@ -90,6 +90,7 @@ function refFor(path: string | FileRef): FileRef {
     )
       return {
         projectId: project.id,
+        expectedBranch: project.checkoutBranch ?? undefined,
         path: path
           .slice(root.length)
           .replace(/^[\\/]+/, "")
@@ -98,10 +99,8 @@ function refFor(path: string | FileRef): FileRef {
   }
   throw new Error("File is not in a registered project");
 }
-export async function scanProjectFolder(rootPath: string): Promise<ScanResult> {
-  const project =
-    projects.get(rootPath.replace(/[\\/]+$/, "")) ??
-    (await registerProjectRoot(rootPath));
+export async function scanProjectFolder(rootPath: string, registered?:Project): Promise<ScanResult> {
+  const project = await registerProjectRoot(rootPath,registered);
   const result = await backend.files.list(project.id);
   return {
     folders: result.folders,
@@ -111,7 +110,13 @@ export async function scanProjectFolder(rootPath: string): Promise<ScanResult> {
         ? [
             {
               relativePath: f.path,
-              ref: { projectId: project.id, path: f.path },
+              ref: {
+                projectId: project.id,
+                path: f.path,
+                ...(project.checkoutBranch
+                  ? { expectedBranch: project.checkoutBranch }
+                  : {}),
+              },
               type,
               fileSize: f.size,
               diskToken: f.changeToken,
@@ -122,7 +127,7 @@ export async function scanProjectFolder(rootPath: string): Promise<ScanResult> {
   };
 }
 function revisionKey(ref: FileRef) {
-  return `${ref.projectId}:${ref.path}`;
+  return JSON.stringify([ref.projectId, ref.expectedBranch, ref.path]);
 }
 export async function readProjectBytes(
   path: string | FileRef,

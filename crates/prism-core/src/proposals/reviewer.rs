@@ -354,6 +354,7 @@ pub(crate) fn local_reviews(app: &Backend, project: &str) -> Result<Vec<Value>, 
             continue;
         };
         if p.project_id != project
+            || require_owner(app, &p).is_err()
             || p.git.as_ref().is_none_or(|g| g.kind != "reviewer")
             || ["original", "superseded"].contains(&p.state.as_str())
         {

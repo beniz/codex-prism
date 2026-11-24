@@ -43,7 +43,7 @@ fn build_inputs(files: &BTreeMap<String, Vec<u8>>) -> impl Iterator<Item = (&Str
     files.iter().filter(|(path, _)| !path.starts_with(".prism-collab/"))
 }
 
-fn input_hashes(files: &BTreeMap<String, Vec<u8>>) -> BTreeMap<String, String> {
+pub(crate) fn input_hashes(files: &BTreeMap<String, Vec<u8>>) -> BTreeMap<String, String> {
     build_inputs(files).map(|(path, bytes)| (path.clone(), projects::revision(bytes))).collect()
 }
 
@@ -1003,7 +1003,16 @@ pub(crate) fn promote_proposal_builds(app: &Backend, workspace: &str, root: &std
             let stem = std::path::Path::new(&manifest.main).file_stem().and_then(|s|s.to_str()).ok_or("Invalid main")?;
             fs::write(dest.join(format!("{stem}.synctex")), rebase_synctex(&sync, &original, &dest)).map_err(|e|e.to_string())?;
             fs::write(dest.join(format!("{stem}.pdf")), pdf).map_err(|e|e.to_string())?;
-            let pointer = projects::resolve(root, &format!(".prism/accepted-{}.json", projects::revision(manifest.main.as_bytes())))?;
+            if root.join(".prism/branch-builds").is_dir() {
+                projects::save_json(
+                    &dest.join(format!("{stem}.prism-inputs.json")),
+                    &manifest.inputs,
+                )?;
+            }
+            let pointer =
+                projects::resolve(root, &crate::latex::accepted_pointer(root, &manifest.main))?;
+            fs::create_dir_all(pointer.parent().ok_or("Invalid pointer")?)
+                .map_err(|e| e.to_string())?;
             projects::save_json(&pointer, &format!("{relative}/{stem}.pdf"))?;
             Ok((manifest.main, key))
         };

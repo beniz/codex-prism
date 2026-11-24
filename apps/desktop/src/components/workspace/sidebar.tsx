@@ -1,3 +1,4 @@
+import { ProjectBranches } from "@/components/project-branches";
 import { CollaborationPanel } from "@/components/collaboration";
 import { UpdateIndicator } from "@/components/app-updates";
 import { DataSources } from "@/components/data-sources";
@@ -1160,7 +1161,7 @@ export function Sidebar({
       >
         <div className="flex h-full flex-col bg-sidebar text-sidebar-foreground">
           {/* Header — padded top for macOS overlay titlebar */}
-          <div className="grid h-[calc(var(--workspace-topbar-height)+var(--titlebar-height))] grid-cols-[2rem_minmax(0,1fr)_3.5rem] items-center gap-2 border-sidebar-border border-b px-3">
+          <div className="grid h-[calc(var(--workspace-topbar-height)+var(--titlebar-height))] shrink-0 grid-cols-[2rem_minmax(0,1fr)_3.5rem] items-center gap-2 border-sidebar-border border-b px-3 pt-[var(--titlebar-height)]">
             <div className="flex items-center justify-start">
               <Button
                 variant="ghost"
@@ -1173,7 +1174,22 @@ export function Sidebar({
                 <HomeIcon className="size-3.5" />
               </Button>
             </div>
-            {instructionsProjectId ? <ProjectInstructions key={instructionsProjectId} projectId={instructionsProjectId} projectName={projectName} renameProject={renameProject} /> : <span className="truncate text-sm font-semibold">{projectName}</span>}
+            <div key={instructionsProjectId} className="flex min-w-0 flex-col items-center justify-center">
+              {instructionsProjectId ? (
+                <>
+                  <ProjectInstructions
+                    projectId={instructionsProjectId}
+                    projectName={projectName}
+                    renameProject={renameProject}
+                  />
+                  <ProjectBranches projectId={instructionsProjectId} />
+                </>
+              ) : (
+                <span className="max-w-full truncate text-sm font-semibold">
+                  {projectName}
+                </span>
+              )}
+            </div>
             <div className="flex items-center justify-end gap-1">
               <CodePaneToggle controls={layoutControls} className="size-6" />
               <LayoutPaneSwitcher

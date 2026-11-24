@@ -44,10 +44,11 @@ pub async fn project_write(
     path: String,
     bytes: Vec<u8>,
     expected_revision: Option<String>,
+    expected_branch: Option<String>,
 ) -> Result<String, String> {
     let backend = backend.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        backend.project_write(project_id, path, bytes, expected_revision)
+        backend.project_write_on_branch(project_id, path, bytes, expected_revision, expected_branch)
     })
     .await
     .map_err(|e| e.to_string())?
@@ -60,10 +61,11 @@ pub async fn project_mutate(
     path: String,
     action: String,
     destination: Option<String>,
+    expected_branch: Option<String>,
 ) -> Result<(), String> {
     let backend = backend.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        backend.project_mutate(project_id, path, action, destination)
+        backend.project_mutate_on_branch(project_id, path, action, destination, expected_branch)
     })
     .await
     .map_err(|e| e.to_string())?

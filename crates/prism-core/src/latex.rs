@@ -31,6 +31,14 @@ pub(crate) struct LatexCompilerState {
     semaphore: Arc<Semaphore>,
 }
 
+impl LatexCompilerState {
+    async fn project_lock(&self, project: &str) -> Arc<Mutex<()>> {
+        self.project_locks.lock().await.entry(project.to_owned()).or_default().clone()
+    }
+    pub(crate) async fn checkout_guard(&self, project:&Path)->Result<tokio::sync::OwnedMutexGuard<()>,String>{
+        self.project_lock(&project.to_string_lossy()).await.try_lock_owned().map_err(|_|"Wait for the current document build before switching branches".into())
+    }
+}
 impl Default for LatexCompilerState {
     fn default() -> Self {
         Self {
@@ -379,7 +387,28 @@ fn sync_source_files(src: &Path, dst: &Path) -> std::io::Result<()> {
 /// Persistent build directory inside the project.
 /// Stored in `<project>/.prism/build/` — hidden from file tree (dot-prefix is filtered).
 fn persistent_build_dir(project_dir: &str) -> PathBuf {
-    PathBuf::from(project_dir).join(".prism").join("build")
+    PathBuf::from(project_dir).join(build_relative(Path::new(project_dir)))
+}
+pub(crate) fn build_relative(root: &Path) -> String {
+    if root.join(".prism/branch-builds").is_dir() {
+        let branch = crate::projects::checkout_branch(root)
+            .ok()
+            .flatten()
+            .unwrap_or_default();
+        return format!(
+            ".prism/branch-builds/{}/build",
+            crate::projects::revision(branch.as_bytes())
+        );
+    }
+    ".prism/build".into()
+}
+pub(crate) fn accepted_pointer(root: &Path, main: &str) -> String {
+    let scope = build_relative(root);
+    format!(
+        "{}/accepted-{}.json",
+        scope.trim_end_matches("/build"),
+        crate::projects::revision(main.as_bytes())
+    )
 }
 
 // --- Thread priority ---
@@ -1059,8 +1088,12 @@ fn find_pdf_revision(
         .ok_or("Invalid TeX filename")?;
     let beside_source = main.with_extension("pdf").to_string_lossy().to_string();
     let mut candidates = Vec::new();
-    let mut paths = vec![format!(".prism/build/{stem}.pdf"), beside_source];
-    let pointer = crate::projects::resolve(root, &format!(".prism/accepted-{}.json", crate::projects::revision(main_file.as_bytes())))?;
+    let scope = build_relative(root);
+    let mut paths = vec![format!("{scope}/{stem}.pdf")];
+    if scope == ".prism/build" {
+        paths.push(beside_source);
+    }
+    let pointer = crate::projects::resolve(root, &accepted_pointer(root, main_file))?;
     if let Ok(bytes) = std::fs::read(pointer) {
         if let Ok(relative) = serde_json::from_slice::<String>(&bytes) {
             if relative.starts_with(".prism/accepted/") { paths.push(relative); }
@@ -1079,7 +1112,26 @@ fn find_pdf_revision(
         }
     }
     candidates.sort_by(|a, b| b.0.cmp(&a.0));
+    let mut inputs = None;
     for (_, path) in candidates {
+        if scope != ".prism/build" && revision.is_none() {
+            let Ok(manifest) = std::fs::read(path.with_extension("prism-inputs.json")) else {
+                continue;
+            };
+            let Ok(saved) =
+                serde_json::from_slice::<std::collections::BTreeMap<String, String>>(&manifest)
+            else {
+                continue;
+            };
+            if inputs.is_none() {
+                inputs = Some(crate::visual_review::input_hashes(
+                    &crate::projects::isolated_snapshot(root)?,
+                ));
+            }
+            if inputs.as_ref() != Some(&saved) {
+                continue;
+            }
+        }
         let bytes = std::fs::read(&path).map_err(|e| e.to_string())?;
         // Ignore empty/obviously invalid artifacts from interrupted builds.
         if bytes.starts_with(b"%PDF-")
@@ -1104,14 +1156,10 @@ pub(crate) async fn compile_latex_policy(
     state: &LatexCompilerState, project_dir: String, main_file: String, incremental: bool,
 ) -> Result<Vec<u8>, String> {
     // Acquire per-project lock to prevent concurrent compilations on the same build dir.
-    let project_lock = {
-        let mut locks = state.project_locks.lock().await;
-        locks
-            .entry(project_dir.clone())
-            .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(())))
-            .clone()
-    };
+    let expected_branch=crate::projects::checkout_branch(Path::new(&project_dir))?;
+    let project_lock = state.project_lock(&project_dir).await;
     let _project_guard = project_lock.lock_owned().await;
+    if crate::projects::checkout_branch(Path::new(&project_dir))? != expected_branch {return Err("The branch changed while this build was queued".into());}
     let permit = state
         .semaphore
         .clone()
@@ -1187,18 +1235,54 @@ pub(crate) async fn compile_latex_policy(
     let backend_label = format!("TeX Live/{}", engine_name_for_label);
     let work_dir_clone = work_dir.clone();
     let main_file_clone = main_file.clone();
+    let managed_root = PathBuf::from(&project_dir);
     let compile_result = tokio::task::spawn_blocking(move || {
         let _permit = permit;
         lower_thread_priority();
-        compile_with_texlive_policy(&work_dir_clone, &main_file_clone, engine, incremental, |program, args, dir| {
-            let (main, flags) = args.split_last().ok_or("Missing compiler argument")?;
-            run_texlive_pass(program, flags, Path::new(main), dir)
-        })
+        let mut manifest = None;
+        if managed_root.join(".prism/branch-builds").is_dir() {
+            let marker = work_dir_clone.join(format!(
+                "{}.prism-inputs.json",
+                Path::new(&main_file_clone)
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .ok_or("Invalid main filename")?
+            ));
+            let _ = std::fs::remove_file(&marker);
+            // Record the bytes actually supplied to TeX, including untracked figure assets.
+            if let Ok(inputs) = crate::projects::isolated_snapshot(&managed_root) {
+                let hashes = crate::visual_review::input_hashes(&inputs);
+                let matches = hashes.iter().all(|(name, hash)| {
+                    std::fs::read(work_dir_clone.join(name))
+                        .is_ok_and(|bytes| crate::projects::revision(&bytes) == *hash)
+                });
+                if matches {
+                    manifest = Some((marker, hashes));
+                }
+            }
+        }
+        compile_with_texlive_policy(
+            &work_dir_clone,
+            &main_file_clone,
+            engine,
+            incremental,
+            |program, args, dir| {
+                let (main, flags) = args.split_last().ok_or("Missing compiler argument")?;
+                run_texlive_pass(program, flags, Path::new(main), dir)
+            },
+        )?;
+        if let Some((marker, hashes)) = manifest {
+            crate::projects::save_json(&marker, &hashes)?;
+        }
+        Ok::<(), String>(())
     })
     .await
     .map_err(|e| format!("Compilation task panicked: {}", e))?;
     let log_path = work_dir.join(format!("{}.log", main_file_name));
 
+    if crate::projects::checkout_branch(Path::new(&project_dir))? != expected_branch {
+        return Err("Branch changed during compilation".into());
+    }
     // Store build info
     {
         let mut builds = state.last_builds.lock().await;
@@ -1276,7 +1360,9 @@ pub(crate) fn synctex_view_source(
     };
     // Builds use a copied source tree. Check the requested heading against it
     // so unsaved line insertions cannot send the PDF to unrelated text.
-    let source_root = if work.starts_with(root.join(".prism/build")) || work.starts_with(root.join(".prism/accepted")) {
+    let source_root = if work.starts_with(root.join(build_relative(&root)))
+        || work.starts_with(root.join(".prism/accepted"))
+    {
         work
     } else {
         root
@@ -1378,8 +1464,16 @@ fn synctex_edit_source(
         data
     } else if plain.exists() {
         std::fs::read_to_string(plain).map_err(|e| e.to_string())?
-    } else { return Ok(None); };
-    let source_root = if work.starts_with(root.join(".prism/build")) || work.starts_with(root.join(".prism/accepted")) { work } else { root.as_path() };
+    } else {
+        return Ok(None);
+    };
+    let source_root = if work.starts_with(root.join(build_relative(&root)))
+        || work.starts_with(root.join(".prism/accepted"))
+    {
+        work
+    } else {
+        root.as_path()
+    };
     let resolve = |name: &str| -> Option<(PathBuf, String)> {
         let source = work.join(name).canonicalize().ok()?;
         if !matches!(source.extension().and_then(|s| s.to_str()), Some("tex" | "bib" | "sty" | "cls")) { return None; }

@@ -1,4 +1,5 @@
 // Real React components with a disposable host boundary; no real credentials or remotes.
+import { ProjectBranches } from "../../src/components/project-branches";
 import { createRoot } from "react-dom/client";
 import "../../src/styles/globals.css";
 import { ProposedChangesPanel } from "../../src/components/agent-chat/proposed-changes-panel";
@@ -68,6 +69,17 @@ let finishReport: ((value: { report: string }) => void) | undefined;
           name: "Existing Author",
           email: "existing@example.test",
         };
+      case "branch_list":
+        return {
+          active: "refs/heads/main",
+          head: "abc",
+          branches: ["main", "draft"],
+          connected: true,
+        };
+      case "remote_work_pulls":
+        return { entries: [{ name: "PR #12", number: 12, sha: "12345678" }] };
+      case "branch_change":
+        return { changed: false };
       case "resolve":
         return {
           url: "https://git.example.test/team/paper",
@@ -195,6 +207,27 @@ async function field(label: string, value: string) {
   await pause();
 }
 (window as any).runSmoke = async () => {
+  useDocumentStore.setState({
+    projectId: "existing",
+    projectRoot: "/paper",
+    files: [],
+    isCompiling: false,
+  });
+  useAgentChatStore.setState({ checkoutBranch: "refs/heads/main" });
+  root.render(<ProjectBranches projectId="existing" />);
+  await click("main");
+  await click("Pull requests");
+  await click("PR #12 · 12345678");
+  if (
+    !calls.some(
+      (c) =>
+        c.operation === "branch_change" &&
+        c.args.action === "pull" &&
+        c.args.active === "refs/heads/main" &&
+        c.args.name === "review/pr-12",
+    )
+  )
+    throw new Error("Missing pinned PR checkout");
   root.render(<ConnectSharedProject />);
   await click("Connect shared project");
   await field(

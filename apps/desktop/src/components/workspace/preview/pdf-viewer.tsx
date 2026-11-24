@@ -212,6 +212,7 @@ interface PdfViewerProps {
   scale: number;
   /** Root file ID for scroll position caching across file switches. */
   rootFileId?: string;
+  positionKey?: string;
   ownerId?: string;
   documentScope?: string;
   /** Whether this viewer is currently the active/visible one (for keep-alive). */
@@ -241,6 +242,7 @@ export const PdfViewer = memo(function PdfViewer({
   renderOverlay,
   scale,
   rootFileId,
+  positionKey,
   ownerId = rootFileId,
   documentScope = "",
   isActive = true,
@@ -293,6 +295,22 @@ export const PdfViewer = memo(function PdfViewer({
   // Scroll preservation across recompile
   const isFirstLoad = useRef(true);
   const savedPageRef = useRef<number>(0);
+  const observedPage = useRef(0);
+  useEffect(() => {
+    observedPage.current = 0;
+    savedPageRef.current = positionKey
+      ? Number(localStorage.getItem(positionKey)) || 0
+      : 0;
+    function save() {
+      if (positionKey && observedPage.current > 0)
+        localStorage.setItem(positionKey, String(observedPage.current));
+    }
+    window.addEventListener("pagehide", save);
+    return () => {
+      save();
+      window.removeEventListener("pagehide", save);
+    };
+  }, [positionKey]);
 
   // Increment on app-visibility-restored to force IntersectionObserver reconnection
   const [focusGen, setFocusGen] = useState(0);
@@ -809,7 +827,10 @@ export const PdfViewer = memo(function PdfViewer({
       cancelAnimationFrame(rafId);
       rafId = requestAnimationFrame(() => {
         const cb = currentPageChangeRef.current;
-        if (cb) cb(getVisiblePage());
+        if (cb) {
+          observedPage.current = getVisiblePage();
+          cb(observedPage.current);
+        }
       });
     };
 

@@ -38,11 +38,27 @@ sign-in. Configure SSH trust/key access beforehand, or use HTTPS. Select SSH in
 the dialog or paste an SSH clone URL; Prism does not change a supplied SSH URL
 to HTTPS.
 
+## Write on a branch
+
+Click the branch name below the project title, or **Collaboration → Project branches**.
+Choose a local branch, create one from the current commit, or open a remote branch.
+Selecting a PR opens a local `review/pr-<number>` branch. **Update from PR** explicitly
+integrates newer commits. **Publish branch** creates a same-named remote branch.
+
+Branch switching changes the files on disk. Finish running turns and checkpoint
+manual edits first. Pending proposals and chat drafts return when you switch back.
+Project instructions, data sources, and model defaults are shared.
+
+To integrate work, switch to the destination, select the local source branch and
+click **Merge**. Clean changes apply immediately. Conflicts open a resolution chat
+for review and Keep. Only committed source changes participate.
+
 ## Review a collaborator’s branch or pull request
 
-In **Collaboration → Browse remote work**, select a branch or an open pull request.
+In **Project branches**, choose **Preview remote work without switching branches**, then select a branch or pull request.
 The review opens at the displayed commit. **Diff** shows changes since the common
-ancestor with the connected branch, or with the pull request’s target branch.
+ancestor with the comparison branch. For PRs, **Compare against** defaults to
+the connected branch. Select another branch if the PR targets it.
 **Refresh review** fetches the latest revision on demand.
 
 Use **Source** to read the TeX, or choose a root document and **Compile PDF** to
@@ -50,8 +66,9 @@ build it locally. Only compile sources you trust. Double-click a source line or
 the PDF to navigate when SyncTeX has a matching location. **Writing** returns
 to your document and keeps the review available. Reviewing leaves your edits,
 staging area and connected branch untouched. Use **Open pull request** for
-discussion or merging on the host. Private PR listings need API credentials
-even when Git uses SSH.
+discussion or merging on the host. Prism discovers PR numbers and commits through the configured Git
+remote. An SSH connection uses your existing SSH credentials. The list can
+include closed PRs because Git refs do not report PR status.
 
 ## Save, sync, and resolve
 

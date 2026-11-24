@@ -11,9 +11,7 @@ interface Entry {
   name: string;
   sha: string;
   base: string;
-  author?: string;
   number?: number;
-  draft?: boolean;
   link?: string;
 }
 interface Review {
@@ -40,7 +38,7 @@ interface Build {
   locations: Box[];
   main: string;
 }
-const title = (e: Entry) => (e.number ? `PR #${e.number} · ${e.name}` : e.name);
+const pageSize = 50;
 
 export function RemoteWork({
   projectId,
@@ -52,6 +50,8 @@ export function RemoteWork({
   const [visible, setVisible] = useState(false);
   const [kind, setKind] = useState<Kind>("branches");
   const [rows, setRows] = useState<Entry[]>([]);
+  const [branches, setBranches] = useState<Entry[]>([]);
+  const [base, setBase] = useState("");
   const [page, setPage] = useState(1);
   const [review, setReview] = useState<Review | null>(null);
   const [entry, setEntry] = useState<Entry | null>(null);
@@ -96,16 +96,35 @@ export function RemoteWork({
   function finish(n: number) {
     if (n === epoch.current) setBusy("");
   }
-  async function list(k: Kind, p = 1) {
+  async function list(k: Kind) {
     const n = begin("Reading remote work…");
     setKind(k);
-    setPage(p);
+    setPage(1);
+    setBranches([]);
     setRows([]);
     try {
-      const data = await collaboration<Entry[]>(projectId, `remote_work_${k}`, {
-        page: p,
-      });
-      if (n === epoch.current) setRows(data);
+      if (k === "branches") {
+        const data = await collaboration<Entry[]>(
+          projectId,
+          "remote_work_branches",
+        );
+        if (n === epoch.current) setRows(data);
+      } else {
+        const data = await collaboration<{
+          entries: Entry[];
+          branches: Entry[];
+          defaultBase: string;
+        }>(projectId, "remote_work_pulls");
+        if (n === epoch.current) {
+          setRows(data.entries);
+          setBranches(data.branches);
+          setBase((previous) =>
+            data.branches.some((b) => b.name === previous)
+              ? previous
+              : data.defaultBase,
+          );
+        }
+      }
     } catch (e) {
       failed(n, e);
     } finally {
@@ -216,7 +235,7 @@ export function RemoteWork({
             variant={visible ? "secondary" : "ghost"}
             onClick={() => setVisible(true)}
           >
-            {entry ? title(entry) : "Browse remote work"}
+            {entry ? entry.name : "Browse remote work"}
           </Button>
           <Button
             variant="ghost"
@@ -234,12 +253,12 @@ export function RemoteWork({
           className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden p-4"
         >
           <h2 className="font-semibold">
-            {entry ? title(entry) : "Browse remote work"}
+            {entry ? entry.name : "Browse remote work"}
           </h2>
           <p className="text-muted-foreground text-xs">
             {entry && review
               ? `Read-only · ${review.sha.slice(0, 12)} · Compared with ${entry.base} (${review.baseSha.slice(0, 8)})`
-              : "Select a remote branch or open pull request to review."}
+              : "Select a remote branch or pull request to review."}
           </p>
           <div className="flex flex-wrap items-center gap-2">
             {entry ? (
@@ -280,7 +299,7 @@ export function RemoteWork({
                 <Button
                   variant="ghost"
                   disabled={!!busy}
-                  onClick={() => void list(kind, page)}
+                  onClick={() => void list(kind)}
                 >
                   Refresh list
                 </Button>
@@ -298,20 +317,40 @@ export function RemoteWork({
           )}
           {!review ? (
             <div className="overflow-auto">
-              {rows.map((e) => (
+              {kind === "pulls" && rows.length > 0 && (
+                <div className="mb-3 space-y-1">
+                  <label>
+                    Compare against{" "}
+                    <select
+                      value={base}
+                      onChange={(event) => setBase(event.target.value)}
+                    >
+                      {!branches.some((b) => b.name === base) && (
+                        <option>{base}</option>
+                      )}
+                      {branches.map((b) => (
+                        <option key={b.name}>{b.name}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <p className="text-muted-foreground text-xs">
+                    Git lists PR revisions, including some closed PRs. Choose
+                    the branch to use for the diff.
+                  </p>
+                </div>
+              )}
+              {(kind === "pulls"
+                ? rows.slice((page - 1) * pageSize, page * pageSize)
+                : rows
+              ).map((e) => (
                 <button
                   key={e.number ?? e.name}
                   disabled={!!busy}
                   className="flex w-full flex-col rounded border-b p-3 text-left hover:bg-muted"
-                  onClick={() => void select(e)}
+                  onClick={() => void select(e.number ? { ...e, base } : e)}
                 >
-                  <strong>
-                    {title(e)}
-                    {e.draft ? " · Draft" : ""}
-                  </strong>
+                  <strong>{e.name}</strong>
                   <span className="text-muted-foreground text-xs">
-                    {e.author && `${e.author} · `}
-                    {e.number && `into ${e.base} · `}
                     {e.sha.slice(0, 8)}
                   </span>
                 </button>
@@ -321,25 +360,19 @@ export function RemoteWork({
                   No{" "}
                   {kind === "branches"
                     ? "remote branches"
-                    : "open pull requests"}{" "}
+                    : "advertised pull requests"}{" "}
                   found.
                 </p>
               )}
               {kind === "pulls" && (
                 <div className="flex gap-2">
                   {page > 1 && (
-                    <Button
-                      disabled={!!busy}
-                      onClick={() => void list(kind, page - 1)}
-                    >
+                    <Button disabled={!!busy} onClick={() => setPage(page - 1)}>
                       Previous
                     </Button>
                   )}
-                  {rows.length === 50 && (
-                    <Button
-                      disabled={!!busy}
-                      onClick={() => void list(kind, page + 1)}
-                    >
+                  {rows.length > page * pageSize && (
+                    <Button disabled={!!busy} onClick={() => setPage(page + 1)}>
                       Next
                     </Button>
                   )}

@@ -59,7 +59,7 @@ export function ProjectInstructions({ projectId, projectName, renameProject }: {
     finally { if (job === generation.current) setBusy(false); }
   }
   return <>
-    <button type="button" className="w-full min-w-0 rounded-md px-2 py-1 font-semibold text-sm hover:bg-sidebar-accent focus-visible:ring-2 focus-visible:ring-ring" onClick={() => { setName(projectName ?? ""); setRenameError(null); setOpen(true); }} title="Project settings" aria-label="Project settings"><span className="block truncate">{projectName ?? "Project instructions"}</span>{saved.trim() && <span className="sr-only">Instructions configured</span>}</button>
+    <button type="button" className="w-full min-w-0 rounded-md px-1 font-semibold text-sm hover:bg-sidebar-accent focus-visible:ring-2 focus-visible:ring-ring" onClick={() => { setName(projectName ?? ""); setRenameError(null); setOpen(true); }} title="Project settings" aria-label="Project settings"><span className="block truncate">{projectName ?? "Project instructions"}</span>{saved.trim() && <span className="sr-only">Instructions configured</span>}</button>
     <Dialog open={open} onOpenChange={value => { if (!busy && !renaming) setOpen(value); }}>
       <DialogContent className="max-h-[90vh] overflow-y-auto">
         <DialogHeader><DialogTitle>Project settings</DialogTitle><DialogDescription>Shared instructions apply to all chats in this project from their next turn. Data sources provide reference material; required document assets are copied into the project. Stored locally in Prism.</DialogDescription></DialogHeader>

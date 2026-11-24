@@ -15,7 +15,7 @@ it("keeps Writing mounted and restores the pinned PR without fetching again", as
   (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
   const entry = {
     number: 7,
-    name: "Conference paper",
+    name: "PR #7",
     sha: "1234567890",
     base: "conference",
   };
@@ -24,7 +24,11 @@ it("keeps Writing mounted and restores the pinned PR without fetching again", as
       case "remote_work_branches":
         return [];
       case "remote_work_pulls":
-        return [entry];
+        return {
+          entries: [entry],
+          branches: [{ name: "main" }, { name: "conference" }],
+          defaultBase: "main",
+        };
       case "remote_work_open":
         return {
           id: "review",
@@ -68,8 +72,19 @@ it("keeps Writing mounted and restores the pinned PR without fetching again", as
       );
     });
     await click("Pull requests");
+    const comparison = host.querySelector("select")!;
+    expect(comparison.value).toBe("main");
+    await act(async () => {
+      comparison.value = "conference";
+      comparison.dispatchEvent(new Event("change", { bubbles: true }));
+    });
     const row = host.querySelector("strong")!.closest("button")!;
     await act(async () => row.click());
+    expect(collaboration).toHaveBeenCalledWith("p", "remote_work_open", {
+      ...entry,
+      base: "conference",
+      refresh: false,
+    });
     expect(host.textContent).toContain("+Draft");
     await click("Compile PDF");
     expect(host.textContent).toContain("Preview main.tex");
@@ -77,7 +92,7 @@ it("keeps Writing mounted and restores the pinned PR without fetching again", as
     expect(host.querySelector("textarea")).toBe(editor);
     expect(host.querySelector("section")).toBeNull();
     const count = vi.mocked(collaboration).mock.calls.length;
-    await click("PR #7 · Conference paper");
+    await click("PR #7");
     expect(host.textContent).toContain("Preview main.tex");
     expect(collaboration).toHaveBeenCalledTimes(count);
     await click("Close remote review");

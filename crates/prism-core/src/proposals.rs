@@ -86,6 +86,8 @@ type Files = BTreeMap<String, Vec<u8>>;
 #[serde(rename_all = "camelCase")]
 pub(crate) struct Proposal {
     #[serde(default)]
+    pub(crate) owner_branch: Option<String>,
+    #[serde(default)]
     review_saved: bool,
     #[serde(default)]
     review_deferred: bool,
@@ -118,6 +120,8 @@ pub(crate) struct Proposal {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub(crate) struct GitProposal {
     pub kind: String,
+    #[serde(default)]
+    pub merge_source: Option<String>,
     pub base: String,
     pub incoming: String,
     pub branch: Option<String>,
@@ -152,7 +156,32 @@ fn snapshot_path(app: &Backend, p: &Proposal) -> Result<PathBuf, String> {
 fn snapshot(app: &Backend, p: &Proposal) -> Result<Review, String> {
     review_storage::load(&snapshot_path(app, p)?)
 }
+fn require_owner(app: &Backend, p: &Proposal) -> Result<(), String> {
+    let project = projects::get(app, &p.project_id)?;
+    if let Some(owner) = p.owner_branch.as_ref().or(project.legacy_branch.as_ref()) {
+        if projects::checkout_branch(&project.root)?.as_ref() != Some(owner) {
+            return Err(format!(
+                "Return to {} to review this proposal",
+                owner.trim_start_matches("refs/heads/")
+            ));
+        }
+    }
+    Ok(())
+}
 pub(crate) fn all(app: &Backend, project: &str) -> Result<Vec<Proposal>, String> {
+    let metadata = projects::get(app, project)?;
+    let branch = projects::checkout_branch(&metadata.root)?;
+    Ok(all_branches(app, project)?
+        .into_iter()
+        .filter(|p| {
+            p.owner_branch
+                .as_ref()
+                .or(metadata.legacy_branch.as_ref())
+                .is_none_or(|owner| Some(owner) == branch.as_ref())
+        })
+        .collect())
+}
+pub(crate) fn all_branches(app: &Backend, project: &str) -> Result<Vec<Proposal>, String> {
     let mut result = vec![];
     for e in fs::read_dir(directory(app)?).map_err(|e| e.to_string())? {
         let e = e.map_err(|e| e.to_string())?;
@@ -214,7 +243,12 @@ fn create(
     result: Files,
     parent: Option<String>,
 ) -> Result<Proposal, String> {
+    let owner_branch = projects::checkout_branch(&projects::get(app, project)?.root)?;
+    if owner_branch.as_deref() == Some("HEAD") {
+        return Err("Check out a branch before starting a proposal".into());
+    }
     let p = Proposal {
+        owner_branch,
         review_saved: false,
         review_deferred: false,
         git: None,
@@ -259,6 +293,7 @@ pub(crate) fn begin(
 ) -> Result<Proposal, String> {
     begin_for_chat(app, project, thread, prompt, None)
 }
+#[cfg(test)]
 pub(crate) fn begin_for_chat(
     app: &Backend,
     project: &str,
@@ -266,7 +301,22 @@ pub(crate) fn begin_for_chat(
     prompt: Option<String>,
     chat: Option<String>,
 ) -> Result<Proposal, String> {
+    begin_on_branch(app, project, thread, prompt, chat, None)
+}
+pub(crate) fn begin_on_branch(
+    app: &Backend,
+    project: &str,
+    thread: Option<&str>,
+    prompt: Option<String>,
+    chat: Option<String>,
+    expected: Option<&str>,
+) -> Result<Proposal, String> {
     let _lock = app.inner.projects.0.lock().map_err(|e| e.to_string())?;
+    if expected.is_some()
+        && projects::checkout_branch(&projects::get(app, project)?.root)?.as_deref() != expected
+    {
+        return Err("Branch changed before this turn started".into());
+    }
     if crate::codex::review_path(app, project)?.exists() {
         return Err(
             "Resolve the legacy project review before starting concurrent proposals".into(),
@@ -521,7 +571,7 @@ pub(crate) fn finish_thread(
     thread: &str,
     interrupted: bool,
 ) -> Result<(), String> {
-    for p in all(app, project)? {
+    for p in all_branches(app, project)? {
         if p.thread_id.as_deref() == Some(thread) {
             finish(app, &p.id, interrupted)?;
         }
@@ -534,7 +584,7 @@ pub(crate) fn finish_turn(
     thread: &str,
     turn: Option<&str>,
 ) -> Result<(), String> {
-    for p in all(app, project)? {
+    for p in all_branches(app, project)? {
         if p.thread_id.as_deref() == Some(thread)
             && (p.turn_id.is_none() || p.turn_id.as_deref() == turn)
         {
@@ -708,6 +758,17 @@ pub(crate) fn incoming(
     incoming: git2::Oid,
     index: &git2::Index,
 ) -> Result<Value, String> {
+    incoming_from(app, project, repo, local, incoming, index, None)
+}
+pub(crate) fn incoming_from(
+    app: &Backend,
+    project: &str,
+    repo: &git2::Repository,
+    local: git2::Oid,
+    incoming: git2::Oid,
+    index: &git2::Index,
+    merge_source: Option<String>,
+) -> Result<Value, String> {
     let current = projects::isolated_snapshot(repo.workdir().ok_or("Missing working directory")?)?;
     let mut merged = Files::new();
     let local_tree = repo
@@ -752,6 +813,7 @@ pub(crate) fn incoming(
     let mut p = create(app, project, None, current, merged, None)?;
     p.git = Some(GitProposal {
         kind: "resolution".into(),
+        merge_source,
         base: local.to_string(),
         incoming: incoming.to_string(),
         branch: None,
@@ -799,6 +861,7 @@ pub(crate) fn attach(app: &Backend, project: &str, id: &str, chat: &str) -> Resu
     {
         return Err("Proposal cannot be attached".into());
     }
+    require_owner(app, &p)?;
     p.chat_id = Some(chat.into());
     save(app, &p)
 }
@@ -808,6 +871,7 @@ pub(crate) fn report(app: &Backend, project: &str, id: &str) -> Result<Value, St
         return Err("Unknown review".into());
     }
     let r = snapshot(app, &p)?;
+    require_owner(app, &p)?;
     let prefix = reviewer::record_prefix(&p)?;
     let report = r.after.get(&format!("{prefix}report.md"))
         .map(|b| String::from_utf8_lossy(b).to_string()).unwrap_or_default();
@@ -845,6 +909,7 @@ pub(crate) fn prepare_reviewer(
         .map_err(|e| e.to_string())?;
     let files = projects::isolated_snapshot(&main.root)?;
     let mut p = create(app, project, None, files.clone(), files.clone(), None)?;
+    require_owner(app, &p)?;
     p.chat_id = Some(chat.into());
     let branch_name = format!("prism/reviews/{}", p.id);
     let setup = (|| -> Result<(), String> {
@@ -863,6 +928,7 @@ pub(crate) fn prepare_reviewer(
         write_files(&workspace, &checked_out, &files)?;
         p.git = Some(GitProposal {
             kind: "reviewer".into(),
+            merge_source: None,
             base: base.id().to_string(),
             incoming: base.id().to_string(),
             branch: Some(branch_name),
@@ -887,6 +953,7 @@ fn checked(app: &Backend, project: &str, id: &str, generation: u64) -> Result<Pr
     if p.project_id != project || p.generation != generation {
         return Err("Proposal changed; reload before reviewing".into());
     }
+    require_owner(app, &p)?;
     if !["ready", "conflicts", "interrupted"].contains(&p.state.as_str()) {
         return Err("Proposal is not ready for review".into());
     }
@@ -917,6 +984,12 @@ fn record_with(app: &Backend, j: &Journal, target: Option<&str>) -> Result<Optio
             .head()
             .and_then(|h| h.peel_to_commit())
             .map_err(|e| e.to_string())?;
+        if let Some(reference) = &g.merge_source {
+            let source = repo.refname_to_id(reference).map_err(|e| e.to_string())?;
+            if source.to_string() != g.incoming || current.id().to_string() != g.base {
+                return Err("Branch tips changed. Repair and review the merge again.".into());
+            }
+        }
         if target
             .is_some_and(|t| workflow::target(&root.to_string_lossy()).ok().as_deref() != Some(t))
         {
@@ -1092,8 +1165,8 @@ fn record_with(app: &Backend, j: &Journal, target: Option<&str>) -> Result<Optio
         save(app, &old)?;
         cleanup_resolved(app, &old);
     }
-    cleanup_resolved(app, &p);
     fs::remove_file(journal_path(app, &p)?).map_err(|e| e.to_string())?;
+    cleanup_resolved(app, &p);
     Ok(warning)
 }
 pub(crate) fn service(
@@ -1125,6 +1198,7 @@ pub(crate) fn service(
     if p.project_id != project || p.generation != generation {
         return Err("Stale proposal request".into());
     }
+    require_owner(app, &p)?;
     if operation == "proposal_read" {
         let name = args["path"].as_str().ok_or("Missing path")?;
         let r = snapshot(app, &p)?;
@@ -1143,11 +1217,27 @@ pub(crate) fn service(
     let r = snapshot(app, &p)?;
     let main = projects::get(app, project)?;
     if p.git.as_ref().is_some_and(|g| g.kind == "resolution") {
-        if let Some(latest) = crate::collaboration::incoming_revision(&main.root)? {
-            if p.git
-                .as_ref()
-                .is_some_and(|g| g.incoming != latest.to_string())
-            {
+        let source = p.git.as_ref().and_then(|g| g.merge_source.clone());
+        let latest = if let Some(reference) = &source {
+            Some(
+                git2::Repository::open(&main.root)
+                    .and_then(|r| r.refname_to_id(reference))
+                    .map_err(|e| e.to_string())?,
+            )
+        } else {
+            crate::collaboration::incoming_revision(&main.root)?
+        };
+        if let Some(latest) = latest {
+            if p.git.as_ref().is_some_and(|g| {
+                g.incoming != latest.to_string()
+                    || (source.is_some()
+                        && git2::Repository::open(&main.root)
+                            .and_then(|r| r.refname_to_id("HEAD"))
+                            .ok()
+                            .map(|oid| oid.to_string())
+                            .as_ref()
+                            != Some(&g.base))
+            }) {
                 if operation == "proposal_apply" {
                     return Err("New collaborator changes arrived. Use Repair to refresh this resolution before Keep.".into());
                 }
@@ -1163,7 +1253,15 @@ pub(crate) fn service(
                     let index = repo
                         .merge_commits(&local, &remote, None)
                         .map_err(|e| e.to_string())?;
-                    let result = incoming(app, project, &repo, local.id(), latest, &index)?;
+                    let result = incoming_from(
+                        app,
+                        project,
+                        &repo,
+                        local.id(),
+                        latest,
+                        &index,
+                        source.clone(),
+                    )?;
                     let mut candidate = load(
                         app,
                         result["proposalId"].as_str().ok_or("Missing resolution")?,
@@ -1201,6 +1299,7 @@ pub(crate) fn service(
         {
             return Err("Proposal is busy or changed".into());
         }
+        require_owner(app, &p)?;
         p.state = "discarded".into();
         save(app, &p)?;
         if let Some(parent) = &p.parent {
@@ -1338,6 +1437,11 @@ fn recover_inner(app: &Backend, finish_runs: bool) {
         let Ok(p) = load(app, &e.file_name().to_string_lossy()) else {
             continue;
         };
+        if (reviewer::pending(app, &p) || e.path().join("application.json").exists())
+            && require_owner(app, &p).is_err()
+        {
+            continue;
+        }
         if reviewer::pending(app, &p) {
             if let Err(error) = reviewer::recover(app, &p) {
                 let mut failed = p.clone();
@@ -1456,6 +1560,7 @@ fn build_proposal(
     {
         return Err("Stale proposal build".into());
     }
+    require_owner(app, &p)?;
     Ok(p)
 }
 pub(crate) async fn compile(app: Backend, project: String, args: Value) -> Result<Option<crate::ProjectPdf>, String> {
@@ -1787,6 +1892,30 @@ mod tests {
     }
 
     #[test]
+    fn parked_proposal_requires_its_original_branch_even_at_the_same_commit() {
+        let (_dir, app, project) = fixture();
+        let proposal = edit(&app, &project.id, "draft", "main.tex", b"branch edit");
+        let repo = git2::Repository::open(&project.root).unwrap();
+        let original = repo.head().unwrap().name().unwrap().to_string();
+        repo.branch(
+            "another",
+            &repo.head().unwrap().peel_to_commit().unwrap(),
+            false,
+        )
+        .unwrap();
+        repo.set_head("refs/heads/another").unwrap();
+        assert!(all(&app, &project.id).unwrap().is_empty());
+        let args = json!({"proposalId":proposal.id,"generation":proposal.generation});
+        for op in ["proposal_apply", "proposal_discard", "proposal_repair"] {
+            assert!(service(&app, &project.id, op, args.clone())
+                .unwrap_err()
+                .contains("Return to"));
+        }
+        repo.set_head(&original).unwrap();
+        assert_eq!(all(&app, &project.id).unwrap()[0].id, proposal.id);
+    }
+
+    #[test]
     fn independent_chats_merge_separate_regions_in_either_order() {
         for reverse in [false, true] {
             let (_d, app, main) = fixture();
@@ -2074,7 +2203,7 @@ fn cleanup_resolved(app: &Backend, p: &Proposal) {
     if let Some(parent) = &p.parent {
         let _ = app.inner.cache_cleanup.send(parent.clone());
     }
-    if all(app, &p.project_id)
+    if all_branches(app, &p.project_id)
         .map(|pending| {
             pending
                 .iter()
