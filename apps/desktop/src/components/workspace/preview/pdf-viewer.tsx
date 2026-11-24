@@ -16,6 +16,7 @@ import {
   getOrOpenDocument,
 } from "@/lib/mupdf/pdf-doc-cache";
 import { LOCAL_ZOOM_SHORTCUTS_ATTR } from "@/lib/app-zoom";
+import { PdfSearch, type PdfMatch } from "./pdf-search";
 import { MupdfPage } from "./mupdf-page";
 import { createLogger } from "@/lib/debug/logger";
 import { APP_VISIBILITY_RESTORED } from "@/lib/debug/log-store";
@@ -271,6 +272,33 @@ export const PdfViewer = memo(function PdfViewer({
   const takeLease = (lease: DocCacheResult) => { documentLease.current?.release(); documentLease.current = lease; };
   const loadGenRef = useRef(0);
   const [loadedDocument, setLoadedDocument] = useState<{ data: ArrayBuffer; artifactId?: string }>();
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchMatch, setSearchMatch] = useState<PdfMatch>();
+  useEffect(() => {
+    if (!isActive) { setSearchOpen(false); setSearchMatch(undefined); }
+  }, [isActive]);
+  const searchInput = useRef<HTMLInputElement>(null);
+  const highlightRef = useRef<HTMLSpanElement>(null);
+  const searchDocId = isActive && loadedDocument?.data === data && loadedDocument.artifactId === artifactId
+    ? docIdRef.current : 0;
+  const match = searchOpen && searchMatch?.docId === searchDocId ? searchMatch : undefined;
+  useLayoutEffect(() => {
+    if (match) highlightRef.current?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, [match]);
+  function closeSearch() {
+    setSearchOpen(false);
+    setSearchMatch(undefined);
+    containerRef.current?.focus({ preventScroll: true });
+  }
+  function searchShortcut(e: React.KeyboardEvent) {
+    if (!isActive || !(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey ||
+      !["s", "f"].includes(e.key.toLowerCase())) return;
+    e.preventDefault();
+    e.stopPropagation();
+    setSearchOpen(true);
+    searchInput.current?.select();
+    searchInput.current?.focus();
+  }
   const appliedChange = useRef<string | undefined>(undefined);
   useEffect(() => () => { loadGenRef.current++; documentLease.current?.release(); }, []);
 
@@ -1277,7 +1305,14 @@ export const PdfViewer = memo(function PdfViewer({
       : null;
 
   return (
+    <>
+    {searchOpen && isActive && <PdfSearch docId={searchDocId} pages={numPages} ownerId={ownerId}
+      inputRef={searchInput} onMatch={setSearchMatch} onClose={closeSearch} onShortcut={searchShortcut} />}
     <div
+      onKeyDown={e => {
+        searchShortcut(e);
+        if (searchOpen && e.key === "Escape") { e.stopPropagation(); closeSearch(); }
+      }}
       ref={containerRef}
       tabIndex={-1}
       {...{ [LOCAL_ZOOM_SHORTCUTS_ATTR]: "true" }}
@@ -1319,7 +1354,14 @@ export const PdfViewer = memo(function PdfViewer({
           <MupdfPage
             key={i}
             overlay={
-              visiblePages.docId === docIdRef.current && visiblePages.pages.has(i + 1) ? renderOverlay?.(i + 1) : undefined
+              match?.page === i + 1 ? <>
+                {renderOverlay?.(i + 1)}
+                {match.boxes.map((box, index) => (
+                  <span key={index} ref={index === 0 ? highlightRef : undefined} aria-hidden="true"
+                    className="pointer-events-none absolute z-10 bg-amber-400/45 outline outline-amber-600"
+                    style={{ left: box.x * scale, top: box.y * scale, width: box.w * scale, height: box.h * scale }} />
+                ))}
+              </> : visiblePages.docId === docIdRef.current && visiblePages.pages.has(i + 1) ? renderOverlay?.(i + 1) : undefined
             }
             docId={docIdRef.current}
             pageIndex={i}
@@ -1339,5 +1381,6 @@ export const PdfViewer = memo(function PdfViewer({
         />
       )}
     </div>
+    </>
   );
 });
