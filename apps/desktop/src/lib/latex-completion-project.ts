@@ -11,6 +11,7 @@ import type {
 export function projectCompletionIndex() {
   let worker: Worker | undefined;
   const known = new Map<string, ProjectFile>();
+  let selectedBibs = new Set<string>();
   let disposed = false;
   let pending: ((result: IndexResult | null) => void) | undefined;
   let tail = Promise.resolve();
@@ -23,14 +24,25 @@ export function projectCompletionIndex() {
       doc.activeFileId === query.active
     );
   }
-  async function run(query: IndexQuery, aborted: () => boolean) {
+  async function run(
+    query: IndexQuery,
+    aborted: () => boolean,
+    resolving = true,
+  ): Promise<IndexResult | null> {
     if (!current(query) || aborted()) return null;
     const files = useDocumentStore.getState().files;
+    const bibPaths = files
+      .filter((f) => f.type === "bib")
+      .map((f) => f.relativePath);
     const paths = new Set<string>();
     const changed: IndexUpdate["changed"] = [];
     for (const file of files) {
-      if (!/\.(tex|sty|cls)$/i.test(file.relativePath)) continue;
       paths.add(file.relativePath);
+      if (
+        !/\.(tex|sty|cls)$/i.test(file.relativePath) &&
+        !(query.kind === "citations" && selectedBibs.has(file.relativePath))
+      )
+        continue;
       const previous = known.get(file.relativePath);
       if (
         previous === file ||
@@ -48,6 +60,7 @@ export function projectCompletionIndex() {
             new Uint8Array(data.bytes),
           );
         } catch {
+          paths.delete(file.relativePath);
           continue;
         }
         if (!current(query) || aborted()) return null;
@@ -71,7 +84,12 @@ export function projectCompletionIndex() {
     }
     const result = await new Promise<IndexResult | null>((resolve) => {
       pending = resolve;
-      worker!.postMessage({ query, changed, removed } satisfies IndexUpdate);
+      worker!.postMessage({
+        query,
+        changed,
+        removed,
+        bibPaths,
+      } satisfies IndexUpdate);
     });
     pending = undefined;
     if (result) {
@@ -80,7 +98,24 @@ export function projectCompletionIndex() {
       for (const file of files)
         if (updated.has(file.relativePath)) known.set(file.relativePath, file);
     }
-    return current(query) && !aborted() ? result : null;
+    if (!current(query) || aborted()) return null;
+    // A refresh can replace sources while disk or worker requests are pending.
+    // The next keystroke will pick up the new revisions.
+    const latest = useDocumentStore.getState().files;
+    if (
+      latest !== files &&
+      (latest.length !== files.length ||
+        latest.some((file, i) => file !== files[i] && file.id !== query.active))
+    )
+      return null;
+    if (result?.bibliographies) {
+      const missing = result.bibliographies.some(
+        (path) => !selectedBibs.has(path),
+      );
+      selectedBibs = new Set(result.bibliographies);
+      if (missing && resolving) return run(query, aborted, false);
+    }
+    return result;
   }
   return {
     query(query: IndexQuery, aborted: () => boolean) {

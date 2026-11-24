@@ -1,3 +1,8 @@
+import {
+  biblatexCitations,
+  natbibCitations,
+  citationContext,
+} from "./latex-citation-context";
 import type { IndexQuery, IndexResult } from "./latex-completion-index";
 import {
   acceptCompletion,
@@ -22,7 +27,7 @@ const catalog: [string, number, string][] = [
   [
     "LaTeX",
     1,
-    "footnote footnotetext thanks marginpar title author date part chapter section subsection subsubsection paragraph subparagraph label ref pageref eqref cite nocite bibitem bibliography bibliographystyle documentclass usepackage input include includeonly caption emph textnormal textbf textit texttt textsf textrm textsc textsl textup underline overline mbox fbox hspace vspace hphantom vphantom phantom mathrm mathbf mathit mathsf mathtt mathcal mathnormal ensuremath sqrt vec hat bar dot ddot tilde widehat widetilde symbol appendixname",
+    "footnote footnotetext thanks marginpar title author date part chapter section subsection subsubsection paragraph subparagraph label ref pageref eqref cite nocite bibitem bibliography bibliographystyle documentclass usepackage input include includeonly caption emph textnormal textbf textit texttt textsf textrm textsc textsl textup underline overline mbox fbox hspace vspace hphantom vphantom phantom mathrm mathbf mathit mathsf mathtt mathcal mathnormal ensuremath sqrt vec hat bar dot ddot tilde widehat widetilde symbol",
   ],
   [
     "LaTeX",
@@ -34,6 +39,18 @@ const catalog: [string, number, string][] = [
     0,
     "appendix appendixname footnotemark footnotesize tiny scriptsize small normalsize large Large LARGE huge Huge centering raggedright raggedleft noindent indent par newline linebreak nolinebreak pagebreak nopagebreak newpage clearpage cleardoublepage bigskip medskip smallskip hfill vfill hss vss noalign noexpand expandafter csname endcsname providecommand newtheorem newcounter newlength newif makeatletter makeatother protected edef gdef xdef long global obeylines listoffigures listoftables today linewidth textwidth textheight baselineskip parskip parindent itemsep columnwidth arraystretch LaTeX TeX",
   ],
+  [
+    "LaTeX",
+    0,
+    "addcontentsline addtocontents protect relax linebreak nobreakspace smallskipamount normalsize normalfont centering raggedbottom flushbottom sloppy fussy frontmatter mainmatter backmatter listtablename figurename chaptername refname contentsname baselinestretch textbackslash textasciitilde textasciicircum copyright pounds ellipsis ldots cdots vdots ddots dots dagger ddagger Re Im forall exists neg land lor leq geq neq approx equiv sim simeq cong propto subset supset subseteq supseteq in notin ni cup cap emptyset times div cdot pm mp ast star circ bullet oplus otimes wedge vee setminus angle parallel perp mid to mapsto gets rightarrow leftarrow leftrightarrow Rightarrow Leftarrow Leftrightarrow longrightarrow longleftarrow uparrow downarrow nabla top bot aleph hbar ell imath jmath sin cos tan cot sec csc sinh cosh tanh log ln exp det gcd max min inf sup ker dim hom Pr bmod limits nolimits left right middle big Big bigg Bigg",
+  ],
+  [
+    "LaTeX",
+    1,
+    "textsuperscript textsubscript textsl MakeUppercase MakeLowercase uppercase lowercase phantom smash mathop mathbin mathrel mathord mathopen mathclose mathpunct overbrace underbrace acute grave breve check ddot tilde underline vphantom includeonly pagecolor pagestyle thispagestyle pagenumbering index",
+  ],
+  ["LaTeX", 2, "markboth settowidth settoheight settodepth addtocontents"],
+  ["LaTeX", 3, "addcontentsline"],
   ["LaTeX", 3, "multicolumn"],
   [
     "amsmath",
@@ -56,28 +73,20 @@ const catalog: [string, number, string][] = [
   ["graphicx", 3, "resizebox"],
   ["graphicx", 1, "reflectbox"],
   ["hyperref", 1, "url nolinkurl autoref autopageref nameref hypersetup path"],
-  [
-    "hyperref",
-    2,
-    "href hyperref hypertarget hyperlink texorpdfstring pdfstringdef",
-  ],
+  ["hyperref", 2, "href hypertarget hyperlink texorpdfstring pdfstringdef"],
+  ["hyperref", 0, "hyperref"],
   ["cleveref", 1, "cref Cref cpageref Cpageref labelcref namecref nameCref"],
   ["cleveref", 2, "crefrange Crefrange cpagerefrange Cpagerefrange"],
-  [
-    "biblatex",
-    1,
-    "addbibresource textcite Textcite textcites Textcites parencite Parencite parencites Parencites autocite Autocite autocites Autocites footcite footcites footcitetext fullcite footfullcite smartcite smartcites supercite supercites citeauthor Citeauthor citeyear citetitle citedate citeurl citelabel cites Cites",
-  ],
+  ["biblatex", 1, "addbibresource " + biblatexCitations],
+  ["biblatex", 2, "citefield citelist citename"],
+  ["natbib", 2, "defcitealias"],
+  ["bibentry", 1, "bibentry"],
   ["biblatex", 0, "printbibliography printbibheading bibsetup AtEveryBibitem"],
-  [
-    "natbib",
-    1,
-    "citet citep citealt citealp citeauthor citeyear citeyearpar citenum Citet Citep Citealt Citealp Citeauthor citetalias citepalias",
-  ],
+  ["natbib", 1, natbibCitations],
   [
     "beamer",
     1,
-    "frametitle framesubtitle framesubtitle institute subtitle titlegraphic usetheme usecolortheme usefonttheme useinnertheme useoutertheme alert structure frametitle column",
+    "frametitle framesubtitle institute subtitle titlegraphic usetheme usecolortheme usefonttheme useinnertheme useoutertheme alert structure column",
   ],
   ["beamer", 2, "setbeamertemplate setbeamercolor setbeamerfont"],
   [
@@ -133,6 +142,17 @@ const builtins = Array.from(commands, ([name, { args, group }]) =>
 const upstream = latexCompletionSource(true);
 function ignored(context: CompletionContext) {
   if (context.view?.scrollDOM.classList.contains("cm-vimMode")) return true;
+  // The grammar recovers an unfinished inline verb as ordinary commands
+  // until its closing delimiter is typed.
+  const line = context.state.doc.lineAt(context.pos);
+  const before = line.text.slice(0, context.pos - line.from);
+  const verbs = /\\\\|\\verb\*?([^\w\s])/g;
+  for (let m = verbs.exec(before); m; m = verbs.exec(before)) {
+    if (!m[1]) continue;
+    const end = before.indexOf(m[1], verbs.lastIndex);
+    if (end < 0) return true;
+    verbs.lastIndex = end + 1;
+  }
   for (
     let node = syntaxTree(context.state).resolveInner(context.pos, -1);
     node;
@@ -154,12 +174,34 @@ async function complete(
 ): Promise<CompletionResult | null> {
   if (ignored(context)) return null;
   const token = context.matchBefore(/\\[A-Za-z@]*$/);
-  if (!token)
+  if (!token) {
+    const cite = citationContext(context);
+    if (cite && lookup) {
+      context.addEventListener("abort", () => {}, { onDocChange: true });
+      const index = await lookup(
+        { active, kind: "citations", term: cite.term },
+        () => context.aborted,
+      );
+      if (!index || context.aborted) return null;
+      return {
+        from: cite.from,
+        to: cite.to,
+        filter: false,
+        options: (index.citations ?? []).map(({ key, metadata, paths }) => ({
+          label: key,
+          type: "reference",
+          detail: metadata,
+          info: paths.join(", "),
+          apply: key,
+        })),
+      };
+    }
     return upstream(
       context.explicit
         ? context
         : new CompletionContext(context.state, context.pos, true),
     );
+  }
   const previous = context.state.doc.lineAt(token.from);
   const precedingSlashes =
     previous.text.slice(0, token.from - previous.from).match(/\\+$/)?.[0]
@@ -177,14 +219,15 @@ async function complete(
       packages.has(c.detail!) ? { ...c, boost: 3 } : c,
     ]),
   );
-  for (const [label, defined] of index?.commands ?? []) {
+  for (const [label, args] of index?.commands ?? []) {
+    const defined = args !== null;
     if (label === token.text && !defined) continue;
     if (defined || !options.has(label))
       options.set(
         label,
         commandOption(
           label,
-          0,
+          args ?? 0,
           defined ? "Project definition" : "Used in project",
           defined ? 8 : 0,
         ),
@@ -200,7 +243,8 @@ export function latexAutocomplete(active = "", lookup?: ProjectLookup) {
   return [
     autocompletion({
       override: [(context) => complete(context, active, lookup)],
-      activateOnCompletion: (c) => commands.has(c.label),
+      activateOnCompletion: (c) =>
+        c.type === "function" && commands.has(c.label),
     }),
     Prec.high(keymap.of([{ key: "Tab", run: acceptCompletion }])),
   ];

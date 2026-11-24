@@ -5,6 +5,8 @@ and detailed release notes are in [docs/releases](docs/releases/README.md).
 
 ## Unreleased
 
+- The LaTeX editor completes standard, package and project commands and suggests citation keys from the document’s bibliography while you type.
+
 - Reclaim cached proposal PDFs and build inputs after Keep or Discard, including older resolved proposals on startup.
 
 - SSH data sources automatically locate Codex in common installation folders, including nvm, when the SSH shell cannot find it on PATH.
