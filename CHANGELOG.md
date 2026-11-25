@@ -5,6 +5,8 @@ and detailed release notes are in [docs/releases](docs/releases/README.md).
 
 ## Unreleased
 
+- The PDF panel divider has a wider grab area and a visible grip for resizing the preview.
+
 - Conflict repair keeps full file contents in the repair workspace. Existing chats show a short summary for older repair prompts that embedded file contents.
 
 - Search the focused PDF with Ctrl+S or Ctrl+F (Cmd on macOS). Enter and Shift+Enter move between highlighted matches.

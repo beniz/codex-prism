@@ -296,7 +296,20 @@ export function WorkspaceLayout() {
           </Panel>
 
           {previewVisible && (
-            <PanelResizeHandle className="w-px bg-border transition-colors hover:bg-ring" />
+            <PanelResizeHandle
+              aria-label="Resize PDF panel"
+              hitAreaMargins={{ fine: 0, coarse: 8 }}
+              className="relative flex w-4 shrink-0 cursor-col-resize items-center justify-center text-border hover:text-ring focus-visible:text-ring data-resize-handle-active:text-ring"
+            >
+              <span
+                aria-hidden="true"
+                className="absolute inset-y-0 w-px bg-current"
+              />
+              <span
+                aria-hidden="true"
+                className="h-8 w-1 rounded-full bg-current"
+              />
+            </PanelResizeHandle>
           )}
 
           {previewVisible && (
