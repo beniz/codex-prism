@@ -112,6 +112,7 @@ For the third example, add the paper in project settings first, then type `@` an
 | Add research material | Project settings → Data sources → Add files / Add directory / Add SSH connection. |
 | Reference a registered source | Type `@`, then Tab; use arrows and Tab/Enter to choose, Escape to close. |
 | Reuse your own starter | Put it in `~/.codexprism/templates/`, then open **My Templates → Refresh**. [Template guide](README_AGENTS.md#private-templates) |
+| Complete LaTeX commands and citations | Type `\footn` or `\textci` and accept with Enter or Tab. Inside `\textcite{}`, type part of a key, author, title, or year. Ctrl+Space opens suggestions and Escape closes them. |
 | Navigate the document | Click an outline heading, double-click a LaTeX line, or select PDF text and choose **Navigate to source**. |
 | Hide the LaTeX panel | Toggle **Code** beside **Layout**. |
 | Plan before editing | Press Shift+Tab in an idle chat composer. |
