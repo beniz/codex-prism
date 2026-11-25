@@ -24,12 +24,14 @@ export async function checkCompletion() {
     isDirty: false,
     content,
   });
-  const prefix = "\\documentclass{article}\n\\addbibresource{refs.bib}\n";
+  const prefix =
+    "\\documentclass{article}\n\\input{part}\n\\addbibresource{refs.bib}\n";
   useDocumentStore.setState({
     activeFileId: active,
     files: [
       file(active, "tex", prefix),
       file("refs.bib", "bib"),
+      file("part.tex", "tex", String.raw`\label{sec:intro}\label{balance}`),
       file("unrelated.bib", "bib"),
     ],
   });
@@ -106,6 +108,16 @@ export async function checkCompletion() {
       throw new Error("Citation insertion or bibliography cache failed");
     if (!undo(view) || view.state.doc.toString().includes("Smith2026"))
       throw new Error("Cannot undo key insertion");
+    view.dispatch({ selection: { anchor: view.state.doc.length } });
+    type(" \\ref{sec");
+    await accept("sec:intro", "Tab");
+    type("} \\eqr");
+    await accept("\\eqref", "Enter");
+    await accept("balance", "Tab");
+    if (
+      !view.state.doc.toString().endsWith("\\ref{sec:intro} \\eqref{balance}")
+    )
+      throw new Error("Label completion lost the key or closing brace");
   } finally {
     view.destroy();
     index.destroy();

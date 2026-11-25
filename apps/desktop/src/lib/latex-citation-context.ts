@@ -14,7 +14,7 @@ const citeNames = new Set(
     " nocite citefield citelist citename defcitealias bibentry"
   ).split(" "),
 );
-export function citationContext(context: CompletionContext) {
+export function referenceKeyContext(context: CompletionContext) {
   const offset = Math.max(0, context.pos - 8192);
   const before = context.state.sliceDoc(offset, context.pos);
   const open = before.lastIndexOf("{");
@@ -39,20 +39,27 @@ export function citationContext(context: CompletionContext) {
     if (depth) return null;
   }
   const name = before.slice(0, i).match(/\\([A-Za-z]+)\*?$/);
+  if (!name) return null;
+  const label = name[1] === "ref" || name[1] === "eqref";
   if (
-    !name ||
-    !citeNames.has(name[1]) ||
-    (earlierKey && !name[1].endsWith("s"))
+    label
+      ? before.slice(i, open).trim() !== ""
+      : !citeNames.has(name[1]) || (earlierKey && !name[1].endsWith("s"))
   )
     return null;
   const slashes = before.slice(0, name.index).match(/\\+$/)?.[0].length ?? 0;
   if (slashes % 2) return null;
-  const term = list.slice(list.lastIndexOf(",") + 1).trimStart();
+  const term = (
+    label ? list : list.slice(list.lastIndexOf(",") + 1)
+  ).trimStart();
   const after = context.state.doc.lineAt(context.pos);
   const rest = after.text.slice(context.pos - after.from);
   return {
+    kind: label ? ("labels" as const) : ("citations" as const),
     term,
     from: context.pos - term.length,
-    to: context.pos + /^[^,{}\s%\\]*/.exec(rest)![0].length,
+    to:
+      context.pos +
+      (label ? /^[^{}\s%\\]*/ : /^[^,{}\s%\\]*/).exec(rest)![0].length,
   };
 }

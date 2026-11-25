@@ -103,3 +103,42 @@ it("skips nonentries and recovers at a valid entry after malformed text", () => 
   });
   expect(refs.citations?.map((c) => c.key)).toEqual(["valid"]);
 });
+
+it("completes literal labels across the active document and refreshes edited definitions", () => {
+  const index = new LatexCompletionIndex();
+  const query = { active: "part.tex", kind: "labels" } as const;
+  const result = index.update({
+    query,
+    removed: [],
+    changed: [
+      {
+        path: "main.tex",
+        text: String.raw`\documentclass{article}\input{part}\label{sec:intro}`,
+      },
+      {
+        path: "part.tex",
+        text: String.raw`\label{energy}\label{sec:intro}
+% \label{comment}
+\verb|\label{literal}| \\label{escaped} \label{#1}
+\begin{verbatim}\label{example}\end{verbatim}`,
+      },
+      {
+        path: "other.tex",
+        text: String.raw`\documentclass{book}\label{other}`,
+      },
+    ],
+  });
+  expect(result.labels).toEqual([
+    { key: "sec:intro", paths: ["main.tex", "part.tex"] },
+    { key: "energy", paths: ["part.tex"] },
+  ]);
+  expect(
+    index
+      .update({
+        query,
+        changed: [{ path: "part.tex", text: "\\label{new}" }],
+        removed: [],
+      })
+      .labels?.map((l) => l.key),
+  ).toEqual(["sec:intro", "new"]);
+});

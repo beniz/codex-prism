@@ -1,11 +1,12 @@
 import {
   biblatexCitations,
   natbibCitations,
-  citationContext,
+  referenceKeyContext,
 } from "./latex-citation-context";
 import type { IndexQuery, IndexResult } from "./latex-completion-index";
 import {
   acceptCompletion,
+  insertCompletionText,
   autocompletion,
   pickedCompletion,
   type Completion,
@@ -175,17 +176,45 @@ async function complete(
   if (ignored(context)) return null;
   const token = context.matchBefore(/\\[A-Za-z@]*$/);
   if (!token) {
-    const cite = citationContext(context);
-    if (cite && lookup) {
+    const reference = referenceKeyContext(context);
+    if (reference && lookup) {
       context.addEventListener("abort", () => {}, { onDocChange: true });
       const index = await lookup(
-        { active, kind: "citations", term: cite.term },
+        reference.kind === "labels"
+          ? { active, kind: "labels" }
+          : { active, kind: "citations", term: reference.term },
         () => context.aborted,
       );
       if (!index || context.aborted) return null;
+      if (reference.kind === "labels") {
+        return {
+          from: reference.from,
+          to: context.pos,
+          // Filter the typed prefix only; replace any remaining key suffix on accept.
+          options: (index.labels ?? []).map(({ key, paths }) => ({
+            label: key,
+            type: "reference",
+            detail: paths.join(", "),
+            apply(view, completion, from, to) {
+              const line = view.state.doc.lineAt(to);
+              const suffix = /^[^{}\s%\\]*/.exec(
+                line.text.slice(to - line.from),
+              )![0];
+              view.dispatch(
+                insertCompletionText(view.state, key, from, to + suffix.length),
+                {
+                  annotations: pickedCompletion.of(completion),
+                  userEvent: "input.complete",
+                },
+              );
+            },
+          })),
+          validFor: /^[^{}\s%\\]*$/,
+        };
+      }
       return {
-        from: cite.from,
-        to: cite.to,
+        from: reference.from,
+        to: reference.to,
         filter: false,
         options: (index.citations ?? []).map(({ key, metadata, paths }) => ({
           label: key,

@@ -9,7 +9,7 @@ import {
 } from "./latex-project";
 
 export type IndexQuery = { active: string } & (
-  | { kind: "commands" }
+  | { kind: "commands" | "labels" }
   | { kind: "citations"; term: string }
 );
 export interface IndexUpdate {
@@ -21,6 +21,7 @@ export interface IndexUpdate {
 export interface IndexResult {
   commands: [string, number | null][]; // null means observed use; a number means a definition.
   packages: string[];
+  labels?: { key: string; paths: string[] }[];
   bibliographies?: string[];
   citations?: { key: string; metadata: string; paths: string[] }[];
 }
@@ -68,7 +69,11 @@ function parseTex(text: string) {
     source.match(/\\documentclass[\s{[]/)?.[0] ?? "",
     ...includes.map((m) => m[0]),
   ].join("\n");
+  const labels = new Set<string>();
+  for (const m of source.matchAll(/\\\\|\\label\s*\{\s*([^{}\s\\%#]+)\s*\}/g))
+    if (m[1]) labels.add(m[1]);
   return {
+    labels,
     commands,
     packages,
     resources,
@@ -177,6 +182,22 @@ export class LatexCompletionIndex {
         this.bib.set(path, bibliographyEntries(text));
         this.merged = undefined;
       } else this.sources.set(path, parseTex(text));
+    }
+    if (query.kind === "labels") {
+      const { paths } = this.documentSources(query.active);
+      const labels = new Map<string, string[]>();
+      for (const path of paths) {
+        for (const key of this.sources.get(path)?.labels ?? []) {
+          const existing = labels.get(key);
+          if (existing) existing.push(path);
+          else labels.set(key, [path]);
+        }
+      }
+      return {
+        commands: [],
+        packages: [],
+        labels: Array.from(labels, ([key, paths]) => ({ key, paths })),
+      };
     }
     if (query.kind === "citations") {
       const paths = this.resources(query.active, bibPaths);
