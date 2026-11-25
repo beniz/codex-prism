@@ -5,6 +5,8 @@ and detailed release notes are in [docs/releases](docs/releases/README.md).
 
 ## Unreleased
 
+- Capture & Ask uses a compact crosshair button in the PDF toolbar. Hover over it to see its name and keyboard shortcut.
+
 ## 1.8.2
 
 - The PDF panel divider has a wider grab area and a visible grip for resizing the preview.
