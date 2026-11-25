@@ -1,5 +1,6 @@
 import { holdReviewedPdfs } from "@/lib/chat-pdf-handoff";
 import { useActivityStore, endStoppingActivity, beginActivity, proposalActivityBusy, startActivityTurn, updateActivityItem, finishActivityTurn, resetActivities, disconnectActivities } from "./activity-store";
+import { repairPromptSummary } from "@/lib/repair-prompt";
 import { sourcePromptText, sourceRequest } from "@/lib/source-completion";
 import { readChatTabs, writeChatTabs, type SavedChatTabs } from "@/lib/chat-tabs";
 import { toast } from "sonner";
@@ -1115,7 +1116,7 @@ function toItem(item: any): ChatItem {
     ...(!["agentMessage", "userMessage", "reasoning"].includes(item.type)
       ? { activity: item }
       : {}),
-    text: item.type === "userMessage" ? sourcePromptText(text) : text,
+    text: item.type === "userMessage" ? repairPromptSummary(sourcePromptText(text)) : text,
   };
 }
 let subscription: Promise<void> | null = null;
