@@ -15,6 +15,10 @@ pub struct Project {
     pub id: String,
     pub root: PathBuf,
     pub name: String,
+    #[serde(default)]
+    pub legacy_branch: Option<String>,
+    #[serde(default)]
+    pub checkout_branch: Option<String>,
 }
 #[derive(Default)]
 pub(crate) struct Projects(pub Mutex<()>);
@@ -60,6 +64,16 @@ pub(crate) fn get(app: &crate::Backend, id: &str) -> Result<Project, String> {
         .find(|p| p.id == id)
         .ok_or("Unknown project".into())
 }
+pub(crate) fn checkout_branch(root: &Path) -> Result<Option<String>, String> {
+    let repo = match git2::Repository::discover(root) {
+        Ok(repo) => repo,
+        Err(e) if e.code() == git2::ErrorCode::NotFound => return Ok(None),
+        Err(e) => return Err(e.to_string()),
+    };
+    let head = repo.find_reference("HEAD").map_err(|e| e.to_string())?;
+    Ok(Some(head.symbolic_target().unwrap_or("HEAD").to_owned()))
+}
+
 pub(crate) fn project_register(app: crate::Backend, root: String) -> Result<Project, String> {
     let state = &app.inner.projects;
     let _guard = state.0.lock().map_err(|e| e.to_string())?;
@@ -68,10 +82,32 @@ pub(crate) fn project_register(app: crate::Backend, root: String) -> Result<Proj
         return Err("Project must be a directory".into());
     }
     let mut projects = registry(&app)?;
-    if let Some(p) = projects.iter().find(|p| p.root == root) {
-        return Ok(p.clone());
+    let checkout_branch = checkout_branch(&root)?;
+    if let Some(index) = projects.iter().position(|p| p.root == root) {
+        crate::collaboration::recover_checkout(&app, &projects[index].id, &root)?;
+        if projects[index].legacy_branch.is_none() && checkout_branch.is_some() {
+            let recorded = crate::collaboration::legacy_branch(&root)?;
+            if recorded.is_some() && recorded != checkout_branch {
+                return Err(format!(
+                    "Return to {} to migrate existing chats and proposals",
+                    recorded.as_deref().unwrap_or_default()
+                ));
+            }
+            projects[index].legacy_branch = checkout_branch.clone();
+            save_json(&data_dir(&app)?.join("projects.json"), &projects)?;
+        }
+        let mut project = projects[index].clone();
+        if project.legacy_branch.is_some() && checkout_branch != project.legacy_branch {
+            let marker = resolve(&root, ".prism/branch-builds")?;
+            fs::create_dir_all(marker).map_err(|e| e.to_string())?;
+        }
+        project.checkout_branch = checkout_branch;
+        return Ok(project);
     }
     let project = Project {
+        legacy_branch: crate::collaboration::legacy_branch(&root)?
+            .or_else(|| checkout_branch.clone()),
+        checkout_branch,
         id: uuid::Uuid::new_v4().to_string(),
         name: root
             .file_name()
@@ -169,17 +205,29 @@ pub(crate) fn project_read(
     let bytes = fs::read(resolve(&p.root, &path)?).map_err(|e| e.to_string())?;
     Ok(serde_json::json!({"revision":revision(&bytes),"bytes":bytes}))
 }
+fn ensure_write_branch(root: &Path, expected: Option<&str>) -> Result<(), String> {
+    let active = checkout_branch(root)?;
+    if expected.is_some() && active.as_deref() != expected {
+        return Err("Return to the original branch before saving this edit".into());
+    }
+    if active.as_deref() == Some("HEAD") {
+        return Err("Check out a branch before editing".into());
+    }
+    Ok(())
+}
 pub(crate) fn project_write(
     app: crate::Backend,
     project_id: String,
     path: String,
     bytes: Vec<u8>,
     expected_revision: Option<String>,
+    expected_branch: Option<String>,
 ) -> Result<String, String> {
     let state = &app.inner.projects;
     let _guard = state.0.lock().map_err(|e| e.to_string())?;
     crate::codex::assert_unlocked(&app, &project_id)?;
     let p = get(&app, &project_id)?;
+    ensure_write_branch(&p.root, expected_branch.as_deref())?;
     let target = resolve(&p.root, &path)?;
     write_checked(&target, &bytes, expected_revision.as_deref())
 }
@@ -432,11 +480,13 @@ pub(crate) fn project_mutate(
     path: String,
     action: String,
     destination: Option<String>,
+    expected_branch: Option<String>,
 ) -> Result<(), String> {
     let state = &app.inner.projects;
     let _guard = state.0.lock().map_err(|e| e.to_string())?;
     crate::codex::assert_unlocked(&app, &project_id)?;
     let p = get(&app, &project_id)?;
+    ensure_write_branch(&p.root, expected_branch.as_deref())?;
     let target = resolve(&p.root, &path)?;
     if path.is_empty() {
         return Err("Cannot mutate project root through file operations".into());

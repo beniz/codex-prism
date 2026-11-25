@@ -1267,3 +1267,37 @@ it("sends only selected document paths and refuses acceptance over unsaved buffe
     "Save your manuscript edits",
   );
 });
+
+it("restores independent branch drafts and shares the project's model preference", async () => {
+  const root = "/branch-drafts";
+  const legacyBranch = "refs/heads/main";
+  let checkoutBranch = legacyBranch;
+  vi.mocked(backend.projects.register).mockImplementation(async () => ({
+    id: "branches", name: "paper", root, legacyBranch, checkoutBranch,
+  }));
+  async function reopen(branch: string) {
+    checkoutBranch = branch;
+    useAgentChatStore.getState().resetForProject(null);
+    useAgentChatStore.getState().resetForProject(root);
+    await vi.waitFor(() => expect(useAgentChatStore.getState().restoringChats).toBe(false));
+  }
+  function draft(text: string) {
+    useAgentChatStore.setState(state => ({ tabs: state.tabs.map(t => ({ ...t, draft: text })) }));
+  }
+  try {
+    await reopen(legacyBranch);
+    draft("Main question");
+    useAgentChatStore.setState({ selectedModel: "project-model" });
+    await reopen("refs/heads/slides");
+    expect(useAgentChatStore.getState().tabs[0].draft).toBe("");
+    expect(useAgentChatStore.getState().selectedModel).toBe("project-model");
+    draft("Slides question");
+    await reopen(legacyBranch);
+    expect(useAgentChatStore.getState().tabs[0].draft).toBe("Main question");
+    await reopen("refs/heads/slides");
+    expect(useAgentChatStore.getState().tabs[0].draft).toBe("Slides question");
+  } finally {
+    useAgentChatStore.getState().resetForProject(null);
+    vi.mocked(backend.projects.register).mockResolvedValue({ id:"p1", name:"paper", root:"/paper" });
+  }
+});

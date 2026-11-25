@@ -80,6 +80,7 @@ export function clearPdfBytesCache() {
 interface DocumentState {
   projectId: string | null;
   projectRoot: string | null;
+  viewKey?: string;
   files: ProjectFile[];
   folders: string[];
   activeFileId: string;
@@ -311,20 +312,36 @@ export const useDocumentStore = create<DocumentState>()((set, get) => ({
     try {
       const project = await backend.projects.register(rootPath);
       if (!current()) return;
-      set({ projectId: project.id, openingPhase: "scanning" });
+      const viewKey = project.checkoutBranch
+        ? JSON.stringify([
+            "prism-active-file",
+            project.id,
+            project.checkoutBranch,
+          ])
+        : undefined;
+      const preferred =
+        preferredMainFile ??
+        (viewKey ? localStorage.getItem(viewKey) : undefined);
+      set({ projectId: project.id, viewKey, openingPhase: "scanning" });
       await invoke("allow_project_directory", { rootPath });
       if (!current()) return;
-      const { files: scanned, folders } = await scanProjectFolder(rootPath);
+      const { files: scanned, folders } = await scanProjectFolder(rootPath,project);
       if (!current()) return;
       const files: ProjectFile[] = scanned.map(f => ({
         id: f.relativePath, name: f.relativePath.split(/[/\\]/).pop() || f.relativePath,
         relativePath: f.relativePath, ref: f.ref, type: f.type, isDirty: false,
         fileSize: f.fileSize, diskToken: f.diskToken,
       }));
-      const main = files.find(f => f.relativePath === preferredMainFile && f.type === "tex")
-        ?? files.find(f => f.name === "main.tex" || f.name === "document.tex")
-        ?? files.find(f => f.type === "tex");
-      set({ files, folders, activeFileId: main?.id ?? files[0]?.id ?? "", openingPhase: "sources" });
+      const main =
+        files.find((f) => f.relativePath === preferred && f.type === "tex") ??
+        files.find((f) => f.name === "main.tex" || f.name === "document.tex") ??
+        files.find((f) => f.type === "tex");
+      set({
+        files,
+        folders,
+        activeFileId: main?.id ?? files[0]?.id ?? "",
+        openingPhase: "sources",
+      });
       mark("metadata");
       const read = async (file: ProjectFile) => {
         if (!current()) return;
@@ -458,6 +475,8 @@ export const useDocumentStore = create<DocumentState>()((set, get) => ({
   setActiveFile: (id) => {
     const state = get();
     const file = state.files.find((f) => f.id === id);
+    if (file && state.viewKey)
+      localStorage.setItem(state.viewKey, file.relativePath);
     if (!file || file.type !== "tex") {
       set({
         activeFileId: id,
@@ -822,8 +841,9 @@ export const useDocumentStore = create<DocumentState>()((set, get) => ({
     if (!file || !file.isDirty || file.content == null) return;
 
     await writeTexFileContent(file.ref, file.content);
+    if (get().openingGeneration !== state.openingGeneration) return;
     set((s) => ({
-      files: s.files.map((f) => (f.id === id ? { ...f, isDirty: false } : f)),
+      files: s.files.map((f) => (f === file ? { ...f, isDirty: false } : f)),
     }));
   },
 
@@ -836,10 +856,12 @@ export const useDocumentStore = create<DocumentState>()((set, get) => ({
     const results = await Promise.allSettled(
       dirtyFiles.map((f) => writeTexFileContent(f.ref, f.content!)),
     );
+    if (get().openingGeneration !== state.openingGeneration) return;
     // Only mark successfully saved files as clean
     const savedIds = new Set<string>();
     results.forEach((r, i) => {
-      if (r.status === "fulfilled") savedIds.add(dirtyFiles[i].id);
+      if (r.status === "fulfilled" && get().files.includes(dirtyFiles[i]))
+        savedIds.add(dirtyFiles[i].id);
     });
     if (savedIds.size > 0) {
       set((s) => ({

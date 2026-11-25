@@ -5,6 +5,10 @@ and detailed release notes are in [docs/releases](docs/releases/README.md).
 
 ## Unreleased
 
+- Select the active branch below the project title to switch branches or preview remote work. Work on Git branches in the normal editor, park branch-specific chats and proposals, publish a local branch, and merge document changes into the active branch.
+
+- Browse remote branches and GitHub or Gitea pull requests over the configured Git transport from Collaboration, choose a PR comparison branch, inspect changes, and compile a pinned revision independently of the writing project.
+
 - The LaTeX editor completes standard, package and project commands and suggests citation keys from the document’s bibliography while you type. Inside `\ref{}` and `\eqref{}`, it suggests labels from the document and its included files.
 
 - Reclaim cached proposal PDFs and build inputs after Keep or Discard, including older resolved proposals on startup.

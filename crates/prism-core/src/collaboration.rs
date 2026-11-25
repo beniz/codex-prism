@@ -1,4 +1,7 @@
 //! Repository collaboration. Network work never owns the document mutation lock.
+mod branches;
+mod remote_work;
+pub(crate) use branches::recover_checkout;
 use crate::{history::workflow, projects, Backend};
 use git2::{Oid, Repository};
 use serde::{Deserialize, Serialize};
@@ -12,6 +15,7 @@ use std::{
 
 #[derive(Default)]
 pub(crate) struct State {
+    previews: Mutex<HashMap<(String, String), std::sync::Arc<remote_work::Preview>>>,
     tokens: Mutex<HashMap<String, Credential>>,
     refresh_lock: tokio::sync::Mutex<()>,
     jobs: Mutex<HashMap<String, tokio::sync::watch::Sender<bool>>>,
@@ -75,8 +79,60 @@ fn read_connection(root: &Path) -> Result<Option<Connection>, String> {
         Err(e) => Err(e.to_string()),
     }
 }
+pub(crate) fn legacy_branch(root: &Path) -> Result<Option<String>, String> {
+    Ok(read_connection(root)?.map(|connection| format!("refs/heads/{}", connection.branch)))
+}
+fn sync_state_path(root: &Path, c: &Connection) -> PathBuf {
+    let key = projects::revision(format!("{}\n{}\n{}", c.url, c.remote, c.branch).as_bytes());
+    root.join(".codexprism").join(format!("sync-{key}.json"))
+}
+fn active_connection(root: &Path) -> Result<Option<Connection>, String> {
+    let Some(mut c) = read_connection(root)? else {
+        return Ok(None);
+    };
+    let repo = repository(root)?;
+    let active = branch(&repo)?;
+    if active == format!("refs/heads/{}", c.branch) {
+        return Ok(Some(c));
+    }
+    let name = active
+        .strip_prefix("refs/heads/")
+        .ok_or("Missing local branch")?;
+    let cfg = repo.config().map_err(|e| e.to_string())?;
+    if cfg
+        .get_string(&format!("branch.{name}.remote"))
+        .ok()
+        .as_ref()
+        != Some(&c.remote)
+        || cfg
+            .get_string(&format!("branch.{name}.merge"))
+            .ok()
+            .as_ref()
+            != Some(&active)
+    {
+        return Ok(None);
+    }
+    c.branch = name.into();
+    c.last_remote = None;
+    c.message = None;
+    c.checked_at = None;
+    let path = sync_state_path(root, &c);
+    if path.exists() {
+        return serde_json::from_slice(&std::fs::read(path).map_err(|e| e.to_string())?)
+            .map(Some)
+            .map_err(|e| e.to_string());
+    }
+    Ok(Some(c))
+}
+fn save_sync_state(root: &Path, c: &Connection) -> Result<(), String> {
+    if read_connection(root)?.is_some_and(|base| base.branch == c.branch) {
+        write_connection(root, c)
+    } else {
+        projects::save_json(&sync_state_path(root, c), c)
+    }
+}
 pub(crate) fn incoming_revision(root: &Path) -> Result<Option<Oid>, String> {
-    Ok(read_connection(root)?
+    Ok(active_connection(root)?
         .and_then(|c| c.last_remote)
         .and_then(|s| Oid::from_str(&s).ok()))
 }
@@ -541,6 +597,9 @@ fn status(app: &Backend, project: &str) -> Result<Value, String> {
             .ok()
             .and_then(|s| s["warning"].as_str().map(str::to_owned))
     };
+    let upstream = active_connection(&root)?;
+    let can_sync = upstream.is_some();
+    let c = upstream.unwrap_or(c);
     let dirty = tracked_clean(&repo).err();
     let busy = app
         .inner
@@ -557,7 +616,7 @@ fn status(app: &Backend, project: &str) -> Result<Value, String> {
         .unwrap_or((0, 0));
     let identity = repo.signature().ok();
     Ok(
-        json!({"connected":true,"remote":c.remote,"url":c.url,"branch":c.branch,"checkedAt":c.checked_at,"message":c.message,"warning":warning,"localEdits":dirty,"busy":busy,"ahead":ahead,"behind":behind,"name":identity.as_ref().and_then(|s|s.name()),"email":identity.as_ref().and_then(|s|s.email())}),
+        json!({"connected":true,"canSync":can_sync,"checkoutBranch":branch(&repo)?,"remote":c.remote,"url":c.url,"branch":c.branch,"checkedAt":c.checked_at,"message":c.message,"warning":warning,"localEdits":dirty,"busy":busy,"ahead":ahead,"behind":behind,"name":identity.as_ref().and_then(|s|s.name()),"email":identity.as_ref().and_then(|s|s.email())}),
     )
 }
 
@@ -666,7 +725,8 @@ async fn sync_mode(
     cancel: &mut tokio::sync::watch::Receiver<bool>,
 ) -> Result<Value, String> {
     let root = projects::get(app, project)?.root;
-    let mut c = read_connection(&root)?.ok_or("Project is not connected")?;
+    let mut c =
+        active_connection(&root)?.ok_or("Publish the active branch before synchronizing")?;
     let mut changed = false;
     let mut source_changed = false;
     let result = async {
@@ -706,7 +766,7 @@ async fn sync_mode(
                 c.last_remote = Some(incoming.to_string());
                 c.checked_at = Some(chrono::Utc::now().timestamp());
                 c.message = None;
-                write_connection(&root, &c)?;
+                save_sync_state(&root, &c)?;
                 let local = head(&repo)?;
                 if local == incoming
                     || repo
@@ -809,7 +869,7 @@ async fn sync_mode(
                 Ok(_) => {
                     c.last_remote = Some(tip);
                     c.message = None;
-                    write_connection(&root, &c)?;
+                    save_sync_state(&root, &c)?;
                     let mut result = status(app, project)?;
                     result["changed"] = json!(changed);
                     result["sourceChanged"] = json!(source_changed);
@@ -832,7 +892,7 @@ async fn sync_mode(
     if changed {
         if let Err(error) = &result {
             c.message = Some(error.clone());
-            write_connection(&root, &c)?;
+            save_sync_state(&root, &c)?;
             let mut result = status(app, project)?;
             result["changed"] = json!(true);
             result["sourceChanged"] = json!(source_changed);
@@ -1311,6 +1371,10 @@ pub(crate) async fn service(
     operation: &str,
     args: Value,
 ) -> Result<Value, String> {
+    if operation.starts_with("remote_work_") {
+        let project = project.as_deref().ok_or("Missing project")?;
+        return remote_work::service(&app, project, operation, args).await;
+    }
     let key = project.as_deref().unwrap_or("setup");
     if operation == "cancel" {
         if let Some(tx) = app
@@ -1335,6 +1399,20 @@ pub(crate) async fn service(
     }
     if operation == "status" {
         return status(&app, project.as_deref().ok_or("Missing project")?);
+    }
+    if operation == "branch_list" {
+        let project = projects::get(&app, key)?;
+        let mut result = branches::list(&project.root)?;
+        let mut counts = std::collections::BTreeMap::<String, usize>::new();
+        for p in crate::proposals::all_branches(&app, key)? {
+            if let Some(owner) = p.owner_branch.as_ref().or(project.legacy_branch.as_ref()) {
+                *counts
+                    .entry(owner.trim_start_matches("refs/heads/").into())
+                    .or_default() += 1;
+            }
+        }
+        result["pending"] = json!(counts);
+        return Ok(result);
     }
     if operation == "profile" {
         return profile(&app, &args).await;
@@ -1448,6 +1526,14 @@ pub(crate) async fn service(
         return Ok(value);
     }
     let (_job, mut cancel) = job(&app, key)?;
+    if matches!(operation, "sync" | "sync_apply") {
+        if let Some(expected) = args["expectedBranch"].as_str() {
+            let root = projects::get(&app, key)?.root;
+            if projects::checkout_branch(&root)?.as_deref() != Some(expected) {
+                return Err("Branch changed before synchronization".into());
+            }
+        }
+    }
     let operation_id = uuid::Uuid::new_v4().to_string();
     if let Some(project) = &project {
         app.inner
@@ -1459,6 +1545,7 @@ pub(crate) async fn service(
             });
     }
     let result = match operation {
+        "branch_change" => branches::change(&app, key, &args, &mut cancel).await,
         "oauth_finish" => oauth_finish(&app, &args, &mut cancel).await,
         "resolve" => resolve(&app, &args, &mut cancel).await,
         "connect" => connect(&app, project.as_deref(), &args, &mut cancel).await,
@@ -1495,9 +1582,9 @@ pub(crate) async fn service(
     };
     if let (Some(project), Err(error)) = (project.as_deref(), &result) {
         if let Ok(p) = projects::get(&app, project) {
-            if let Ok(Some(mut c)) = read_connection(&p.root) {
+            if let Ok(Some(mut c)) = active_connection(&p.root) {
                 c.message = Some(error.clone());
-                let _ = write_connection(&p.root, &c);
+                let _ = save_sync_state(&p.root, &c);
             }
         }
     }
@@ -1579,6 +1666,327 @@ mod tests {
         .unwrap();
         (dir, app, project, b)
     }
+    #[tokio::test]
+    async fn remote_review_pins_refreshes_and_preserves_writing_state() {
+        let (_dir, app, p, other) = setup();
+        command(&other, &["checkout", "-b", "draft/slides"]);
+        let manuscript =
+            "\\documentclass{article}\n\\begin{document}\nCollaborator draft.\n\\end{document}\n";
+        commit(&other, "main.tex", manuscript);
+        command(&other, &["push", "origin", "draft/slides"]);
+        command(&other, &["checkout", "main"]);
+        commit(&other, "accepted.tex", "Accepted on main only");
+        command(&other, &["push", "origin", "main"]);
+
+        std::fs::write(p.root.join("main.tex"), "staged").unwrap();
+        command(&p.root, &["add", "main.tex"]);
+        std::fs::write(p.root.join("main.tex"), "unstaged").unwrap();
+        let head = command(&p.root, &["rev-parse", "HEAD"]);
+        let connection = || read_connection(&p.root).unwrap().unwrap();
+        let branches =
+            remote_work::browse(&app, &p.id, "remote_work_branches", json!({}), connection())
+                .await
+                .unwrap();
+        let draft = branches
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|b| b["name"] == "draft/slides")
+            .unwrap();
+        let first =
+            remote_work::browse(&app, &p.id, "remote_work_open", draft.clone(), connection())
+                .await
+                .unwrap();
+        assert_eq!(first["sha"], draft["sha"]);
+        assert_eq!(first["sources"]["main.tex"], manuscript);
+        assert!(!first["diff"].as_str().unwrap().contains("accepted.tex"));
+        command(&other, &["checkout", "draft/slides"]);
+        commit(&other, "new.tex", "Another paragraph.");
+        command(&other, &["push", "origin", "draft/slides"]);
+        assert!(
+            remote_work::browse(&app, &p.id, "remote_work_open", draft.clone(), connection())
+                .await
+                .unwrap_err()
+                .contains("revision changed")
+        );
+        let mut request = draft.clone();
+        request["refresh"] = json!(true);
+        let second = remote_work::browse(&app, &p.id, "remote_work_open", request, connection())
+            .await
+            .unwrap();
+        assert_ne!(first["sha"], second["sha"]);
+        assert_eq!(second["sources"]["new.tex"], "Another paragraph.");
+        let original = json!({"id":first["id"], "main":"main.tex"});
+        if which::which("pdflatex").is_ok()
+            && which::which("kpsewhich").is_ok()
+            && std::process::Command::new("kpsewhich")
+                .arg("article.cls")
+                .output()
+                .is_ok_and(|out| out.status.success())
+        {
+            let build = remote_work::service(&app, &p.id, "remote_work_compile", original.clone())
+                .await
+                .unwrap();
+            assert!(build["pdf"].as_str().unwrap().starts_with("JVBER"));
+            assert!(build["locations"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|b| b["file"] == "main.tex"));
+        }
+        remote_work::service(&app, &p.id, "remote_work_close", original.clone())
+            .await
+            .unwrap();
+        assert!(
+            remote_work::service(&app, &p.id, "remote_work_compile", original)
+                .await
+                .unwrap_err()
+                .contains("expired")
+        );
+        assert_eq!(command(&p.root, &["rev-parse", "HEAD"]), head);
+        assert_eq!(command(&p.root, &["show", ":main.tex"]), "staged");
+        assert_eq!(
+            std::fs::read_to_string(p.root.join("main.tex")).unwrap(),
+            "unstaged"
+        );
+        assert_eq!(connection().branch, "main");
+    }
+
+    #[tokio::test]
+    async fn remote_pull_review_uses_git_refs_and_selected_comparison_branch() {
+        let (_dir, app, p, other) = setup();
+        command(&other, &["checkout", "-b", "conference"]);
+        commit(&other, "template.tex", "Conference template");
+        command(&other, &["push", "origin", "conference"]);
+        commit(&other, "paper.tex", "Proposed content");
+        command(&other, &["push", "origin", "HEAD:refs/pull/7/head"]);
+        let connection = || read_connection(&p.root).unwrap().unwrap();
+        let list = remote_work::browse(&app, &p.id, "remote_work_pulls", json!({}), connection())
+            .await
+            .unwrap();
+        assert_eq!(list["defaultBase"], "main");
+        assert!(list["branches"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|b| b["name"] == "conference"));
+        let mut request = list["entries"][0].clone();
+        assert_eq!(request["number"], 7);
+        assert_eq!(request["sha"], command(&other, &["rev-parse", "HEAD"]));
+        request["base"] = json!("conference");
+        let review = remote_work::browse(
+            &app,
+            &p.id,
+            "remote_work_open",
+            request.clone(),
+            connection(),
+        )
+        .await
+        .unwrap();
+        commit(&other, "later.tex", "Follow-up");
+        command(&other, &["push", "origin", "HEAD:refs/pull/7/head"]);
+        assert!(remote_work::browse(
+            &app,
+            &p.id,
+            "remote_work_open",
+            request.clone(),
+            connection()
+        )
+        .await
+        .unwrap_err()
+        .contains("revision changed"));
+        request["refresh"] = json!(true);
+        let latest = remote_work::browse(&app, &p.id, "remote_work_open", request, connection())
+            .await
+            .unwrap();
+        assert_ne!(latest["sha"], review["sha"]);
+        assert_eq!(latest["base"], "conference");
+        assert_eq!(review["base"], "conference");
+        let patch = review["diff"].as_str().unwrap();
+        assert!(patch.contains("Proposed content"));
+        assert!(!patch.contains("Conference template"));
+        assert!(!p.root.join("paper.tex").exists());
+    }
+
+    #[tokio::test]
+    async fn writing_checkout_parks_proposals_and_merges_local_branches() {
+        let (_dir, app, p, _) = setup();
+        async fn change(
+            app: &Backend,
+            p: &projects::Project,
+            action: &str,
+            name: &str,
+        ) -> Result<Value, String> {
+            let mut args = branches::list(&p.root)?;
+            args["name"] = json!(name);
+            args["action"] = json!(action);
+            branches::change(app, &p.id, &args, &mut app.inner.cancel.subscribe()).await
+        }
+        let proposal = crate::proposals::begin(&app, &p.id, Some("main-chat"), None).unwrap();
+        assert!(change(&app, &p, "create", "draft")
+            .await
+            .unwrap_err()
+            .contains("active turn"));
+        std::fs::write(
+            crate::proposals::root(&app, &proposal)
+                .unwrap()
+                .join("main.tex"),
+            "Pending",
+        )
+        .unwrap();
+        crate::proposals::finish(&app, &proposal.id, false).unwrap();
+        change(&app, &p, "create", "draft").await.unwrap();
+        assert!(crate::proposals::all(&app, &p.id).unwrap().is_empty());
+        commit(&p.root, "draft.tex", "Draft");
+        change(&app, &p, "switch", "main").await.unwrap();
+        assert!(!p.root.join("draft.tex").exists());
+        let parked = crate::proposals::all(&app, &p.id).unwrap().pop().unwrap();
+        assert_eq!(parked.id, proposal.id);
+        assert!(change(&app, &p, "merge", "draft").await.is_err());
+        crate::proposals::service(
+            &app,
+            &p.id,
+            "proposal_discard",
+            json!({"proposalId":parked.id,"generation":parked.generation}),
+        )
+        .unwrap();
+        change(&app, &p, "merge", "draft").await.unwrap();
+        assert_eq!(
+            std::fs::read_to_string(p.root.join("draft.tex")).unwrap(),
+            "Draft"
+        );
+        assert_eq!(command(&p.root, &["branch", "--show-current"]), "main");
+    }
+    #[tokio::test]
+    async fn branch_builds_reopen_only_with_matching_inputs() {
+        if which::which("pdflatex").is_err() || !std::process::Command::new("kpsewhich").arg("article.cls").output().is_ok_and(|o|o.status.success()){return;}
+        let (_dir,app,p,_)=setup();
+        let root=p.root.to_string_lossy().to_string();
+        std::fs::create_dir_all(p.root.join(".prism/branch-builds")).unwrap();
+        commit(&p.root,"main.tex","\\documentclass{article}\n\\begin{document}Main\\end{document}\n");
+        let build=crate::latex::compile_latex_policy(&app.inner.latex,root.clone(),"main.tex".into(),false).await.unwrap();
+        command(&p.root,&["checkout","-b","slides"]);
+        let load=||crate::latex::load_existing_pdf(&app.inner.latex,root.clone(),"main.tex".into());
+        assert!(load().await.unwrap().is_none());
+        command(&p.root,&["checkout","main"]);
+        assert_eq!(load().await.unwrap().unwrap(),build);
+        std::fs::write(p.root.join("main.tex"),"changed outside Prism").unwrap();
+        assert!(load().await.unwrap().is_none());
+    }
+    #[tokio::test]
+    async fn pr_checkout_updates_and_publishes_to_a_new_remote_branch() {
+        let (_dir, app, p, collaborator) = setup();
+        let mut connection = read_connection(&p.root).unwrap().unwrap();
+        let remote_path = connection.url.clone();
+        connection.url = "git@fixture.invalid:team/paper.git".into();
+        command(
+            &p.root,
+            &[
+                "config",
+                &format!("url.{remote_path}.insteadOf"),
+                &connection.url,
+            ],
+        );
+        write_connection(&p.root, &connection).unwrap();
+        commit(&collaborator, "slides.tex", "First version");
+        command(&collaborator, &["push", "origin", "HEAD:refs/pull/7/head"]);
+        let sha = command(&collaborator, &["rev-parse", "HEAD"]);
+        let mut args = branches::list(&p.root).unwrap();
+        args["action"] = json!("pull");
+        args["number"] = json!(7);
+        args["name"] = json!("review/pr-7");
+        args["sha"] = json!(sha);
+        branches::change(&app, &p.id, &args, &mut app.inner.cancel.subscribe())
+            .await
+            .unwrap();
+        assert_eq!(
+            command(&p.root, &["branch", "--show-current"]),
+            "review/pr-7"
+        );
+        assert!(active_connection(&p.root).unwrap().is_none());
+        commit(&collaborator, "slides.tex", "Second version");
+        command(&collaborator, &["push", "origin", "HEAD:refs/pull/7/head"]);
+        let mut update = branches::list(&p.root).unwrap();
+        update["action"] = json!("update");
+        update["number"] = json!(7);
+        update["name"] = json!("review/pr-7");
+        branches::change(&app, &p.id, &update, &mut app.inner.cancel.subscribe())
+            .await
+            .unwrap();
+        assert_eq!(
+            std::fs::read_to_string(p.root.join("slides.tex")).unwrap(),
+            "Second version"
+        );
+        let mut publish = branches::list(&p.root).unwrap();
+        publish["action"] = json!("publish");
+        publish["name"] = json!("review/pr-7");
+        branches::change(&app, &p.id, &publish, &mut app.inner.cancel.subscribe())
+            .await
+            .unwrap();
+        assert_eq!(
+            active_connection(&p.root).unwrap().unwrap().branch,
+            "review/pr-7"
+        );
+        assert_eq!(
+            command(
+                Path::new(&remote_path),
+                &["rev-parse", "refs/heads/review/pr-7"]
+            ),
+            command(&p.root, &["rev-parse", "HEAD"])
+        );
+    }
+
+    #[tokio::test]
+    async fn local_merge_conflict_tracks_the_source_tip_and_preserves_dirty_files() {
+        let (_dir, app, p, _) = setup();
+        command(&p.root, &["checkout", "-b", "draft"]);
+        commit(&p.root, "main.tex", "Draft changes");
+        command(&p.root, &["checkout", "main"]);
+        commit(&p.root, "main.tex", "Main changes");
+        let mut args = branches::list(&p.root).unwrap();
+        args["action"] = json!("merge");
+        args["name"] = json!("draft");
+        std::fs::write(p.root.join("main.tex"), "Uncheckpointed").unwrap();
+        assert!(
+            branches::change(&app, &p.id, &args, &mut app.inner.cancel.subscribe())
+                .await
+                .is_err()
+        );
+        assert_eq!(
+            std::fs::read_to_string(p.root.join("main.tex")).unwrap(),
+            "Uncheckpointed"
+        );
+        std::fs::write(p.root.join("main.tex"), "Main changes").unwrap();
+        let merged = branches::change(&app, &p.id, &args, &mut app.inner.cancel.subscribe())
+            .await
+            .unwrap();
+        let id = merged["resolution"]["proposalId"].as_str().unwrap();
+        assert_eq!(
+            std::fs::read_to_string(p.root.join("main.tex")).unwrap(),
+            "Main changes"
+        );
+        let resolution = crate::proposals::all(&app, &p.id)
+            .unwrap()
+            .into_iter()
+            .find(|p| p.id == id)
+            .unwrap();
+        command(&p.root, &["checkout", "draft"]);
+        commit(&p.root, "next.tex", "Next");
+        command(&p.root, &["checkout", "main"]);
+        let request = json!({"proposalId":id,"generation":resolution.generation});
+        assert!(
+            crate::proposals::service(&app, &p.id, "proposal_apply", request.clone())
+                .unwrap_err()
+                .contains("Repair")
+        );
+        let repair = crate::proposals::service(&app, &p.id, "proposal_repair", request).unwrap();
+        assert_ne!(repair["proposalId"], id);
+        assert_eq!(
+            std::fs::read_to_string(p.root.join("main.tex")).unwrap(),
+            "Main changes"
+        );
+    }
+
     #[tokio::test]
     async fn two_clones_integrate_then_push_without_rewriting_history() {
         let (_dir, app, p, other) = setup();

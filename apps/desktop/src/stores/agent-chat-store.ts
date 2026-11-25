@@ -57,6 +57,8 @@ interface ChatState {
   isStreaming: boolean;
   projectId: string | null;
   activeProjectPath: string | null;
+  checkoutBranch: string | null;
+  chatStorageKey: string | null;
   review: Review;
   proposals: Proposal[];
   decideProposal(
@@ -159,6 +161,8 @@ export const useAgentChatStore = create<ChatState>((set, get) => ({
   isStreaming: false,
   projectId: null,
   activeProjectPath: null,
+  checkoutBranch: null,
+  chatStorageKey: null,
   proposals: [],
   decideProposal: async (action, paths) => {
     const state = get();
@@ -314,18 +318,29 @@ export const useAgentChatStore = create<ChatState>((set, get) => ({
     acceptanceCompiles.clear();
     resetActivities();
     clearDeltas();
-    const saved = root ? readChatTabs(root) : null;
+    const initialKey = root
+      ? (localStorage.getItem(`prism-last-chat-key:${root}`) ?? root)
+      : null;
+    let saved = initialKey ? readChatTabs(initialKey) : null;
+    const model = root
+      ? localStorage.getItem(`prism-project-model:${root}`)
+      : null;
+    const effort = root
+      ? localStorage.getItem(`prism-project-effort:${root}`)
+      : null;
     // Show local drafts immediately. Discovering sessions and reading transcripts
     // can take longer, and neither operation owns the user's input.
     const initialTabs = saved?.tabs.map(item => ({ ...tab(), ...item, projectPath: root })) ?? [tab()];
     const t = initialTabs.find(item => item.id === saved?.activeTabId) ?? initialTabs[0];
     set({
       restoringChats: !!root,
-      selectedModel: saved?.selectedModel ?? "gpt-5.6-sol",
-      effortLevel: saved?.effortLevel ?? "xhigh",
+      selectedModel: model ?? saved?.selectedModel ?? "gpt-5.6-sol",
+      effortLevel: effort ?? saved?.effortLevel ?? "xhigh",
       tabs: initialTabs,
       activeTabId: t.id,
       activeProjectPath: root,
+      checkoutBranch: null,
+      chatStorageKey: initialKey === root ? null : initialKey,
       projectId: null,
       review: { active: false, changes: [] },
       proposals: [],
@@ -334,65 +349,170 @@ export const useAgentChatStore = create<ChatState>((set, get) => ({
       error: null,
       isStreaming: false,
     });
-    if (root) void (async () => {
-      try {
-        const p = await backend.projects.register(root);
-        await ensureAgentEvents();
-        const sessions = await backend.agent.sessions(p.id);
-        const candidates = saved?.tabs ?? (sessions.length ? [{
-          id: t.id, title: sessions[0].title,
-          sessionId: sessions[0].id, draft: "",
-        }] : []);
-        if (generation !== projectGeneration) return;
-        const current = get();
-        const tabs: TabState[] = [];
-        for (const candidate of candidates) {
-          const local = current.tabs.find(item => item.id === candidate.id);
-          const draft = local?.draft ?? candidate.draft;
-          if (candidate.sessionId && !sessions.some(session => session.id === candidate.sessionId)) {
-            // An archived thread cannot be resumed. Retain its unsent draft in a fresh chat.
-            if (draft) tabs.push({ ...tab(), id: candidate.id, projectPath: root, draft });
-          } else {
-            tabs.push({ ...tab(), ...candidate, draft, projectPath: root, restoring: !!candidate.sessionId });
-          }
-        }
-        if (!tabs.length) tabs.push({ ...tab(), id: t.sessionId ? crypto.randomUUID() : t.id, projectPath: root, draft: current.tabs[0]?.draft ?? "" });
-        const active = tabs.find(item => item.id === current.activeTabId) ?? tabs[0];
-        set({ tabs, activeTabId: active.id, projectId: p.id });
-        // Recover ownership before enabling any new editing or agent work.
-        await get().refreshReview();
-        if (generation !== projectGeneration) return;
-        set(s => ({ tabs: s.tabs.map(t => {
-          const pending = s.proposals.find(p => p.threadId === t.sessionId && ["running", "repairing"].includes(p.state));
-          return pending ? { ...t, isStreaming: true, turnId: pending.turnId ?? null } : t;
-        }) }));
-        const restore = async (target: TabState) => {
-          if (generation !== projectGeneration || !get().tabs.some(t => t.id === target.id)) return;
-          let messages: ChatItem[] = [], error: string | null = null;
-          if (target.sessionId) try {
-            const result = await backend.agent.thread(p.id, target.sessionId, "read");
-            messages = (result.thread?.turns ?? []).flatMap((turn: any) =>
-              (turn.items ?? []).map((item: any) => { const mapped = toItem(item); return mapped.type === "proposedPlan" ? { ...mapped, status: turn.status } : mapped; }));
-          } catch (e) { error = `Could not restore conversation: ${String(e)}`; }
+    if (root)
+      void (async () => {
+        try {
+          const p = await backend.projects.register(root);
           if (generation !== projectGeneration) return;
-          set(s => ({ error: s.activeTabId === target.id ? error : s.error,
-            tabs: s.tabs.map(t => t.id === target.id
-            ? { ...t, messages: [...new Map([...messages, ...t.messages].map(item => [item.id, item])).values()], error, restoring: false } : t) }));
-        };
-        await restore(active);
-        if (generation !== projectGeneration) return;
-        set(s => ({ restoringChats: false, isStreaming: !!s.tabs.find(t => t.id === s.activeTabId)?.isStreaming }));
-        const remaining = tabs.filter(t => t.id !== active.id);
-        while (remaining.length && generation === projectGeneration) {
-          // A newly selected tab moves ahead of other queued transcripts.
-          remaining.sort((a, b) => Number(b.id === get().activeTabId) - Number(a.id === get().activeTabId));
-          await Promise.all(remaining.splice(0, 2).map(restore));
+          const storageKey =
+            p.checkoutBranch && p.checkoutBranch !== p.legacyBranch
+              ? JSON.stringify([root, p.checkoutBranch])
+              : root;
+          if (storageKey !== initialKey) {
+            saved = readChatTabs(storageKey);
+            const restored = saved?.tabs.map((item) => ({
+              ...tab(),
+              ...item,
+              projectPath: root,
+            })) ?? [tab()];
+            set({
+              tabs: restored,
+              activeTabId: saved?.activeTabId ?? restored[0].id,
+              chatStorageKey: storageKey === root ? null : storageKey,
+            });
+          }
+          localStorage.setItem(`prism-last-chat-key:${root}`, storageKey);
+          set({ checkoutBranch: p.checkoutBranch ?? null });
+          await ensureAgentEvents();
+          const sessions = await backend.agent.sessions(p.id);
+          const candidates =
+            saved?.tabs ??
+            (sessions.length
+              ? [
+                  {
+                    id: t.id,
+                    title: sessions[0].title,
+                    sessionId: sessions[0].id,
+                    draft: "",
+                  },
+                ]
+              : []);
+          if (generation !== projectGeneration) return;
+          const current = get();
+          const tabs: TabState[] = [];
+          for (const candidate of candidates) {
+            const local = current.tabs.find((item) => item.id === candidate.id);
+            const draft = local?.draft ?? candidate.draft;
+            if (
+              candidate.sessionId &&
+              !sessions.some((session) => session.id === candidate.sessionId)
+            ) {
+              // An archived thread cannot be resumed. Retain its unsent draft in a fresh chat.
+              if (draft)
+                tabs.push({
+                  ...tab(),
+                  id: candidate.id,
+                  projectPath: root,
+                  draft,
+                });
+            } else {
+              tabs.push({
+                ...tab(),
+                ...candidate,
+                draft,
+                projectPath: root,
+                restoring: !!candidate.sessionId,
+              });
+            }
+          }
+          if (!tabs.length)
+            tabs.push({
+              ...tab(),
+              id: t.sessionId ? crypto.randomUUID() : t.id,
+              projectPath: root,
+              draft: current.tabs[0]?.draft ?? "",
+            });
+          const active =
+            tabs.find((item) => item.id === current.activeTabId) ?? tabs[0];
+          set({ tabs, activeTabId: active.id, projectId: p.id });
+          // Recover ownership before enabling any new editing or agent work.
+          await get().refreshReview();
+          if (generation !== projectGeneration) return;
+          set((s) => ({
+            tabs: s.tabs.map((t) => {
+              const pending = s.proposals.find(
+                (p) =>
+                  p.threadId === t.sessionId &&
+                  ["running", "repairing"].includes(p.state),
+              );
+              return pending
+                ? { ...t, isStreaming: true, turnId: pending.turnId ?? null }
+                : t;
+            }),
+          }));
+          const restore = async (target: TabState) => {
+            if (
+              generation !== projectGeneration ||
+              !get().tabs.some((t) => t.id === target.id)
+            )
+              return;
+            let messages: ChatItem[] = [],
+              error: string | null = null;
+            if (target.sessionId)
+              try {
+                const result = await backend.agent.thread(
+                  p.id,
+                  target.sessionId,
+                  "read",
+                );
+                messages = (result.thread?.turns ?? []).flatMap((turn: any) =>
+                  (turn.items ?? []).map((item: any) => {
+                    const mapped = toItem(item);
+                    return mapped.type === "proposedPlan"
+                      ? { ...mapped, status: turn.status }
+                      : mapped;
+                  }),
+                );
+              } catch (e) {
+                error = `Could not restore conversation: ${String(e)}`;
+              }
+            if (generation !== projectGeneration) return;
+            set((s) => ({
+              error: s.activeTabId === target.id ? error : s.error,
+              tabs: s.tabs.map((t) =>
+                t.id === target.id
+                  ? {
+                      ...t,
+                      messages: [
+                        ...new Map(
+                          [...messages, ...t.messages].map((item) => [
+                            item.id,
+                            item,
+                          ]),
+                        ).values(),
+                      ],
+                      error,
+                      restoring: false,
+                    }
+                  : t,
+              ),
+            }));
+          };
+          await restore(active);
+          if (generation !== projectGeneration) return;
+          set((s) => ({
+            restoringChats: false,
+            isStreaming: !!s.tabs.find((t) => t.id === s.activeTabId)
+              ?.isStreaming,
+          }));
+          const remaining = tabs.filter((t) => t.id !== active.id);
+          while (remaining.length && generation === projectGeneration) {
+            // A newly selected tab moves ahead of other queued transcripts.
+            remaining.sort(
+              (a, b) =>
+                Number(b.id === get().activeTabId) -
+                Number(a.id === get().activeTabId),
+            );
+            await Promise.all(remaining.splice(0, 2).map(restore));
+          }
+        } catch (e) {
+          if (generation === projectGeneration)
+            set({
+              restoringChats: false,
+              error: `Could not restore chats: ${String(e)}`,
+            });
         }
-      } catch (e) {
-        if (generation === projectGeneration)
-          set({ restoringChats: false, error: `Could not restore chats: ${String(e)}` });
-      }
-    })();
+      })();
   },
   createTab: (kind) => {
     if (get().restoringChats) return get().activeTabId;
@@ -723,6 +843,7 @@ export const useAgentChatStore = create<ChatState>((set, get) => ({
           prompt,
           t.id,
           t.mode ?? "default",
+          ...(state.checkoutBranch ? ([state.checkoutBranch] as const) : []),
         );
         accepted = true;
         settleDraft();
@@ -1053,7 +1174,7 @@ function chatTabsSnapshot(state: ChatState) {
   if (!state.projectId && (!state.restoringChats ||
     !state.tabs.some(t => t.projectPath || t.draft))) return null;
   return {
-    root: state.activeProjectPath,
+    root: state.chatStorageKey ?? state.activeProjectPath,
     saved: {
       activeTabId: state.activeTabId,
       selectedModel: state.selectedModel,
@@ -1085,9 +1206,28 @@ export function persistChatTabs() {
   flushQueuedChatTabs();
 }
 useAgentChatStore.subscribe((state, previous) => {
-  const ownerChanged = state.activeProjectPath !== previous.activeProjectPath || state.projectId !== previous.projectId;
+  const ownerChanged =
+    state.chatStorageKey !== previous.chatStorageKey ||
+    state.activeProjectPath !== previous.activeProjectPath ||
+    state.projectId !== previous.projectId;
   // A pending draft belongs to its old project even after navigation.
   if (ownerChanged) tryFlushQueuedChatTabs();
+  if (state.activeProjectPath && state.projectId && !ownerChanged) {
+    try {
+      if (state.selectedModel !== previous.selectedModel)
+        localStorage.setItem(
+          `prism-project-model:${state.activeProjectPath}`,
+          state.selectedModel,
+        );
+      if (state.effortLevel !== previous.effortLevel)
+        localStorage.setItem(
+          `prism-project-effort:${state.activeProjectPath}`,
+          state.effortLevel,
+        );
+    } catch {
+      /* Storage may be unavailable. */
+    }
+  }
   const metadataChanged = ownerChanged || state.restoringChats !== previous.restoringChats ||
     state.selectedModel !== previous.selectedModel ||
     state.effortLevel !== previous.effortLevel || state.tabs.length !== previous.tabs.length ||

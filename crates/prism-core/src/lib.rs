@@ -223,10 +223,13 @@ impl Backend {
             return Err("Wait for agent turns to finish before restarting".into());
         }
         for project in projects::registry(self)? {
-            if proposals::all(self, &project.id)?.iter().any(|p| {
-                matches!(p.state.as_str(), "running" | "repairing" | "applying")
-            }) {
-                return Err("Wait for agent turns and proposal changes to finish before restarting".into());
+            if proposals::all_branches(self, &project.id)?
+                .iter()
+                .any(|p| matches!(p.state.as_str(), "running" | "repairing" | "applying"))
+            {
+                return Err(
+                    "Wait for agent turns and proposal changes to finish before restarting".into(),
+                );
             }
         }
         Ok(pause)

@@ -66,8 +66,25 @@ impl Backend {
         bytes: Vec<u8>,
         expected_revision: Option<String>,
     ) -> Result<String, String> {
+        self.project_write_on_branch(project_id, path, bytes, expected_revision, None)
+    }
+    pub fn project_write_on_branch(
+        &self,
+        project_id: String,
+        path: String,
+        bytes: Vec<u8>,
+        expected_revision: Option<String>,
+        expected_branch: Option<String>,
+    ) -> Result<String, String> {
         let _operation = self.enter()?;
-        projects::project_write(self.clone(), project_id, path, bytes, expected_revision)
+        projects::project_write(
+            self.clone(),
+            project_id,
+            path,
+            bytes,
+            expected_revision,
+            expected_branch,
+        )
     }
     pub fn project_mutate(
         &self,
@@ -76,8 +93,25 @@ impl Backend {
         action: String,
         destination: Option<String>,
     ) -> Result<(), String> {
+        self.project_mutate_on_branch(project_id, path, action, destination, None)
+    }
+    pub fn project_mutate_on_branch(
+        &self,
+        project_id: String,
+        path: String,
+        action: String,
+        destination: Option<String>,
+        expected_branch: Option<String>,
+    ) -> Result<(), String> {
         let _operation = self.enter()?;
-        projects::project_mutate(self.clone(), project_id, path, action, destination)
+        projects::project_mutate(
+            self.clone(),
+            project_id,
+            path,
+            action,
+            destination,
+            expected_branch,
+        )
     }
     pub fn project_list(&self, project_id: String) -> Result<serde_json::Value, String> {
         let _operation = self.enter()?;
@@ -204,6 +238,7 @@ impl Backend {
             history_prompt,
             chat_id,
             None,
+            None,
         )
         .await
     }
@@ -220,6 +255,35 @@ impl Backend {
         chat_id: Option<String>,
         mode: Option<String>,
     ) -> Result<Value, String> {
+        self.codex_send_on_branch(
+            project_id,
+            thread_id,
+            prompt,
+            model,
+            effort,
+            images,
+            main_document,
+            history_prompt,
+            chat_id,
+            mode,
+            None,
+        )
+        .await
+    }
+    pub async fn codex_send_on_branch(
+        &self,
+        project_id: String,
+        thread_id: Option<String>,
+        prompt: String,
+        model: Option<String>,
+        effort: Option<String>,
+        images: Option<Vec<String>>,
+        main_document: Option<String>,
+        history_prompt: Option<String>,
+        chat_id: Option<String>,
+        mode: Option<String>,
+        expected_branch: Option<String>,
+    ) -> Result<Value, String> {
         let _operation = self.enter()?;
         codex::codex_send_for_chat(
             self.clone(),
@@ -233,6 +297,7 @@ impl Backend {
             history_prompt,
             chat_id,
             mode,
+            expected_branch,
         )
         .await
     }

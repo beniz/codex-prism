@@ -767,6 +767,14 @@ export function CollaborationPanel({ projectId }: { projectId: string }) {
         </button>
       </div>
       <div className="space-y-0.5 px-1 pb-1.5">
+        <CollaborationRow
+          icon={GitBranchIcon}
+          onClick={() =>
+            window.dispatchEvent(new Event("prism-project-branches"))
+          }
+        >
+          Project branches
+        </CollaborationRow>
         {status.connected && (
           <>
             <div

@@ -50,9 +50,21 @@ pub struct Review {
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Session {
+    #[serde(default)]
+    owner_branch: Option<String>,
     project_id: String,
     id: String,
     title: String,
+}
+impl Session {
+    fn belongs_to(&self, project: &projects::Project, branch: Option<&String>) -> bool {
+        self.project_id == project.id
+            && self
+                .owner_branch
+                .as_ref()
+                .or(project.legacy_branch.as_ref())
+                .is_none_or(|owner| Some(owner) == branch)
+    }
 }
 fn sessions(app: &crate::Backend) -> Result<Vec<Session>, String> {
     let p = projects::data_dir(app)?.join("sessions.json");
@@ -683,11 +695,12 @@ pub(crate) async fn codex_sessions(
     app: crate::Backend,
     project_id: String,
 ) -> Result<Value, String> {
-    projects::get(&app, &project_id)?;
+    let project = projects::get(&app, &project_id)?;
+    let branch = projects::checkout_branch(&project.root)?;
     Ok(json!(sessions(&app)?
         .into_iter()
         .rev()
-        .filter(|s| s.project_id == project_id)
+        .filter(|s| s.belongs_to(&project, branch.as_ref()))
         .collect::<Vec<_>>()))
 }
 pub(crate) async fn codex_thread(
@@ -698,9 +711,11 @@ pub(crate) async fn codex_thread(
     title: Option<String>,
 ) -> Result<Value, String> {
     let mut all = sessions(&app)?;
+    let project = projects::get(&app, &project_id)?;
+    let branch = projects::checkout_branch(&project.root)?;
     let s = all
         .iter_mut()
-        .find(|s| s.id == thread_id && s.project_id == project_id)
+        .find(|s| s.id == thread_id && s.belongs_to(&project, branch.as_ref()))
         .ok_or("Unknown project session")?;
     if action == "rename" {
         s.title = title.unwrap_or_else(|| "Chat".into());
@@ -752,6 +767,7 @@ pub(crate) async fn codex_send(
         history_prompt,
         None,
         None,
+        None,
     )
     .await
 }
@@ -767,6 +783,7 @@ pub(crate) async fn codex_send_for_chat(
     history_prompt: Option<String>,
     chat_id: Option<String>,
     mode: Option<String>,
+    expected_branch: Option<String>,
 ) -> Result<Value, String> {
     let mode = mode.as_deref().unwrap_or("default");
     if !["plan", "default"].contains(&mode) { return Err("Unknown collaboration mode".into()); }
@@ -787,9 +804,10 @@ pub(crate) async fn codex_send_for_chat(
     // Serialize only startup/binding. Running turns are reserved per proposal.
     let _startup = app.inner.codex.service_lock.lock().await;
     if let Some(id) = &thread_id {
+        let branch = projects::checkout_branch(&project.root)?;
         if !sessions(&app)?
             .iter()
-            .any(|s| s.id == *id && s.project_id == project_id)
+            .any(|s| s.id == *id && s.belongs_to(&project, branch.as_ref()))
         {
             return Err("Unknown project session".into());
         }
@@ -798,13 +816,18 @@ pub(crate) async fn codex_send_for_chat(
     let mut source_status = crate::data_sources::status(source_settings.sources.iter().filter(|s| s.connection_id.is_none() && s.kind != "file").cloned().collect(), &[]).await;
     let instructions = projects::instructions(&app, &project_id, None)?
         .replace(&project.root.to_string_lossy().to_string(), ".");
+    {
+        let _files=app.inner.projects.0.lock().map_err(|e|e.to_string())?;
+        if expected_branch.is_some() && projects::checkout_branch(&project.root)?!=expected_branch {return Err("Branch changed before this turn started".into());}
     history_result(&app, &project_id, history_before_turn(&app, &project_id));
-    let mut proposal = crate::proposals::begin_for_chat(
+    }
+    let mut proposal = crate::proposals::begin_on_branch(
         &app,
         &project_id,
         thread_id.as_deref(),
         history_prompt,
         chat_id.clone(),
+        expected_branch.as_deref(),
     )?;
     crate::proposals::set_planning(&app, &mut proposal, mode == "plan")?;
     crate::proposals::set_source_context(&app, &mut proposal, json!(source_settings))?;
@@ -858,7 +881,7 @@ pub(crate) async fn codex_send_for_chat(
         if !source_settings.sources.is_empty() { crate::source_mcp::remember(&app, &id); }
         { let _guard = app.inner.codex.reviews.lock().map_err(|e|e.to_string())?;
           let mut all = sessions(&app)?;
-          if !all.iter().any(|s|s.id==id) { all.push(Session { project_id:project_id.clone(), id:id.clone(), title }); save_json(&projects::data_dir(&app)?.join("sessions.json"), &all)?; }
+          if !all.iter().any(|s|s.id==id) { all.push(Session { owner_branch:proposal.owner_branch.clone(), project_id:project_id.clone(), id:id.clone(), title }); save_json(&projects::data_dir(&app)?.join("sessions.json"), &all)?; }
         }
         let _ = app.emit_agent(json!({"method":"prism/session","params":{"projectId":project_id,"threadId":id,"chatId":chat_id,"proposalId":proposal.id}}));
         let mut input = vec![json!({"type":"text","text":prompt})];

@@ -9,6 +9,8 @@ export const useCollaborationLock = create<{ projectId: string | null }>(
 
 export interface CollaborationStatus {
   connected: boolean;
+  canSync?: boolean;
+  checkoutBranch?: string;
   name?: string;
   email?: string;
   remote?: string;
@@ -53,7 +55,12 @@ export async function syncProject(
       projectId,
       "status",
     );
-    if (!status.connected) return;
+    if (!status.connected || status.canSync === false) return;
+    if(status.checkoutBranch){
+      const {useAgentChatStore}=await import("@/stores/agent-chat-store");
+      const owner=useAgentChatStore.getState().checkoutBranch;
+      if(owner && owner!==status.checkoutBranch)return;
+    }
     lastCheck.set(projectId, Date.now());
     const { useDocumentStore } = await import("@/stores/document-store");
     const doc = useDocumentStore.getState();
@@ -66,6 +73,9 @@ export async function syncProject(
       needsApply?: boolean;
     };
     let result = await collaboration<SyncResult>(projectId, "sync", {
+      ...(status.checkoutBranch
+        ? { expectedBranch: status.checkoutBranch }
+        : {}),
       prepareOnly: true,
       deferApply:
         doc.projectId === projectId && doc.files.some((f) => f.isDirty),
@@ -79,7 +89,13 @@ export async function syncProject(
         );
       useCollaborationLock.setState({ projectId });
       try {
-        result = await collaboration<SyncResult>(projectId, "sync_apply");
+        result = await collaboration<SyncResult>(
+          projectId,
+          "sync_apply",
+          status.checkoutBranch
+            ? { expectedBranch: status.checkoutBranch }
+            : undefined,
+        );
         if (
           result.changed &&
           useDocumentStore.getState().projectId === projectId

@@ -1,3 +1,4 @@
+import { RemoteWork } from "../remote-work";
 import {
   useCallback,
   useEffect,
@@ -16,7 +17,11 @@ import { LatexEditor } from "./editor/latex-editor";
 import { PdfPreview } from "./preview/pdf-preview";
 import { AgentChatDrawer } from "@/components/agent-chat/agent-chat-drawer";
 import { ProposedChangesPanel } from "@/components/agent-chat/proposed-changes-panel";
-import { getCurrentPdfRootId, resolveTexRoot, useDocumentStore } from "@/stores/document-store";
+import {
+  getCurrentPdfRootId,
+  resolveTexRoot,
+  useDocumentStore,
+} from "@/stores/document-store";
 import { useChatPdfBuilds } from "@/hooks/use-chat-pdf";
 import { usePreviewStore } from "@/stores/preview-store";
 import { useReviewFindingsStore } from "@/stores/review-findings-store";
@@ -38,13 +43,15 @@ export function WorkspaceLayout() {
     useReviewFindingsStore.getState().resetForProject(projectId);
   }, [projectId]);
   const files = useDocumentStore((s) => s.files);
-  const openingError = useDocumentStore(s => s.openingError);
-  const openingPhase = useDocumentStore(s => s.openingPhase);
+  const openingError = useDocumentStore((s) => s.openingError);
+  const openingPhase = useDocumentStore((s) => s.openingPhase);
   const activeFileId = useDocumentStore((s) => s.activeFileId);
   useDocumentStore((s) => s.pdfRevision);
   const activeFile = files.find((file) => file.id === activeFileId);
-  const root = activeFile?.type === "tex" ? resolveTexRoot(activeFile.id, files)
-    : (getCurrentPdfRootId() ?? resolveTexRoot(activeFile?.id ?? "", files));
+  const root =
+    activeFile?.type === "tex"
+      ? resolveTexRoot(activeFile.id, files)
+      : (getCurrentPdfRootId() ?? resolveTexRoot(activeFile?.id ?? "", files));
   useChatPdfBuilds(files.find((file) => file.id === root)?.relativePath);
 
   const previewVisible = usePreviewStore((s) => s.visible);
@@ -189,99 +196,124 @@ export function WorkspaceLayout() {
     return () => resizeObserver.disconnect();
   }, [getCollapsedSidebarSize, sidebarCollapsed]);
 
-
-  if (!openingError && (openingPhase === "registering" || openingPhase === "scanning")) {
-    return <div ref={workspaceRef} data-panel-group className="flex h-full">
-      <aside className="w-[15%] border-r p-3 text-sm">
-        <button onClick={() => useDocumentStore.getState().closeProject()}>Back to projects</button>
-      </aside>
-      <main className="flex flex-1 items-center justify-center text-sm text-muted-foreground">Loading document…</main>
-      <aside className="flex w-[35%] flex-col justify-end border-l p-3">
-        <div role="status" className="text-xs text-muted-foreground">
-          {openingPhase === "registering" ? "Opening project…" : "Discovering project files…"}
-        </div>
-      </aside>
-    </div>;
+  if (
+    !openingError &&
+    (openingPhase === "registering" || openingPhase === "scanning")
+  ) {
+    return (
+      <div ref={workspaceRef} data-panel-group className="flex h-full">
+        <aside className="w-[15%] border-r p-3 text-sm">
+          <button onClick={() => useDocumentStore.getState().closeProject()}>
+            Back to projects
+          </button>
+        </aside>
+        <main className="flex flex-1 items-center justify-center text-muted-foreground text-sm">
+          Loading document…
+        </main>
+        <aside className="flex w-[35%] flex-col justify-end border-l p-3">
+          <div role="status" className="text-muted-foreground text-xs">
+            {openingPhase === "registering"
+              ? "Opening project…"
+              : "Discovering project files…"}
+          </div>
+        </aside>
+      </div>
+    );
   }
 
   return (
     <div ref={workspaceRef} className="flex h-full flex-col">
-      {openingError && <div role="alert" className="flex items-center gap-3 p-3 text-sm">
-        <span>Could not open project: {openingError}</span>
-        <button onClick={() => { const s = useDocumentStore.getState(); if (s.projectRoot) void s.openProject(s.projectRoot).catch(() => {}); }}>Retry</button>
-        <button onClick={() => useDocumentStore.getState().closeProject()}>Back to projects</button>
-      </div>}
-      <PanelGroup direction="horizontal" className="h-full">
-        <Panel
-          id="sidebar"
-          order={0}
-          ref={sidebarPanelRef}
-          defaultSize={SIDEBAR_DEFAULT_SIZE}
-          minSize={SIDEBAR_MIN_SIZE}
-          maxSize={25}
-          collapsible
-          collapsedSize={sidebarCollapsedSize}
-          onCollapse={() => setSidebarCollapsed(true)}
-          onExpand={() => setSidebarCollapsed(false)}
-          onResize={(size) => {
-            if (!sidebarAnimatingRef.current && size >= SIDEBAR_MIN_SIZE) {
-              expandedSidebarSizeRef.current = size;
-            }
-          }}
-          className="min-w-0 overflow-hidden"
-        >
-          <Sidebar
-            collapsed={sidebarCollapsed}
-            onToggleCollapsed={toggleSidebarCollapsed}
-            layoutControls={{
-              codeVisible,
-              pdfVisible: previewVisible,
-              sidebarVisible: !sidebarCollapsed,
-              setCodeVisible: setCodePaneVisible,
-              setPdfVisible: setPdfPaneVisible,
-              setSidebarVisible: (visible) => setSidebarPaneCollapsed(!visible),
+      {openingError && (
+        <div role="alert" className="flex items-center gap-3 p-3 text-sm">
+          <span>Could not open project: {openingError}</span>
+          <button
+            onClick={() => {
+              const s = useDocumentStore.getState();
+              if (s.projectRoot)
+                void s.openProject(s.projectRoot).catch(() => {});
             }}
-          />
-        </Panel>
-
-        <PanelResizeHandle className="w-px bg-border transition-colors hover:bg-ring" />
-
-        <Panel
-          id="editor-chat"
-          order={1}
-          defaultSize={previewVisible ? 42.5 : 85}
-          minSize={25}
-          className="min-w-0"
-        >
-          <div className="flex h-full min-h-0 flex-col overflow-hidden">
-            {codeVisible && (
-              <div className="min-h-0 flex-1 overflow-hidden">
-                <LatexEditor />
-              </div>
-            )}
-            <ProposedChangesPanel />
-            <AgentChatDrawer fillHeight={!codeVisible} />
-          </div>
-        </Panel>
-
-        {previewVisible && (
-          <PanelResizeHandle className="w-px bg-border transition-colors hover:bg-ring" />
-        )}
-
-        {previewVisible && (
+          >
+            Retry
+          </button>
+          <button onClick={() => useDocumentStore.getState().closeProject()}>
+            Back to projects
+          </button>
+        </div>
+      )}
+      <RemoteWork key={projectId} projectId={projectId ?? ""}>
+        <PanelGroup direction="horizontal" className="h-full">
           <Panel
-            id="pdf-preview"
-            order={2}
-            defaultSize={42.5}
+            id="sidebar"
+            order={0}
+            ref={sidebarPanelRef}
+            defaultSize={SIDEBAR_DEFAULT_SIZE}
+            minSize={SIDEBAR_MIN_SIZE}
+            maxSize={25}
+            collapsible
+            collapsedSize={sidebarCollapsedSize}
+            onCollapse={() => setSidebarCollapsed(true)}
+            onExpand={() => setSidebarCollapsed(false)}
+            onResize={(size) => {
+              if (!sidebarAnimatingRef.current && size >= SIDEBAR_MIN_SIZE) {
+                expandedSidebarSizeRef.current = size;
+              }
+            }}
+            className="min-w-0 overflow-hidden"
+          >
+            <Sidebar
+              collapsed={sidebarCollapsed}
+              onToggleCollapsed={toggleSidebarCollapsed}
+              layoutControls={{
+                codeVisible,
+                pdfVisible: previewVisible,
+                sidebarVisible: !sidebarCollapsed,
+                setCodeVisible: setCodePaneVisible,
+                setPdfVisible: setPdfPaneVisible,
+                setSidebarVisible: (visible) =>
+                  setSidebarPaneCollapsed(!visible),
+              }}
+            />
+          </Panel>
+
+          <PanelResizeHandle className="w-px bg-border transition-colors hover:bg-ring" />
+
+          <Panel
+            id="editor-chat"
+            order={1}
+            defaultSize={previewVisible ? 42.5 : 85}
             minSize={25}
             className="min-w-0"
           >
-            <ReviewFindingsTabs>
-              <PdfPreview />
-            </ReviewFindingsTabs>
+            <div className="flex h-full min-h-0 flex-col overflow-hidden">
+              {codeVisible && (
+                <div className="min-h-0 flex-1 overflow-hidden">
+                  <LatexEditor />
+                </div>
+              )}
+              <ProposedChangesPanel />
+              <AgentChatDrawer fillHeight={!codeVisible} />
+            </div>
           </Panel>
-        )}
-      </PanelGroup>
+
+          {previewVisible && (
+            <PanelResizeHandle className="w-px bg-border transition-colors hover:bg-ring" />
+          )}
+
+          {previewVisible && (
+            <Panel
+              id="pdf-preview"
+              order={2}
+              defaultSize={42.5}
+              minSize={25}
+              className="min-w-0"
+            >
+              <ReviewFindingsTabs>
+                <PdfPreview />
+              </ReviewFindingsTabs>
+            </Panel>
+          )}
+        </PanelGroup>
+      </RemoteWork>
     </div>
   );
 }

@@ -16,15 +16,13 @@ pub(crate) fn discover(app: &Backend, project_id: &str) -> Result<Value, String>
 }
 
 fn discover_paths(root: &Path, mut paths: Vec<String>) -> Result<Value, String> {
-    if let Ok(build) = projects::resolve(root, ".prism/build") {
+    let scope = crate::latex::build_relative(root);
+    if let Ok(build) = projects::resolve(root, &scope) {
         if build.is_dir() {
             for entry in fs::read_dir(build).map_err(|e| e.to_string())? {
                 let entry = entry.map_err(|e| e.to_string())?;
                 if entry.file_type().map_err(|e| e.to_string())?.is_file() {
-                    paths.push(format!(
-                        ".prism/build/{}",
-                        entry.file_name().to_string_lossy()
-                    ));
+                    paths.push(format!("{scope}/{}", entry.file_name().to_string_lossy()));
                 }
             }
         }
@@ -68,7 +66,7 @@ fn discover_paths(root: &Path, mut paths: Vec<String>) -> Result<Value, String> 
             continue;
         }
         let modified = meta.modified().unwrap_or(UNIX_EPOCH);
-        let rank = if path.starts_with(".prism/build/") {
+        let rank = if path.starts_with(&format!("{scope}/")) {
             0
         } else if Path::new(&path)
             .file_stem()
