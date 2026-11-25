@@ -135,6 +135,35 @@ methods.drawPage = (
   }
 };
 
+methods.searchPage = (docId: number, pageIndex: number, query: string) => {
+  const page = documentMap.get(docId)!.loadPage(pageIndex);
+  try {
+    const [left, top] = page.getBounds();
+    // MuPDF limits the number of returned quads, including multiline matches.
+    let capacity = 128;
+    for (;;) {
+      const hits = page.search(query, capacity);
+      if (hits.reduce((count, hit) => count + hit.length, 0) < capacity) {
+        return hits.map((hit) =>
+          hit.map(([x0, y0, x1, y1, x2, y2, x3, y3]) => {
+            const x = Math.min(x0, x1, x2, x3);
+            const y = Math.min(y0, y1, y2, y3);
+            return {
+              x: x - left,
+              y: y - top,
+              w: Math.max(x0, x1, x2, x3) - x,
+              h: Math.max(y0, y1, y2, y3) - y,
+            };
+          }),
+        );
+      }
+      capacity *= 2;
+    }
+  } finally {
+    page.destroy();
+  }
+};
+
 methods.getPageText = (docId: number, pageIndex: number): unknown => {
   const doc = documentMap.get(docId)!;
   const page = doc.loadPage(pageIndex);

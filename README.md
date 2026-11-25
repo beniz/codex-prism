@@ -114,6 +114,7 @@ For the third example, add the paper in project settings first, then type `@` an
 | Reuse your own starter | Put it in `~/.codexprism/templates/`, then open **My Templates → Refresh**. [Template guide](README_AGENTS.md#private-templates) |
 | Complete LaTeX commands and citations | Type `\footn` or `\textci` and accept with Enter or Tab. Inside `\textcite{}`, type part of a key, author, title, or year. Ctrl+Space opens suggestions and Escape closes them. |
 | Navigate the document | Click an outline heading, double-click a LaTeX line, or select PDF text and choose **Navigate to source**. |
+| Search the PDF | Click the PDF and press Ctrl+S or Ctrl+F (Cmd on macOS). Use Enter or Shift+Enter to move through matches and Escape to close. |
 | Hide the LaTeX panel | Toggle **Code** beside **Layout**. |
 | Plan before editing | Press Shift+Tab in an idle chat composer. |
 | Reuse a prompt | Press Up in an empty composer; Down returns through history. |

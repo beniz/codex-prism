@@ -39,6 +39,7 @@ class Fake {
     blocks: [],
     value: this.values.get(id),
   }));
+  searchPage = vi.fn(async () => []);
   getPageLinks = vi.fn(async () => []);
   countPages = vi.fn(async () => 2);
   getAllPageSizes = vi.fn(async () => [{ width: 100, height: 100 }]);

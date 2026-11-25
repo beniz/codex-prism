@@ -1,6 +1,7 @@
 import { createMupdfPool } from "./mupdf-pool";
 import type { SourceBox, Region } from "../visual-review";
 import type {
+  Rect,
   StructuredTextData,
   LinkData,
   PageSize,
@@ -30,6 +31,7 @@ export interface MupdfClient {
     dpi: number,
     options?: RequestOptions,
   ): Promise<ImageData>;
+  searchPage(docId: number, pageIndex: number, query: string, options?: RequestOptions): Promise<Rect[][]>;
   getPageText(
     docId: number,
     pageIndex: number,
@@ -193,6 +195,7 @@ export function createMupdfClient(onFatal?: (error: Error) => void): MupdfClient
       call("getAllPageSizes", [docId], options),
     drawPage: (docId, pageIndex, dpi, options) =>
       call("drawPage", [docId, pageIndex, dpi], options),
+    searchPage: (id, page, query, options) => call("searchPage", [id, page, query], options),
     getPageText: (docId, pageIndex, options) =>
       call("getPageText", [docId, pageIndex], options),
     getPageLinks: (docId, pageIndex, options) =>

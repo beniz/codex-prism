@@ -363,6 +363,7 @@ export function createMupdfPool(
     getAllPageSizes: (id, options) => read(id, "getAllPageSizes", [], options),
     drawPage: (id, page, dpi, options) =>
       read(id, "drawPage", [page, dpi], options),
+    searchPage: (id, page, query, options) => read(id, "searchPage", [page, query], options),
     getPageText: (id, page, options) =>
       read(id, "getPageText", [page], options),
     getPageLinks: (id, page, options) =>
