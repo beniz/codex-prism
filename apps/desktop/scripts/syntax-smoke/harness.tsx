@@ -1,3 +1,4 @@
+import { checkCompletion } from "./completion";
 import { useEffect, useRef } from "react";
 import { createRoot } from "react-dom/client";
 import { Compartment, EditorState } from "@codemirror/state";
@@ -142,6 +143,7 @@ createRoot(document.getElementById("root")!).render(
   </main>,
 );
 (window as any).runSmoke = async () => {
+  await checkCompletion();
   for (
     let i = 0;
     i < 100 && document.querySelectorAll(".hljs-built_in").length < 2;
@@ -226,6 +228,6 @@ createRoot(document.getElementById("root")!).render(
   return {
     ok: true,
     steps:
-      "light/dark editor and chat → matching colours → activity icons/statuses → expanded shell commands",
+      "command and bibliography completion → light/dark editor and chat → matching colours → activity icons/statuses → expanded shell commands",
   };
 };

@@ -22,7 +22,7 @@ export function stripTexComments(content: string): string {
     .join("\n");
 }
 
-function normalizePath(path: string): string {
+export function normalizePath(path: string): string {
   const parts: string[] = [];
   for (const part of path.replace(/\\/g, "/").split("/")) {
     if (part === "..") {
