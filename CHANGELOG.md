@@ -5,6 +5,8 @@ and detailed release notes are in [docs/releases](docs/releases/README.md).
 
 ## Unreleased
 
+- Conflict repair keeps full file contents in the repair workspace. Existing chats show a short summary for older repair prompts that embedded file contents.
+
 - Search the focused PDF with Ctrl+S or Ctrl+F (Cmd on macOS). Enter and Shift+Enter move between highlighted matches.
 
 - Select the active branch below the project title to switch branches or preview remote work. Work on Git branches in the normal editor, park branch-specific chats and proposals, publish a local branch, and merge document changes into the active branch.

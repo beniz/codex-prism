@@ -1408,14 +1408,23 @@ pub(crate) fn service(
                 fs::create_dir_all(&dest).map_err(|e| e.to_string())?;
                 write_files(&dest, &Files::new(), files)?;
             }
+            let changed: Vec<_> = r.after.keys()
+                .filter(|name| r.before.get(*name) != r.after.get(*name))
+                .collect();
+            let deleted: Vec<_> = r.before.keys()
+                .filter(|name| !r.after.contains_key(*name))
+                .collect();
+            projects::save_json(&intended.join("changes.json"), &json!({
+                "conflicts": conflicts, "changedFiles": changed, "deletedFiles": deleted,
+            }))?;
             save(app, &candidate)?;
             // Retain the original snapshots, with a separate candidate merge base.
             p.state = "original".into();
             save(app, &p)?;
-            let diagnostic = json!({"conflicts":conflicts,"intendedChanges":r.after.iter().filter(|(n,b)|r.before.get(*n)!=Some(*b)).map(|(n,b)|(n,String::from_utf8_lossy(b))).collect::<BTreeMap<_,_>>(),"deletedFiles":r.before.keys().filter(|n|!r.after.contains_key(*n)).collect::<Vec<_>>()});
-            Ok(
-                json!({"proposalId":candidate.id,"prompt":format!("Repair the proposal against the refreshed main document in this workspace. Cleanly merged changes are already present. Exact original base and intended result files, including binary assets, are available at .codexprism/repair-intent/before and .codexprism/repair-intent/after. Preserve other accepted work. Resolve these conflicts and intended changes, then leave the result for review; do not apply it. Diagnostics: {diagnostic}")}),
-            )
+            Ok(json!({
+                "proposalId": candidate.id,
+                "prompt": "Repair the proposal against the refreshed main document. Cleanly merged changes are already present. Read .codexprism/repair-intent/changes.json for conflicting, changed and deleted paths. Compare the exact files under .codexprism/repair-intent/before and .codexprism/repair-intent/after as needed. Preserve other accepted work and leave the result for review."
+            }))
         }
         _ => Err("Unknown proposal operation".into()),
     }
@@ -2001,6 +2010,36 @@ mod tests {
         assert_ne!(next.id, a.id);
         assert_eq!(snapshot(&app, &next).unwrap().before["other.tex"], b"other");
     }
+    #[test]
+    fn repair_passes_paths_and_keeps_exact_file_contents_in_the_workspace() {
+        let (_d, app, main) = fixture();
+        let accepted = edit(&app, &main.id, "a", "main.tex", b"accepted");
+        let mut p = begin(&app, &main.id, Some("b"), None).unwrap();
+        bind(&app, &mut p, "b".into()).unwrap();
+        let workspace = root(&app, &p).unwrap();
+        let image = b"\xff\xd8\x00binary payload\xff\xd9";
+        fs::write(workspace.join("figure.jpg"), image).unwrap();
+        fs::remove_file(workspace.join("asset.png")).unwrap();
+        fs::write(workspace.join("main.tex"), b"private source body").unwrap();
+        finish(&app, &p.id, false).unwrap();
+        let p = load(&app, &p.id).unwrap();
+        op(&app, &accepted, "apply");
+        assert_eq!(op(&app, &p, "apply")["conflicts"], json!(["main.tex"]));
+        let repair = op(&app, &p, "repair");
+        let prompt = repair["prompt"].as_str().unwrap();
+        assert!(prompt.contains(".codexprism/repair-intent/changes.json"));
+        assert!(!prompt.contains("binary payload"));
+        assert!(!prompt.contains("private source body"));
+        let candidate = load(&app, repair["proposalId"].as_str().unwrap()).unwrap();
+        let intent = root(&app, &candidate).unwrap().join(".codexprism/repair-intent");
+        let manifest: Value = serde_json::from_slice(&fs::read(intent.join("changes.json")).unwrap()).unwrap();
+        assert_eq!(manifest, json!({
+            "conflicts": ["main.tex"], "changedFiles": ["figure.jpg", "main.tex"], "deletedFiles": ["asset.png"]
+        }));
+        assert_eq!(fs::read(intent.join("after/figure.jpg")).unwrap(), image);
+        assert_eq!(fs::read(intent.join("before/asset.png")).unwrap(), [0, 1, 2]);
+    }
+
     #[test]
     fn repair_keeps_original_and_preserves_a_later_acceptance() {
         let (_d, app, main) = fixture();
