@@ -5,6 +5,8 @@ and detailed release notes are in [docs/releases](docs/releases/README.md).
 
 ## Unreleased
 
+## 1.8.2
+
 - The PDF panel divider has a wider grab area and a visible grip for resizing the preview.
 
 - Conflict repair keeps full file contents in the repair workspace. Existing chats show a short summary for older repair prompts that embedded file contents.
