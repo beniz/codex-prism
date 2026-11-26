@@ -839,7 +839,22 @@ function Request({ event: e }: { event: AgentEvent }) {
   const respond = useAgentChatStore((s) => s.respond);
   const p = e.params;
   const permissions = e.method === "item/permissions/requestApproval";
-  const approval = e.method.endsWith("/requestApproval");
+  const schema = p.requestedSchema;
+  const toolApproval = e.method === "mcpServer/elicitation/request" &&
+    p.mode === "form" && p._meta?.codex_approval_kind === "mcp_tool_call" &&
+    schema?.type === "object" && schema.properties != null &&
+    Object.keys(schema.properties).length === 0 && !schema.required?.length;
+  const approval = toolApproval || e.method.endsWith("/requestApproval");
+  const persist = p._meta?.persist;
+  const allowAlways = toolApproval &&
+    (persist === "always" || (Array.isArray(persist) && persist.includes("always")));
+  function answer(allow: boolean) {
+    if (toolApproval)
+      return respond(e, { action: allow ? "accept" : "decline", content: null });
+    if (permissions)
+      return respond(e, { permissions: allow ? p.permissions : {}, scope: "turn" });
+    return respond(e, { decision: allow ? "accept" : "decline" });
+  }
   return (
     <div className="space-y-2 rounded border p-3">
       <ActivityLabel kind="approval" label={approval ? "Permission requested" : "Interaction requested"} />
@@ -851,42 +866,40 @@ function Request({ event: e }: { event: AgentEvent }) {
           p.grantRoot ? `Requested access: ${p.grantRoot}` : null,
           p.permissions ? JSON.stringify(p.permissions, null, 2) : null,
           p.message,
+          toolApproval ? JSON.stringify(p._meta.tool_params, null, 2) : null,
         ]
           .filter(Boolean)
           .join("\n") || "Codex needs your permission to continue."}
       </pre>
-      <p className="text-xs">
+      {!toolApproval && <p className="text-xs">
         Project edits belong in this chat’s proposal workspace. Approved
         unrestricted commands can access files outside it.
-      </p>
+      </p>}
       {approval ? (
         <>
           <Button
             variant="outline"
             size="sm"
-            onClick={() =>
-              void respond(
-                e,
-                permissions
-                  ? { permissions: p.permissions, scope: "turn" }
-                  : { decision: "accept" },
-              )
-            }
+            onClick={() => void answer(true)}
           >
             Allow once
           </Button>
+          {allowAlways && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="ml-3"
+              title="Remember this approval for future calls to this tool"
+              onClick={() => void respond(e, { action: "accept", content: null, _meta: { persist: "always" } })}
+            >
+              Allow always
+            </Button>
+          )}
           <Button
             variant="outline"
             size="sm"
             className="ml-3"
-            onClick={() =>
-              void respond(
-                e,
-                permissions
-                  ? { permissions: {}, scope: "turn" }
-                  : { decision: "decline" },
-              )
-            }
+            onClick={() => void answer(false)}
           >
             Deny
           </Button>

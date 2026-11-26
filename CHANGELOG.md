@@ -7,6 +7,8 @@ and detailed release notes are in [docs/releases](docs/releases/README.md).
 
 - Drag the Changes ready panel’s horizontal grip to give expanded diffs more room. Double-click it to restore automatic sizing.
 
+- Approve or deny an MCP tool call from its chat, including remote research on SSH data sources. Choose **Allow always** when Codex offers to remember the approval for future calls.
+
 - Use Paper view in the PDF toolbar to read across the full workspace. Press Escape or click the button again to return to the split view.
 
 - Closing and reopening a project preserves the selected chat without adding an empty tab.

@@ -159,6 +159,58 @@ it("accents approvals without changing the approval action or request ownership"
   }
 });
 
+it("answers one MCP tool approval and keeps forms requiring input unsupported", async () => {
+  const original = useAgentChatStore.getState();
+  const setup = useAgentSetupStore.getState();
+  const respond = vi.fn(async () => {});
+  const request = {
+    id: 73, method: "mcpServer/elicitation/request",
+    params: {
+      threadId: "research-thread", serverName: "prism_sources", mode: "form",
+      message: 'Allow the prism_sources MCP server to run tool "remote_research"?',
+      requestedSchema: { type: "object", properties: {} },
+      _meta: { codex_approval_kind: "mcp_tool_call", tool_params: { sourceId: "example-source" } },
+    },
+  };
+  useAgentSetupStore.setState({ checkStatus: vi.fn(async () => {}) });
+  useAgentChatStore.setState({
+    respond, activeTabId: original.tabs[0].id, requests: [request],
+    tabs: [{ ...original.tabs[0], sessionId: request.params.threadId }],
+  });
+  const host = document.createElement("div");
+  const root = createRoot(host);
+  const button = (label: string) => Array.from(host.querySelectorAll("button")).find(b => b.textContent === label);
+  try {
+    await act(async () => root.render(<AgentChatDrawer />));
+    expect(host.textContent).toContain("example-source");
+    expect(button("Allow always")).toBeUndefined();
+    expect(respond).not.toHaveBeenCalled();
+    await act(async () => button("Allow once")!.click());
+    expect(respond).toHaveBeenLastCalledWith(request, { action: "accept", content: null });
+    await act(async () => button("Deny")!.click());
+    expect(respond).toHaveBeenLastCalledWith(request, { action: "decline", content: null });
+    for (const persist of ["session", "always", ["session", "always"]]) {
+      const offered = { ...request, params: { ...request.params, _meta: { ...request.params._meta, persist } } };
+      await act(async () => useAgentChatStore.setState({ requests: [offered] }));
+      if (persist === "session") {
+        expect(button("Allow always")).toBeUndefined();
+      } else {
+        await act(async () => button("Allow always")!.click());
+        expect(respond).toHaveBeenLastCalledWith(offered, { action: "accept", content: null, _meta: { persist: "always" } });
+      }
+    }
+    await act(async () => useAgentChatStore.setState({ requests: [{
+      ...request, params: { ...request.params, requestedSchema: { type: "object", properties: { query: { type: "string" } } } },
+    }] }));
+    expect(button("Allow once")).toBeUndefined();
+    expect(button("Cancel unsupported interaction")).toBeDefined();
+  } finally {
+    await act(async () => root.unmount());
+    useAgentChatStore.setState(original);
+    useAgentSetupStore.setState(setup);
+  }
+});
+
 it("shows questions in the composer, retains choices across chats, and submits only explicit answers", async () => {
   const original = useAgentChatStore.getState();
   const setup = useAgentSetupStore.getState();
