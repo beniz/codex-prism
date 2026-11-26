@@ -91,10 +91,11 @@ vi.mock("@/stores/history-store", () => ({
 }));
 
 // Mock agent-chat-store
+const resetChatProject = vi.hoisted(() => vi.fn());
 vi.mock("@/stores/agent-chat-store", () => ({
   useAgentChatStore: {
     getState: vi.fn(() => ({
-      newSession: vi.fn(),
+      resetForProject: resetChatProject,
       locked: false,
     })),
   },
@@ -188,6 +189,7 @@ describe("useDocumentStore", () => {
       const task = useDocumentStore.getState().openProject("/late");
       await vi.waitFor(() => expect(finish).toBeDefined());
       useDocumentStore.getState().closeProject();
+      expect(resetChatProject).toHaveBeenCalledWith(null);
       finish("Late source");
       await task;
       expect(useDocumentStore.getState().projectRoot).toBeNull();

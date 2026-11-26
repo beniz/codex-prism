@@ -5,6 +5,8 @@ and detailed release notes are in [docs/releases](docs/releases/README.md).
 
 ## Unreleased
 
+- Closing and reopening a project preserves the selected chat without adding an empty tab.
+
 - Capture & Ask uses a compact crosshair button in the PDF toolbar. Hover over it to see its name and keyboard shortcut.
 
 ## 1.8.2

@@ -468,8 +468,7 @@ export const useDocumentStore = create<DocumentState>()((set, get) => ({
       lastCompiledGenerations: new Map(),
       initialized: false,
     });
-    // Reset chat session so stale messages don't leak into the next project
-    useAgentChatStore.getState().newSession();
+    useAgentChatStore.getState().resetForProject(null);
   },
 
   setActiveFile: (id) => {
