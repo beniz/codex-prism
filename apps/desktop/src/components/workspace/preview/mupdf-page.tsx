@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState, memo } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, memo } from "react";
 import { getMupdfClient } from "@/lib/mupdf/mupdf-client";
 import { createLogger } from "@/lib/debug/logger";
 import { APP_VISIBILITY_RESTORED } from "@/lib/debug/log-store";
@@ -45,6 +45,33 @@ export const MupdfPage = memo(function MupdfPage({
     textLayer?.docId === docId && textLayer.pageIndex === pageIndex
       ? textLayer.data
       : null;
+  // Native HTML ranges can span lines in WebKit. Fit each invisible line to
+  // its PDF bounds once, then scale the entire selection layer with the page.
+  const selectableLines = useMemo(() => {
+    if (!textData) return null;
+    const metrics = document.createElement("canvas").getContext("2d");
+    return textData.blocks.flatMap((block, bi) =>
+      block.type !== "text" ? [] : block.lines.map((line, li) => {
+        const { bbox, font } = line;
+        const family = font.family || "serif";
+        if (metrics) metrics.font = `${font.style} ${font.weight} ${font.size}px ${family}`;
+        const width = metrics?.measureText(line.text).width;
+        return (
+          <span
+            key={`${bi}-${li}`}
+            style={{
+              left: bbox.x, top: bbox.y, lineHeight: `${bbox.h}px`,
+              fontFamily: family, fontSize: font.size, fontWeight: font.weight,
+              fontStyle: font.style,
+              transform: width && bbox.w ? `scaleX(${bbox.w / width})` : undefined,
+            }}
+          >
+            {line.text}<br />
+          </span>
+        );
+      }),
+    );
+  }, [textData]);
   const links =
     linkLayer?.docId === docId && linkLayer.pageIndex === pageIndex
       ? linkLayer.data
@@ -248,7 +275,7 @@ export const MupdfPage = memo(function MupdfPage({
 
   return (
     <div
-      className="mupdf-page relative mb-4 shadow-lg"
+      className="mupdf-page relative mb-4 overflow-clip shadow-lg"
       data-page-number={pageIndex + 1}
       style={{ width: cssW, height: cssH }}
     >
@@ -268,30 +295,12 @@ export const MupdfPage = memo(function MupdfPage({
       )}
       {/* Text layer for selection */}
       {textData && (
-        <svg
+        <div
           className="mupdf-text-layer"
-          viewBox={`0 0 ${pageWidth} ${pageHeight}`}
-          preserveAspectRatio="none"
-          style={{ width: cssW, height: cssH }}
+          style={{ width: pageWidth, height: pageHeight, transform: `scale(${scale})` }}
         >
-          {textData.blocks.map(
-            (block, bi) =>
-              block.type === "text" &&
-              block.lines.map((line, li) => (
-                <text
-                  key={`${bi}-${li}`}
-                  x={line.bbox.x}
-                  y={line.y}
-                  fontSize={line.font.size}
-                  fontFamily={line.font.family || line.font.name || "serif"}
-                  textLength={line.bbox.w > 0 ? line.bbox.w : undefined}
-                  lengthAdjust="spacingAndGlyphs"
-                >
-                  {line.text}
-                </text>
-              )),
-          )}
-        </svg>
+          {selectableLines}
+        </div>
       )}
 
       {/* Link layer */}

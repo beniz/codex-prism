@@ -172,17 +172,22 @@
   position: absolute;
   inset: 0;
   z-index: 1;
-  pointer-events: auto;
+  transform-origin: top left;
+  color: transparent;
+  user-select: text;
+  -webkit-user-select: text;
 }
 
-.mupdf-text-layer text {
-  fill: transparent;
+.mupdf-text-layer > span {
+  position: absolute;
+  transform-origin: left center;
   white-space: pre;
   cursor: text;
 }
 
-.mupdf-text-layer text::selection {
-  fill: hsla(220, 100%, 50%, 0.3);
+.mupdf-text-layer ::selection {
+  color: transparent;
+  background: hsla(220, 100%, 50%, 0.3);
 }
 
 /* MuPDF link overlay layer */

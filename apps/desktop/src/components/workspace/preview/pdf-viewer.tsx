@@ -1335,7 +1335,7 @@ export const PdfViewer = memo(function PdfViewer({
           );
         }
       }}
-      onMouseDownCapture={() => containerRef.current?.focus()}
+      onMouseDownCapture={() => containerRef.current?.focus({ preventScroll: true })}
       onMouseDown={handleCaptureMouseDown}
       onMouseMove={handleCaptureMouseMove}
       onMouseUp={handleCaptureMouseUp}

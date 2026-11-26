@@ -5,6 +5,8 @@ and detailed release notes are in [docs/releases](docs/releases/README.md).
 
 ## Unreleased
 
+- Drag across lines in the PDF preview to select and copy a sentence.
+
 - Drag the Changes ready panel’s horizontal grip to give expanded diffs more room. Double-click it to restore automatic sizing.
 
 - Approve or deny an MCP tool call from its chat, including remote research on SSH data sources. Choose **Allow always** when Codex offers to remember the approval for future calls.
