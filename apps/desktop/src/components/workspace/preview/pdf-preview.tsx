@@ -6,7 +6,7 @@ import { usePdfNavigationStore } from "@/stores/pdf-navigation-store";
 import { toast } from "sonner";
 import { useVisualReview } from "@/hooks/use-visual-review";
 import { VisualReviewPanel } from "./visual-review-panel";
-import { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from "react";
 import { getPdfArrayBuffer } from "@/lib/mupdf/pdf-data";
 import {
   FileTextIcon,
@@ -19,6 +19,8 @@ import {
   HistoryIcon,
   MousePointerClickIcon,
   CrosshairIcon,
+  MaximizeIcon,
+  MinimizeIcon,
   ChevronUpIcon,
   ChevronDownIcon,
 } from "lucide-react";
@@ -139,6 +141,21 @@ export function PdfPreview() {
   const [scale, setScale] = useState<number>(1.0);
   const [captureMode, setCaptureMode] = useState(false);
   const [fitMode, setFitMode] = useState<FitMode>("fit-width");
+  const [paperView, setPaperView] = useState(false);
+  const paperViewPage = useRef<number | null>(null);
+  const togglePaperView = useCallback(() => {
+    paperViewPage.current = fitMode === "fit-width" ? currentPage : null;
+    setPaperView((active) => !active);
+  }, [fitMode, currentPage]);
+
+  useEffect(() => {
+    if (!paperView || captureMode || isEditingPage) return;
+    const exitOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && !event.defaultPrevented) togglePaperView();
+    };
+    window.addEventListener("keydown", exitOnEscape);
+    return () => window.removeEventListener("keydown", exitOnEscape);
+  }, [paperView, captureMode, isEditingPage, togglePaperView]);
   const [containerSize, setContainerSize] = useState<{
     width: number;
     height: number;
@@ -637,12 +654,21 @@ export function PdfPreview() {
     const PADDING = 32; // p-4 on each side
     if (fitMode === "fit-width") {
       const newScale = (containerSize.width - PADDING) / firstPageSize.width;
-      setScale(Math.max(0.25, Math.min(4, newScale)));
+      const nextScale = Math.max(0.25, Math.min(4, newScale));
+      if (nextScale === scale) paperViewPage.current = null;
+      setScale(nextScale);
     } else if (fitMode === "fit-height") {
       const newScale = (containerSize.height - PADDING) / firstPageSize.height;
       setScale(Math.max(0.25, Math.min(4, newScale)));
     }
-  }, [fitMode, containerSize, firstPageSize]);
+  }, [fitMode, containerSize, firstPageSize, scale]);
+
+  useLayoutEffect(() => {
+    if (paperViewPage.current !== null) {
+      scrollToPageRef.current?.(paperViewPage.current);
+      paperViewPage.current = null;
+    }
+  }, [scale]);
 
   const zoomIn = () => {
     setFitMode(null);
@@ -1068,6 +1094,7 @@ export function PdfPreview() {
   return (
     <div
       ref={previewContainerRef}
+      data-paper-view={paperView || undefined}
       className="@container/pv relative flex h-full flex-col bg-muted/50"
     >
       <div className="flex h-[calc(var(--workspace-topbar-height)+var(--titlebar-height))] shrink-0 flex-nowrap items-center border-border border-b bg-background px-2">
@@ -1360,6 +1387,17 @@ export function PdfPreview() {
               />
             </>
           )}
+          <Button
+            variant="ghost"
+            size="icon"
+            className="size-7"
+            aria-label="Paper view"
+            aria-pressed={paperView}
+            title={paperView ? "Exit paper view (Esc)" : "Expand PDF to fill the workspace"}
+            onClick={togglePaperView}
+          >
+            {paperView ? <MinimizeIcon className="size-3.5" /> : <MaximizeIcon className="size-3.5" />}
+          </Button>
           <Popover>
             <PopoverTrigger asChild>
               <Button

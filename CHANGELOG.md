@@ -5,6 +5,8 @@ and detailed release notes are in [docs/releases](docs/releases/README.md).
 
 ## Unreleased
 
+- Use Paper view in the PDF toolbar to read across the full workspace. Press Escape or click the button again to return to the split view.
+
 - Closing and reopening a project preserves the selected chat without adding an empty tab.
 
 - Capture & Ask uses a compact crosshair button in the PDF toolbar. Hover over it to see its name and keyboard shortcut.

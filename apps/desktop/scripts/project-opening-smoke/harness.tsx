@@ -51,5 +51,16 @@ createRoot(document.body).render(<Harness />);
   const readyMs = Math.round(performance.now() - start);
   for (let i = 0; i < 200 && !document.querySelector("canvas"); i++) await pause(25);
   if (!document.querySelector("canvas") || compiles) throw new Error("Existing PDF not shown");
+  const panel = document.querySelector<HTMLElement>('[data-panel-id="pdf-preview"]')!;
+  const toggle = panel.querySelector<HTMLButtonElement>('button[aria-label="Paper view"]')!;
+  const splitWidth = panel.clientWidth;
+  toggle.click();
+  await pause(100);
+  if (panel.clientWidth !== panel.parentElement!.clientWidth || panel.clientWidth <= splitWidth)
+    throw new Error("Paper view did not fill the workspace");
+  window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+  await pause(100);
+  if (panel.clientWidth !== splitWidth || toggle.getAttribute("aria-pressed") !== "false" || compiles)
+    throw new Error("Leaving paper view did not restore the split");
   return { ok: true, shellMs, readyMs, reads, maximum, compiles, visibility: document.visibilityState };
 };

@@ -241,7 +241,7 @@ export function WorkspaceLayout() {
         </div>
       )}
       <RemoteWork key={projectId} projectId={projectId ?? ""}>
-        <PanelGroup direction="horizontal" className="h-full">
+        <PanelGroup direction="horizontal" className="workspace-panels h-full">
           <Panel
             id="sidebar"
             order={0}

@@ -161,6 +161,12 @@
   scrollbar-color: var(--sidebar-border) transparent;
 }
 
+/* Keep the panels mounted so leaving paper view restores the split and drafts. */
+.workspace-panels:has([data-paper-view]) > :not([data-panel-id="pdf-preview"]),
+.workspace-panels:has([data-paper-view]) [aria-label="Document and review findings"] {
+  display: none;
+}
+
 /* MuPDF text selection layer */
 .mupdf-text-layer {
   position: absolute;
