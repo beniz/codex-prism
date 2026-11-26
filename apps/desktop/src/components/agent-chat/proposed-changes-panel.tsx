@@ -8,13 +8,49 @@ import type { ReviewDiffLine } from "@/lib/review-diff";
 import { loadReviewDiff } from "@/lib/review-diff-client";
 import { cn } from "@/lib/utils";
 
-export function ProposedChangesPanel() {
+export function ProposedChangesPanel({ resizeFromTop = false }: { resizeFromTop?: boolean }) {
   const proposal = useAgentChatStore(activeProposal);
+  const legacy = useAgentChatStore(s => !s.review.active && s.review.changes.length > 0);
+  const panel = useRef<HTMLDivElement>(null);
+  const drag = useRef<{ y: number; height: number } | null>(null);
+  const [height, setHeight] = useState<number | null>(null);
+  const limit = resizeFromTop ? 40 : 70;
+  function resize(next: number) {
+    const available = panel.current?.parentElement?.clientHeight;
+    if (available) setHeight(Math.min(available * limit / 100, Math.max(72, next)));
+  }
   return (
     <>
-      {" "}
       <PendingChatWork />
-      {proposal ? <ProposalReview /> : <LegacyChangesPanel />}
+      {(proposal || legacy) && (
+        <div ref={panel} className="flex min-h-0 shrink-0 flex-col border-t"
+          style={{ height: height ?? undefined, maxHeight: height === null ? `min(18rem, ${limit}%)` : `${limit}%` }}>
+          <div className={cn("min-h-0 overflow-auto", height !== null && "flex-1 [container-type:size] [--diff-height:max(4rem,calc(100cqh_-_4rem))]")}>
+            {proposal ? <ProposalReview /> : <LegacyChangesPanel />}
+          </div>
+          <button type="button" aria-label="Resize changes panel"
+            title="Drag or use the up and down arrows to resize. Double-click to reset."
+            className={cn("group flex h-3 w-full shrink-0 touch-none cursor-ns-resize items-center justify-center focus-visible:outline-ring", resizeFromTop && "order-first")}
+            onPointerDown={e => {
+              if (e.button !== 0 || !panel.current) return;
+              e.currentTarget.setPointerCapture(e.pointerId);
+              drag.current = { y: e.clientY, height: panel.current.offsetHeight };
+            }}
+            onPointerMove={e => {
+              if (drag.current && e.currentTarget.hasPointerCapture(e.pointerId))
+                resize(drag.current.height + (resizeFromTop ? -1 : 1) * (e.clientY - drag.current.y));
+            }}
+            onLostPointerCapture={() => { drag.current = null; }}
+            onDoubleClick={() => setHeight(null)}
+            onKeyDown={e => {
+              if (!panel.current || (e.key !== "ArrowUp" && e.key !== "ArrowDown")) return;
+              e.preventDefault();
+              resize(panel.current.offsetHeight + ((e.key === "ArrowUp") === resizeFromTop ? 24 : -24));
+            }}>
+            <span className="h-1 w-8 rounded-full bg-border group-hover:bg-muted-foreground/60" />
+          </button>
+        </div>
+      )}
     </>
   );
 }
@@ -49,7 +85,7 @@ function ProposalReview() {
   return (
     <section
       aria-label="Review chat proposal"
-      className="max-h-72 overflow-auto border-t p-3 text-xs"
+      className="p-3 text-xs"
     >
       <div className="flex flex-wrap items-center gap-3">
         <strong>
@@ -214,7 +250,6 @@ function LegacyChangesPanel() {
   return (
     <section
       aria-label="Review Codex changes"
-      className="max-h-72 shrink-0 overflow-auto border-t"
     >
       {error?.includes("changed on disk") && (
         <div className="px-3 py-2 text-xs" role="alert">
@@ -300,6 +335,14 @@ export function FileReview({
   const [error, setError] = useState<string | null>(null);
   const [scrollTop, setScrollTop] = useState(0);
   const viewport = useRef<HTMLDivElement>(null);
+  const [viewportHeight, setViewportHeight] = useState(240);
+  useEffect(() => {
+    const element = viewport.current;
+    if (!element || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(([entry]) => setViewportHeight(entry.contentRect.height));
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [expanded, change.binary]);
   useEffect(() => {
     if (!expanded || change.binary) {
       setResult(null);
@@ -324,7 +367,7 @@ export function FileReview({
     0,
     Math.min(Math.floor(scrollTop / 20) - 5, (rows?.length ?? 1) - 1),
   );
-  const visibleRows = rows?.slice(start, start + 24) ?? [];
+  const visibleRows = rows?.slice(start, start + Math.ceil(viewportHeight / 20) + 12) ?? [];
   return (
     <div className="border-b last:border-b-0">
       <button
@@ -353,7 +396,7 @@ export function FileReview({
           <div
             ref={viewport}
             className="overflow-auto font-mono text-xs leading-5"
-            style={{ maxHeight: 240 }}
+            style={{ maxHeight: "var(--diff-height, 240px)" }}
             onScroll={(event) => setScrollTop(event.currentTarget.scrollTop)}
             role="region"
             aria-label={`Changes to ${change.path}`}

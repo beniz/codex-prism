@@ -5,6 +5,8 @@ and detailed release notes are in [docs/releases](docs/releases/README.md).
 
 ## Unreleased
 
+- Drag the Changes ready panel’s horizontal grip to give expanded diffs more room. Double-click it to restore automatic sizing.
+
 - Use Paper view in the PDF toolbar to read across the full workspace. Press Escape or click the button again to return to the split view.
 
 - Closing and reopening a project preserves the selected chat without adding an empty tab.

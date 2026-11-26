@@ -290,7 +290,7 @@ export function WorkspaceLayout() {
                   <LatexEditor />
                 </div>
               )}
-              <ProposedChangesPanel />
+              <ProposedChangesPanel resizeFromTop={codeVisible} />
               <AgentChatDrawer fillHeight={!codeVisible} />
             </div>
           </Panel>
