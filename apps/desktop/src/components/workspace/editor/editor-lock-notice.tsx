@@ -47,24 +47,26 @@ export function EditorLockNotice() {
 
   const owners = new Map<
     string,
-    { tabId?: string; threadId?: string; title: string; running: boolean }
+    { tabId?: string; threadId?: string; label: string; running: boolean }
   >();
   for (const p of chat.proposals.filter(
     (p) => p.blocksEditing !== false && p.projectId === projectId,
   )) {
-    const tab = chat.tabs.find(
+    const index = chat.tabs.findIndex(
       (t) => t.id === p.chatId || (!!t.sessionId && t.sessionId === p.threadId),
     );
+    const tab = chat.tabs[index];
     const key = tab?.id ?? p.threadId ?? p.id;
     owners.set(key, {
       tabId: tab?.id,
       threadId: p.threadId ?? undefined,
-      title: tab?.title || "Closed chat",
+      label: tab ? `Chat tab ${index + 1}` : "Closed chat",
       running: !!tab?.isStreaming || ["running", "repairing"].includes(p.state),
     });
   }
-  for (const tab of chat.tabs.filter((t) => t.isStreaming)) {
-    owners.set(tab.id, { tabId: tab.id, title: tab.title, running: true });
+  for (const [index, tab] of chat.tabs.entries()) {
+    if (!tab.isStreaming) continue;
+    owners.set(tab.id, { tabId: tab.id, label: `Chat tab ${index + 1}`, running: true });
   }
   const targets = [...owners.values()];
   const running = targets.some((t) => t.running) || chat.review.active;
@@ -72,11 +74,11 @@ export function EditorLockNotice() {
   const message = syncing
     ? "Editing is paused while collaborator changes are applied."
     : targets.length === 1 && running
-      ? `${targets[0].title} is editing this document. Wait for the agent to finish, then resolve any pending changes to edit LaTeX.`
+      ? `${targets[0].label} is editing this document. Wait for the agent to finish, then resolve any pending changes to edit LaTeX.`
       : targets.length > 1
         ? `${targets.length} chats have running work or pending changes. Finish running work and keep or discard pending changes to edit LaTeX.`
         : targets.length === 1
-          ? `Resolve pending changes in ${targets[0].title} to edit LaTeX. Keep or discard them first.`
+          ? `Resolve pending changes in ${targets[0].label} to edit LaTeX. Keep or discard them first.`
           : legacy
             ? "Resolve the legacy review to edit LaTeX. Wait for any running work, then keep or discard pending changes."
             : chat.restoring
@@ -89,7 +91,7 @@ export function EditorLockNotice() {
     else if (target?.threadId)
       await useAgentChatStore
         .getState()
-        .resumeSession(target.threadId, target.title);
+        .resumeSession(target.threadId, "Closed chat");
   }
   return (
     <div
@@ -122,7 +124,7 @@ export function EditorLockNotice() {
                 onClick={() => void goTo(target)}
               >
                 {target.running ? "Go to chat" : "Go to changes"}
-                {targets.length > 1 ? ` · ${target.title}` : ""}
+                {targets.length > 1 ? ` · ${target.label}` : ""}
               </Button>
             ))}
           {legacy && (

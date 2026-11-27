@@ -63,9 +63,9 @@ afterEach(async () => {
   vi.useRealTimers();
 });
 const render = () => act(async () => root.render(<EditorLockNotice />));
-it("names the blocking chat and opens it without accepting changes", async () => {
+it("numbers the blocking chat by its tab position and opens it without accepting changes", async () => {
   await render();
-  expect(host.textContent).toContain("Resolve pending changes in Chat B");
+  expect(host.textContent).toContain("Resolve pending changes in Chat tab 2");
   await act(async () =>
     host.querySelector<HTMLButtonElement>("button")!.click(),
   );
@@ -81,7 +81,19 @@ it("explains running work and provides links for multiple owners", async () => {
   expect(host.textContent).toContain("2 chats");
   expect(
     [...host.querySelectorAll("button")].map((b) => b.textContent),
-  ).toEqual(["Go to changes · Chat B", "Go to chat · Chat A"]);
+  ).toEqual(["Go to changes · Chat tab 2", "Go to chat · Chat tab 1"]);
+});
+it("updates the running chat number when a preceding tab closes", async () => {
+  useAgentChatStore.setState(s => ({
+    tabs: s.tabs.map(t => ({ ...t, isStreaming: t.id === "b" })),
+  }));
+  await render();
+  expect(host.textContent).toContain("Chat tab 2 is editing");
+  await act(async () => useAgentChatStore.setState(s => ({
+    tabs: s.tabs.filter(t => t.id === "b"),
+  })));
+  expect(host.textContent).toContain("Chat tab 1 is editing");
+  expect(host.textContent).not.toContain("Chat B");
 });
 it("does not lock for PDF preparation or deferred reviewer suggestions", async () => {
   useDocumentStore.setState({ isCompiling: true });
