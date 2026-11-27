@@ -18,8 +18,7 @@ import { PdfPreview } from "./preview/pdf-preview";
 import { AgentChatDrawer } from "@/components/agent-chat/agent-chat-drawer";
 import { ProposedChangesPanel } from "@/components/agent-chat/proposed-changes-panel";
 import {
-  getCurrentPdfRootId,
-  resolveTexRoot,
+  selectPreviewRoot,
   useDocumentStore,
 } from "@/stores/document-store";
 import { useChatPdfBuilds } from "@/hooks/use-chat-pdf";
@@ -42,17 +41,9 @@ export function WorkspaceLayout() {
   useEffect(() => {
     useReviewFindingsStore.getState().resetForProject(projectId);
   }, [projectId]);
-  const files = useDocumentStore((s) => s.files);
   const openingError = useDocumentStore((s) => s.openingError);
   const openingPhase = useDocumentStore((s) => s.openingPhase);
-  const activeFileId = useDocumentStore((s) => s.activeFileId);
-  useDocumentStore((s) => s.pdfRevision);
-  const activeFile = files.find((file) => file.id === activeFileId);
-  const root =
-    activeFile?.type === "tex"
-      ? resolveTexRoot(activeFile.id, files)
-      : (getCurrentPdfRootId() ?? resolveTexRoot(activeFile?.id ?? "", files));
-  useChatPdfBuilds(files.find((file) => file.id === root)?.relativePath);
+  useChatPdfBuilds(useDocumentStore(selectPreviewRoot));
 
   const previewVisible = usePreviewStore((s) => s.visible);
   const setPreviewVisible = usePreviewStore((s) => s.setVisible);

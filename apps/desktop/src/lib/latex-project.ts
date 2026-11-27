@@ -8,6 +8,7 @@ export interface TexSourceFile {
 }
 
 export function stripTexComments(content: string): string {
+  if (!content.includes("%")) return content;
   return content
     .split("\n")
     .map((line) => {
@@ -68,35 +69,47 @@ export function resolveTexInclude(
   return index.get(normalized) ?? index.get(`${normalized}.tex`);
 }
 
+// ProjectFile objects are replaced when their contents change. Keep only
+// structural information for other chapters across edits to the active file.
+const structures = new WeakMap<TexSourceFile, {
+  content: string | undefined;
+  standalone: boolean;
+  includes?: string[];
+}>();
+
+function structure(file: TexSourceFile) {
+  const cached = structures.get(file);
+  if (cached && cached.content === file.content) return cached;
+  const text = file.content ?? "";
+  const entry = {
+    content: file.content,
+    standalone: text.includes("\\documentclass") &&
+      /\\documentclass[\s{[]/.test(stripTexComments(text)),
+    includes: undefined as string[] | undefined,
+  };
+  structures.set(file, entry);
+  return entry;
+}
+
 export function resolveTexRoot(
   fileId: string,
   files: readonly TexSourceFile[],
 ): string {
   const file = files.find((f) => f.id === fileId);
   if (!file || file.type !== "tex") return fileId;
-  const index = texFileIndex(files);
-  for (const line of (file.content ?? "").split("\n").slice(0, 20)) {
+  for (const line of (file.content ?? "").split("\n", 20)) {
     const match = line.match(/^%\s*!TEX\s+root\s*=\s*(.+)/i);
     if (!match) continue;
+    const index = texFileIndex(files);
     const path = match[1].trim();
     const target =
       index.get(normalizePath(directory(file.relativePath) + path)) ??
       index.get(normalizePath(path));
     if (target) return target.id;
   }
-  const activeSource = stripTexComments(file.content ?? "");
-  if (/\\documentclass[\s{[]/.test(activeSource)) return fileId;
-  const sources = new Map(
-    files
-      .filter((f) => f.type === "tex")
-      .map((f) => [
-        f.id,
-        f.id === fileId ? activeSource : stripTexComments(f.content ?? ""),
-      ]),
-  );
-  const roots = files.filter((f) =>
-    /\\documentclass[\s{[]/.test(sources.get(f.id) ?? ""),
-  );
+  if (structure(file).standalone) return fileId;
+  const index = texFileIndex(files);
+  const roots = files.filter(f => f.type === "tex" && structure(f).standalone);
   const preferred = roots.filter(
     (root) => root.name === "main.tex" || root.name === "document.tex",
   );
@@ -113,8 +126,11 @@ export function resolveTexRoot(
       const current = pending.pop()!;
       if (visited.has(current.id)) continue;
       visited.add(current.id);
-      for (const match of texIncludes(sources.get(current.id) ?? "")) {
-        const child = resolveTexInclude(match[1] ?? match[2], root, index);
+      const entry = structure(current);
+      entry.includes ??= texIncludes(stripTexComments(current.content ?? ""))
+        .map(match => match[1] ?? match[2]);
+      for (const path of entry.includes) {
+        const child = resolveTexInclude(path, root, index);
         if (child?.id === fileId) return root.id;
         if (child && !visited.has(child.id)) pending.push(child);
       }

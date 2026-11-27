@@ -213,3 +213,18 @@ it("expands multiline include commands without losing later source line numbers"
     ["After", "main.tex", 4],
   ]);
 });
+
+it("rechecks changed include paths and declarations when resolving the preview root", () => {
+  const file = (name: string, content: string): TexSourceFile => ({
+    name, id: name, relativePath: name, type: "tex", content,
+  });
+  const paper = file("main.tex", "\\documentclass{article}\n");
+  const slides = file("slides.tex", "\\documentclass{beamer}\n\\input{part}");
+  const part = file("part.tex", "Section text");
+  const files = [paper, slides, part];
+  expect(resolveTexRoot(part.id, files)).toBe(slides.id);
+  paper.content += "\\include{part}";
+  expect(resolveTexRoot(part.id, files)).toBe(paper.id);
+  part.content = "\\documentclass{article}";
+  expect(resolveTexRoot(part.id, files)).toBe(part.id);
+});

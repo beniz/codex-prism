@@ -1,3 +1,4 @@
+import { useShallow } from "zustand/react/shallow";
 import { projectCompletionIndex } from "@/lib/latex-completion-project";
 import { latexAutocomplete } from "@/lib/latex-autocomplete";
 import { guardEditorTransaction } from "@/lib/editor-edit-lock";
@@ -122,7 +123,12 @@ export function LatexEditor() {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
 
-  const files = useDocumentStore((s) => s.files);
+  const activeFile = useDocumentStore(useShallow(s => {
+    const file = s.files.find(f => f.id === s.activeFileId);
+    if (!file) return undefined;
+    const { content: _content, ...metadata } = file;
+    return metadata;
+  }));
   const openingGeneration = useDocumentStore(s => s.openingGeneration);
   const activeFileId = useDocumentStore((s) => s.activeFileId);
   const projectRoot = useDocumentStore((s) => s.projectRoot);
@@ -136,19 +142,18 @@ export function LatexEditor() {
   const setCompileError = useDocumentStore((s) => s.setCompileError);
   const saveAllFiles = useDocumentStore((s) => s.saveAllFiles);
 
-  const activeFile = files.find((f) => f.id === activeFileId);
   const isTextFile =
     activeFile?.type === "tex" ||
     activeFile?.type === "bib" ||
     activeFile?.type === "style" ||
     activeFile?.type === "other";
-  const activeFileContent = activeFile?.content;
+  const contentLoaded = useDocumentStore(s => s.files.find(f => f.id === s.activeFileId)?.content !== undefined);
   const isLargeFileNotLoaded =
-    isTextFile && activeFileContent === undefined && !!activeFile;
+    isTextFile && !contentLoaded && !!activeFile;
   const loadFileContent = useDocumentStore((s) => s.loadFileContent);
 
   useEffect(() => {
-    if ((isTextFile || activeFile?.type === "image") && activeFile && activeFile.content === undefined &&
+    if ((isTextFile || activeFile?.type === "image") && activeFile && !contentLoaded &&
         (activeFile.fileSize ?? 0) <= 1024 * 1024) void loadFileContent(activeFile.id);
   }, [activeFile?.id, isTextFile, loadFileContent]);
 
@@ -167,6 +172,7 @@ export function LatexEditor() {
 
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  const activeFileContent = useDocumentStore(s => searchQuery ? s.files.find(f => f.id === s.activeFileId)?.content : undefined);
   const [matchCount, setMatchCount] = useState(0);
   const [currentMatch, setCurrentMatch] = useState(0);
   const [mergeChunkInfo, setMergeChunkInfo] = useState({
@@ -450,6 +456,7 @@ export function LatexEditor() {
     if (!containerRef.current || !isTextFile) return;
     const currentContent = getActiveFileContent();
 
+    let publishingEdit = false;
     const updateListener = EditorView.updateListener.of((update) => {
       if (isMergeActiveRef.current) {
         const chunks = getChunks(update.state);
@@ -503,16 +510,19 @@ export function LatexEditor() {
         }
         return;
       }
-      if (update.docChanged) {
+      if (update.docChanged && !update.transactions.some(tr => tr.annotation(backendReload))) {
         let edit: { line: number; sourceLine: string } | undefined;
-        if (!update.transactions.some(tr => tr.annotation(backendReload))) {
-          update.changes.iterChangedRanges((_from, _to, from) => {
-            if (edit) return;
-            const line = update.state.doc.lineAt(from);
-            edit = { line: line.number, sourceLine: line.text };
-          });
+        update.changes.iterChangedRanges((_from, _to, from) => {
+          if (edit) return;
+          const line = update.state.doc.lineAt(from);
+          edit = { line: line.number, sourceLine: line.text };
+        });
+        publishingEdit = true;
+        try {
+          setContent(update.state.doc.toString(), edit);
+        } finally {
+          publishingEdit = false;
         }
-        setContent(update.state.doc.toString(), edit);
       }
       if (update.selectionSet) {
         const { from, to, head } = update.state.selection.main;
@@ -846,12 +856,32 @@ export function LatexEditor() {
       });
     }
 
+    // Editor transactions already updated both CodeMirror and the store.
+    // Only changes from elsewhere need to travel back into the view.
+    const unsubscribe = useDocumentStore.subscribe((state, previous) => {
+      if (publishingEdit || state.files === previous.files || state.activeFileId !== activeFileId ||
+          state.openingGeneration !== openingGeneration || isMergeActiveRef.current) return;
+      const content = state.files.find(f => f.id === activeFileId)?.content ?? "";
+      if (content === previous.files.find(f => f.id === activeFileId)?.content) return;
+      queueMicrotask(() => {
+        const latest = useDocumentStore.getState();
+        if (viewRef.current !== view || isMergeActiveRef.current ||
+            latest.openingGeneration !== openingGeneration || latest.activeFileId !== activeFileId ||
+            getActiveFileContent() !== content || view.state.doc.toString() === content) return;
+        view.dispatch({
+          changes: { from: 0, to: view.state.doc.length, insert: content },
+          annotations: backendReload.of(true),
+        });
+      });
+    });
+
     return () => {
       // Save per-file cursor + scroll before destroying
       editorStateCache.set(activeFileId, {
         cursor: view.state.selection.main.head,
         scrollTop: view.scrollDOM.scrollTop,
       });
+      unsubscribe();
       completionIndex.destroy();
       view.destroy();
       viewRef.current = null;
@@ -860,6 +890,7 @@ export function LatexEditor() {
     activeFileId,
     openingGeneration,
     isTextFile,
+    contentLoaded,
     setContent,
     setCursorPosition,
     setSelectionRange,
@@ -903,19 +934,6 @@ export function LatexEditor() {
       });
     });
   }, [vimMode, activeFileId, isTextFile]);
-
-  useEffect(() => {
-    const view = viewRef.current;
-    if (!view || !isTextFile || isMergeActiveRef.current) return;
-    const content = activeFileContent ?? "";
-    const currentContent = view.state.doc.toString();
-    if (currentContent !== content) {
-      view.dispatch({
-        changes: { from: 0, to: currentContent.length, insert: content },
-        annotations: backendReload.of(true),
-      });
-    }
-  }, [activeFileContent, isTextFile]);
 
   // Watch for proposed changes → activate/deactivate/update merge view
   useEffect(() => {
@@ -1050,12 +1068,12 @@ export function LatexEditor() {
 
   const buildSelectionContext =
     useCallback((): PromptContextOverride | null => {
-      if (!selectionRange || !selectionLabel || !activeFile?.content) {
+      if (!selectionRange || !selectionLabel || !activeFile) {
         return null;
       }
       const start = Math.min(selectionRange.start, selectionRange.end);
       const end = Math.max(selectionRange.start, selectionRange.end);
-      const selectedText = activeFile.content.slice(start, end);
+      const selectedText = viewRef.current?.state.sliceDoc(start, end);
       if (!selectedText) return null;
       return {
         label: selectionLabel,

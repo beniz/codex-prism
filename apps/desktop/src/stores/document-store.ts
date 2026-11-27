@@ -66,12 +66,27 @@ export function getCurrentPdfRootId(): string | null {
   return _currentPdfRootId;
 }
 
+// Multiple workspace panels need the same root. Recompute only when its inputs
+// change, and notify those panels only if the resulting path changes.
+let previewRootCache: { files: ProjectFile[]; active: string; pdf: string | null; root?: string } | undefined;
+export function selectPreviewRoot(state: { files: ProjectFile[]; activeFileId: string }) {
+  const { files, activeFileId: active } = state;
+  const pdf = getCurrentPdfRootId();
+  if (previewRootCache?.files !== files || previewRootCache.active !== active || previewRootCache.pdf !== pdf) {
+    const file = files.find(f => f.id === active);
+    const id = file?.type === "tex" ? resolveTexRoot(active, files) : pdf ?? file?.id;
+    previewRootCache = { files, active, pdf, root: files.find(f => f.id === id)?.relativePath };
+  }
+  return previewRootCache.root;
+}
+
 /** Check if any PDF data exists for the current root. */
 export function hasPdfData(): boolean {
   return _currentPdfRootId != null && _pdfBytesCache.has(_currentPdfRootId);
 }
 
 export function clearPdfBytesCache() {
+  previewRootCache = undefined;
   _pdfBytesCache.clear();
   clearChatPdfCache();
   _currentPdfRootId = null;
@@ -499,7 +514,9 @@ export const useDocumentStore = create<DocumentState>()((set, get) => ({
     }));
   },
 
-  setSelectionRange: (range) => set({ selectionRange: range }),
+  setSelectionRange: (range) => {
+    if (range !== get().selectionRange) set({ selectionRange: range });
+  },
 
   requestJumpToPosition: (position) => set({ jumpToPosition: position }),
 
@@ -753,7 +770,9 @@ export const useDocumentStore = create<DocumentState>()((set, get) => ({
 
   setIsSaving: (isSaving) => set({ isSaving }),
 
-  setCursorPosition: (position) => set({ cursorPosition: position }),
+  setCursorPosition: (position) => {
+    if (position !== get().cursorPosition) set({ cursorPosition: position });
+  },
 
   insertAtCursor: (text) => {
     if (

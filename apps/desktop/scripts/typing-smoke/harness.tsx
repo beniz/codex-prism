@@ -97,6 +97,16 @@ function record(id: string, _phase: string, duration: number) {
     const pages = document.querySelectorAll(".mupdf-page").length;
     if (withPdf && !pages) throw new Error("PDF was not displayed");
     const sorted = [...times].sort((a, b) => a - b);
+    const beforeReload = useDocumentStore.getState().contentGeneration;
+    const replacement = typed + "% external reload\n";
+    useDocumentStore.setState(state => ({
+      files: state.files.map(file => ({ ...file, content: replacement, isDirty: false })),
+    }));
+    await Promise.resolve();
+    if (view.state.doc.toString() !== replacement ||
+        useDocumentStore.getState().contentGeneration !== beforeReload ||
+        useDocumentStore.getState().files[0].isDirty)
+      throw new Error("External reload was lost or treated as a new edit");
     return {
       characters: source.length,
       pages,

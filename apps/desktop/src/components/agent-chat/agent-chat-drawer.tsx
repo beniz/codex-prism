@@ -122,7 +122,7 @@ export function AgentChatDrawer({
       (el.offsetHeight - field.offsetHeight);
     setInputHeight(Math.max(56, Math.min(height, Math.max(56, available))));
   };
-  const files = useDocumentStore((d) => d.files);
+  const files = useDocumentStore((d) => filePicker ? d.files : undefined);
   const openingProject = useDocumentStore((d) => !!d.projectRoot && !d.initialized);
   const proposals = useAgentChatStore((state) => state.proposals);
   const t = s.tabs.find((t) => t.id === s.activeTabId)!;
@@ -708,7 +708,7 @@ export function AgentChatDrawer({
                         </div>
                         <div className="max-h-44 overflow-auto">
                           {files
-                            .filter((f) =>
+                            ?.filter((f) =>
                               f.relativePath
                                 .toLowerCase()
                                 .includes(query.toLowerCase()),
@@ -736,7 +736,7 @@ export function AgentChatDrawer({
                                 </Button>
                               );
                             })}
-                          {!files.some((f) =>
+                          {!files?.some((f) =>
                             f.relativePath
                               .toLowerCase()
                               .includes(query.toLowerCase()),

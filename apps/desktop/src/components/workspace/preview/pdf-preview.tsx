@@ -28,7 +28,7 @@ import { backend } from "@/lib/backend";
 import {
   useDocumentStore,
   getCurrentPdfBytes,
-  getCurrentPdfRootId,
+  selectPreviewRoot,
   hasPdfData,
 } from "@/stores/document-store";
 import { useHistoryStore } from "@/stores/history-store";
@@ -70,7 +70,6 @@ import {
   type PdfTextSelection,
   type CaptureResult,
 } from "./pdf-viewer";
-import { resolveTexRoot } from "@/stores/document-store";
 import { createLogger } from "@/lib/debug/logger";
 
 const log = createLogger("pdf-preview");
@@ -99,6 +98,12 @@ const ZOOM_OPTIONS = [
   { value: "4", label: "400%" },
 ];
 
+function AutoRecompile(props: Omit<Parameters<typeof useAutoRecompile>[0], "generation">) {
+  const generation = useDocumentStore(s => s.contentGeneration);
+  useAutoRecompile({ ...props, generation });
+  return null;
+}
+
 export function PdfPreview() {
   const incremental = useSettingsStore((s) => s.incrementalCompilation);
   const setIncremental = useSettingsStore((s) => s.setIncrementalCompilation);
@@ -108,7 +113,6 @@ export function PdfPreview() {
   const setVisualChangeReports = useSettingsStore(
     (s) => s.setVisualChangeReports,
   );
-  const contentGeneration = useDocumentStore((s) => s.contentGeneration);
   const agentActive = useAgentChatStore((s) => s.review.active);
   const pdfRevision = useDocumentStore((s) => s.pdfRevision);
   const mainCompileError = useDocumentStore((s) => s.compileError);
@@ -121,13 +125,10 @@ export function PdfPreview() {
   const projectId = useDocumentStore((s) => s.projectId);
   const checkoutBranch = useAgentChatStore((s) => s.checkoutBranch);
   const activeChatId = useAgentChatStore((s) => s.activeTabId);
-  const files = useDocumentStore((s) => s.files);
   const saveAllFiles = useDocumentStore((s) => s.saveAllFiles);
   const setActiveFile = useDocumentStore((s) => s.setActiveFile);
-  const activeFile = useDocumentStore((s) => {
-    return s.files.find((f) => f.id === s.activeFileId) ?? null;
-  });
-  const activeFileType = activeFile?.type ?? "tex";
+  const activeFilePath = useDocumentStore(s => s.files.find(f => f.id === s.activeFileId)?.relativePath);
+  const activeFileType = useDocumentStore(s => s.files.find(f => f.id === s.activeFileId)?.type ?? "tex");
   const isTexActive = activeFileType === "tex";
   const requestJumpToPosition = useDocumentStore(
     (s) => s.requestJumpToPosition,
@@ -184,11 +185,7 @@ export function PdfPreview() {
   const mainPdfData = useMemo(() => getCurrentPdfBytes(), [pdfRevision]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Keep-alive: track which root files have PdfViewer instances alive (LRU order)
-  const sourceRootFileId =
-    activeFile?.type === "tex"
-      ? resolveTexRoot(activeFile.id, files)
-      : (getCurrentPdfRootId() ?? resolveTexRoot(activeFile?.id ?? "", files));
-  const mainFile = files.find((f) => f.id === sourceRootFileId)?.relativePath;
+  const mainFile = useDocumentStore(selectPreviewRoot);
   const chatPdf = useChatPdf(mainFile);
   const artifact = chatPdf.artifact;
   const changePageTarget = useFirstChangedPage(artifact, projectId);
@@ -206,7 +203,7 @@ export function PdfPreview() {
   const currentRootFileId = JSON.stringify([
     projectRoot,
     artifact?.proposal.id ?? accepted?.proposalId ?? "main",
-    sourceRootFileId,
+    mainFile ?? "",
   ]);
   const viewerData = useRef(new Map<string, { bytes: Uint8Array; artifactId?: string }>());
   if (pdfData) viewerData.current.set(currentRootFileId, { bytes: pdfData, artifactId: artifact?.build.artifactId ?? accepted?.artifactId });
@@ -296,11 +293,12 @@ export function PdfPreview() {
   );
   const previewContainerRef = useRef<HTMLDivElement>(null);
 
+  const contentGeneration = useDocumentStore(s => pdfSelection || artifact ? s.contentGeneration : 0);
   const mainSourceLocation = usePdfSourceNavigation({
     projectRoot,
     projectId: useDocumentStore((state) => state.projectId),
     mainFile,
-    activeFilePath: activeFile?.relativePath,
+    activeFilePath,
     pdfRevision: visual.active || artifact ? undefined : pdfRevision,
     data: visual.active
       ? visual.bytes.current
@@ -476,7 +474,7 @@ export function PdfPreview() {
     }
     const normalize = (p: string) => p.replace(/\\/g, "/").replace(/^\.\//, "");
     const normalizedTarget = normalize(resolvedSource.file);
-    const targetFile = files.find(
+    const targetFile = useDocumentStore.getState().files.find(
       (f) => normalize(f.relativePath) === normalizedTarget,
     );
     if (!targetFile) return;
@@ -507,7 +505,7 @@ export function PdfPreview() {
     } else {
       requestJumpToPosition(offset);
     }
-  }, [resolvedSource, files, setActiveFile, requestJumpToPosition, artifact]);
+  }, [resolvedSource, setActiveFile, requestJumpToPosition, artifact]);
 
   const buildPdfContext = useCallback(
     (text: string) => {
@@ -657,8 +655,8 @@ export function PdfPreview() {
     setPdfData,
     setCompileError,
     saveAllFiles,
-    files,
-    activeFile,
+    mainFile,
+    activeFilePath,
   ]);
 
   // Recompute scale when fit mode is active and container/page size changes
@@ -754,7 +752,7 @@ export function PdfPreview() {
     const activeEntry = allFiles.find((f) => f.id === activeFileId);
     if (!automatic && (!activeEntry || activeEntry.type !== "tex")) return;
     const resolved = resolveCompileTarget(
-      automatic ? sourceRootFileId : activeFileId,
+      automatic ? mainFile ?? "" : activeFileId,
       allFiles,
     );
     if (!resolved) {
@@ -810,15 +808,6 @@ export function PdfPreview() {
     return () => window.removeEventListener("compile-chat-pdf", compile);
   }, [chatPdf.key, chatPdf.proposal?.id, chatPdf.proposal?.generation]);
 
-  useAutoRecompile({
-    enabled: autoRecompile && !chatPdf.proposal && !artifact,
-    documentKey: projectRoot
-      ? JSON.stringify([projectRoot, currentRootFileId])
-      : null,
-    generation: contentGeneration,
-    busy: isCompiling || agentActive || !initialized,
-    compile: () => handleCompile(true, true),
-  });
 
   const handleCapture = useCallback(
     async (result: CaptureResult) => {
@@ -1109,6 +1098,12 @@ export function PdfPreview() {
       data-paper-view={paperView || undefined}
       className="@container/pv relative flex h-full flex-col bg-muted/50"
     >
+      <AutoRecompile
+        enabled={autoRecompile && !chatPdf.proposal && !artifact}
+        documentKey={projectRoot ? JSON.stringify([projectRoot, currentRootFileId]) : null}
+        busy={isCompiling || agentActive || !initialized}
+        compile={() => handleCompile(true, true)}
+      />
       <div className="flex h-[calc(var(--workspace-topbar-height)+var(--titlebar-height))] shrink-0 flex-nowrap items-center border-border border-b bg-background px-2">
         <div className="flex min-w-0 shrink-0 items-center gap-1">
           <span
@@ -1215,8 +1210,7 @@ export function PdfPreview() {
         {visualChangeReports &&
           !chatPdf.proposal &&
           visual.metadata.state === "ready" &&
-          visual.metadata.main ===
-            files.find((f) => f.id === sourceRootFileId)?.relativePath && (
+          visual.metadata.main === mainFile && (
             <div className="flex items-center gap-1 text-xs">
               <span>{visual.items.length} changes</span>
               {visual.shown && (
