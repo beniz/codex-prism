@@ -239,6 +239,7 @@ impl Backend {
             chat_id,
             None,
             None,
+            true,
         )
         .await
     }
@@ -284,6 +285,27 @@ impl Backend {
         mode: Option<String>,
         expected_branch: Option<String>,
     ) -> Result<Value, String> {
+        self.codex_send_with_approval_review(
+            project_id, thread_id, prompt, model, effort, images, main_document,
+            history_prompt, chat_id, mode, expected_branch, true,
+        )
+        .await
+    }
+    pub async fn codex_send_with_approval_review(
+        &self,
+        project_id: String,
+        thread_id: Option<String>,
+        prompt: String,
+        model: Option<String>,
+        effort: Option<String>,
+        images: Option<Vec<String>>,
+        main_document: Option<String>,
+        history_prompt: Option<String>,
+        chat_id: Option<String>,
+        mode: Option<String>,
+        expected_branch: Option<String>,
+        auto_review_approvals: bool,
+    ) -> Result<Value, String> {
         let _operation = self.enter()?;
         codex::codex_send_for_chat(
             self.clone(),
@@ -298,6 +320,7 @@ impl Backend {
             chat_id,
             mode,
             expected_branch,
+            auto_review_approvals,
         )
         .await
     }

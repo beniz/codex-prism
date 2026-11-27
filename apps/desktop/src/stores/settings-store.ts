@@ -3,6 +3,8 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
 interface SettingsState {
+  autoReviewApprovals: boolean;
+  setAutoReviewApprovals: (enabled: boolean) => void;
   incrementalCompilation: boolean;
   setIncrementalCompilation: (enabled: boolean) => void;
   autoRecompile: boolean;
@@ -18,6 +20,8 @@ interface SettingsState {
 export const useSettingsStore = create<SettingsState>()(
   persist(
     (set) => ({
+      autoReviewApprovals: true,
+      setAutoReviewApprovals: (enabled) => set({ autoReviewApprovals: enabled }),
       incrementalCompilation: true,
       setIncrementalCompilation: (enabled) => set({ incrementalCompilation: enabled }),
       autoRecompile: false,
@@ -40,12 +44,14 @@ export const useSettingsStore = create<SettingsState>()(
         ...settingsPreferences(persisted),
       }),
       partialize: ({
+        autoReviewApprovals,
         incrementalCompilation,
         autoRecompile,
         visualChangeReports,
         vimMode,
         editorFontSize,
       }) => ({
+        autoReviewApprovals,
         incrementalCompilation,
         autoRecompile,
         visualChangeReports,
@@ -66,6 +72,7 @@ function normalizeFontSize(size: unknown): number {
 export function settingsPreferences(value: unknown) {
   const state = (value ?? {}) as Record<string, unknown>;
   return {
+    autoReviewApprovals: state.autoReviewApprovals !== false,
     incrementalCompilation: state.incrementalCompilation !== false,
     autoRecompile: state.autoRecompile === true,
     visualChangeReports: state.visualChangeReports === true,

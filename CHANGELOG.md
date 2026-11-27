@@ -5,6 +5,8 @@ and detailed release notes are in [docs/releases](docs/releases/README.md).
 
 ## Unreleased
 
+- Codex automatically reviews permission requests in project chats. Choose **Ask me** in **Settings → Provider → Approval handling** to review requests yourself across all projects.
+
 - After compiling a manual LaTeX edit, the PDF preview follows the most recently edited line when SyncTeX can locate it.
 
 - Drag across lines in the PDF preview to select and copy a sentence.

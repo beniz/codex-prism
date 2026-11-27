@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { backend } from "@/lib/backend";
 import { useAgentSetupStore } from "@/stores/agent-setup-store";
+import { useSettingsStore } from "@/stores/settings-store";
+
 export function AgentSetup({
   onSaved,
   onCancel,
@@ -10,6 +12,8 @@ export function AgentSetup({
   onCancel?: () => void;
 }) {
   const s = useAgentSetupStore();
+  const autoReview = useSettingsStore((state) => state.autoReviewApprovals);
+  const setAutoReview = useSettingsStore((state) => state.setAutoReviewApprovals);
   const [path, setPath] = useState("");
   useEffect(() => {
     void s.checkStatus();
@@ -56,6 +60,22 @@ export function AgentSetup({
           <button onClick={() => void s.logout()}>Disconnect</button>
         )}
       </div>
+      <label className="block">
+        Approval handling
+        <select
+          className="block w-full rounded border bg-background p-2"
+          value={autoReview ? "auto_review" : "user"}
+          onChange={(event) => setAutoReview(event.target.value === "auto_review")}
+          aria-describedby="codex-approval-help"
+        >
+          <option value="auto_review">Approve for me</option>
+          <option value="user">Ask me</option>
+        </select>
+      </label>
+      <p id="codex-approval-help" className="text-sm text-muted-foreground">
+        Applies to the next turn in every project chat. With Approve for me,
+        Codex reviews permission requests and can approve or deny them.
+      </p>
       <label className="block">
         Codex executable (optional)
         <input

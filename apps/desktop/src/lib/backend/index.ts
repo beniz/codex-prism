@@ -1,3 +1,4 @@
+import { useSettingsStore } from "@/stores/settings-store";
 import { invoke as nativeInvoke } from "@tauri-apps/api/core";
 const projectServices = new Set([
   "compile_latex",
@@ -262,6 +263,7 @@ export const backend: PrismBackend = {
       expectedBranch,
     ) =>
       invoke("codex_send", {
+        autoReviewApprovals: useSettingsStore.getState().autoReviewApprovals,
         projectId,
         threadId,
         prompt,

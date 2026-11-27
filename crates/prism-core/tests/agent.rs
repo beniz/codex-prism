@@ -129,6 +129,31 @@ async fn agent_streams_approvals_and_persists_sessions_and_reviews() {
     assert!(requests.contains("\"id\": 900, \"result\""));
 }
 #[tokio::test]
+async fn resumed_chat_receives_the_updated_reviewer() {
+    let (dir, backend, project, events) = setup().await;
+    let first = send(&backend, &project.id, "edit").await.unwrap();
+    let thread = first["threadId"].as_str().unwrap().to_owned();
+    backend.codex_control(project.id.clone(), thread.clone(), "turn-1".into(), None)
+        .await.unwrap();
+    event(&events, "turn/completed").await;
+    backend.codex_send_with_approval_review(
+        project.id, Some(thread), "continue".into(), None, None, None,
+        None, None, None, None, None, false,
+    ).await.unwrap();
+    backend.shutdown().await;
+    let requests = fs::read_to_string(dir.path().join("requests.jsonl")).unwrap();
+    let routing: Vec<_> = requests.lines()
+        .map(|line| serde_json::from_str::<Value>(line).unwrap())
+        .filter(|entry| matches!(entry["method"].as_str(), Some("thread/start" | "thread/resume" | "turn/start")))
+        .map(|entry| json!([entry["method"], entry["params"]["approvalsReviewer"]]))
+        .collect();
+    assert_eq!(json!(routing), json!([
+        ["thread/start", "auto_review"], ["turn/start", "auto_review"],
+        ["thread/resume", "user"], ["turn/start", "user"]
+    ]));
+}
+
+#[tokio::test]
 async fn rejected_start_and_process_exit_release_the_review_lock() {
     let (_dir, backend, p, events) = setup().await;
     fs::write(p.root.join("fail-start"), "").unwrap();

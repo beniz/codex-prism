@@ -768,6 +768,7 @@ pub(crate) async fn codex_send(
         None,
         None,
         None,
+        true,
     )
     .await
 }
@@ -784,7 +785,9 @@ pub(crate) async fn codex_send_for_chat(
     chat_id: Option<String>,
     mode: Option<String>,
     expected_branch: Option<String>,
+    auto_review_approvals: bool,
 ) -> Result<Value, String> {
+    let reviewer = if auto_review_approvals { "auto_review" } else { "user" };
     let mode = mode.as_deref().unwrap_or("default");
     if !["plan", "default"].contains(&mode) { return Err("Unknown collaboration mode".into()); }
     let project = projects::get(&app, &project_id)?;
@@ -843,7 +846,7 @@ pub(crate) async fn codex_send_for_chat(
     let result: Result<Value, String> = async {
         let title = prompt.chars().take(70).collect::<String>();
         let prompt = crate::source_completion::augment(&source_settings, &workspace, &prompt)?;
-        let mut config = json!({"cwd":workspace,"approvalPolicy":"on-request","approvalsReviewer":"user","sandbox":"workspace-write","config":{"sandbox_workspace_write.network_access":false,"sandbox_workspace_write.writable_roots":[],"sandbox_workspace_write.exclude_tmpdir_env_var":false,"sandbox_workspace_write.exclude_slash_tmp":false},"developerInstructions":concat!("You are the scientific writing assistant in codex-prism. This is an isolated proposal workspace. It may have been refreshed from the latest main document since your previous turn: inspect current files before editing. Keep project edits in this workspace. Use the configured temporary directory for scratch files. Commands requiring unrestricted execution may request user approval. Project changes require user acceptance.\n\n",include_str!("writing-guidance.txt"))});
+        let mut config = json!({"cwd":workspace,"approvalPolicy":"on-request","approvalsReviewer":reviewer,"sandbox":"workspace-write","config":{"sandbox_workspace_write.network_access":false,"sandbox_workspace_write.writable_roots":[],"sandbox_workspace_write.exclude_tmpdir_env_var":false,"sandbox_workspace_write.exclude_slash_tmp":false},"developerInstructions":concat!("You are the scientific writing assistant in codex-prism. This is an isolated proposal workspace. It may have been refreshed from the latest main document since your previous turn: inspect current files before editing. Keep project edits in this workspace. Use the configured temporary directory for scratch files. Request approval for commands that require unrestricted execution. Project changes require user acceptance.\n\n",include_str!("writing-guidance.txt"))});
         let base = config["developerInstructions"].as_str().unwrap_or_default();
         config["developerInstructions"] = json!(format!("{base}\n\nProject instructions (current standing defaults; explicit user requests may override these; replaces any previous project instructions):\n{}", if instructions.trim().is_empty() { "No project instructions configured." } else { &instructions }));
         let base = config["developerInstructions"].as_str().unwrap_or_default().to_owned();
@@ -886,7 +889,7 @@ pub(crate) async fn codex_send_for_chat(
         let _ = app.emit_agent(json!({"method":"prism/session","params":{"projectId":project_id,"threadId":id,"chatId":chat_id,"proposalId":proposal.id}}));
         let mut input = vec![json!({"type":"text","text":prompt})];
         for url in images.unwrap_or_default() { input.push(json!({"type":"image","imageUrl":url})); }
-        let mut params = json!({"threadId":id,"cwd":workspace,"sandboxPolicy":{"type":"workspaceWrite","writableRoots":[workspace],"networkAccess":false,"excludeTmpdirEnvVar":false,"excludeSlashTmp":false},"input":input});
+        let mut params = json!({"threadId":id,"cwd":workspace,"approvalsReviewer":reviewer,"sandboxPolicy":{"type":"workspaceWrite","writableRoots":[workspace],"networkAccess":false,"excludeTmpdirEnvVar":false,"excludeSlashTmp":false},"input":input});
         if !source_settings.sources.is_empty() {
             params["sandboxPolicy"]["excludeTmpdirEnvVar"] = json!(true);
             params["sandboxPolicy"]["excludeSlashTmp"] = json!(true);

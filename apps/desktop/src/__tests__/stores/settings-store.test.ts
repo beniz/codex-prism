@@ -19,6 +19,7 @@ for (const compilerBackend of ["tectonic", "texlive"]) {
     const saved = JSON.parse(localStorage.getItem("codex-prism-settings")!);
     expect(saved.version).toBe(1);
     expect(saved.state).toEqual({
+      autoReviewApprovals: true,
       incrementalCompilation: true,
       autoRecompile: true,
       vimMode: true,
@@ -53,4 +54,13 @@ it("remembers disabled visual change reports across sessions", async () => {
   localStorage.setItem("codex-prism-settings", saved);
   await useSettingsStore.persist.rehydrate();
   expect(useSettingsStore.getState().incrementalCompilation).toBe(false);
+});
+
+it("remembers Ask me across sessions", async () => {
+  useSettingsStore.getState().setAutoReviewApprovals(false);
+  const saved = localStorage.getItem("codex-prism-settings")!;
+  useSettingsStore.setState({ autoReviewApprovals: true });
+  localStorage.setItem("codex-prism-settings", saved);
+  await useSettingsStore.persist.rehydrate();
+  expect(useSettingsStore.getState().autoReviewApprovals).toBe(false);
 });

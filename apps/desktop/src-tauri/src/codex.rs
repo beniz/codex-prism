@@ -58,9 +58,10 @@ pub async fn codex_send(
     chat_id: Option<String>,
     mode: Option<String>,
     expected_branch: Option<String>,
+    auto_review_approvals: Option<bool>,
 ) -> Result<serde_json::Value, String> {
     backend
-        .codex_send_on_branch(
+        .codex_send_with_approval_review(
             project_id,
             thread_id,
             prompt,
@@ -72,6 +73,7 @@ pub async fn codex_send(
             chat_id,
             mode,
             expected_branch,
+            auto_review_approvals.unwrap_or(true),
         )
         .await
 }
