@@ -5,6 +5,8 @@ and detailed release notes are in [docs/releases](docs/releases/README.md).
 
 ## Unreleased
 
+- Opening the LaTeX editor shrinks a manually enlarged chat input to keep its controls visible. Closing the editor restores the preferred height.
+
 - The LaTeX edit notice identifies the chat by its tab number when an agent is working or changes are awaiting review.
 
 - Typing in the LaTeX editor updates the document immediately without redrawing the PDF preview or closed chat attachment picker on each keystroke.

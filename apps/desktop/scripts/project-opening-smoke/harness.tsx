@@ -62,5 +62,22 @@ createRoot(document.body).render(<Harness />);
   await pause(100);
   if (panel.clientWidth !== splitWidth || toggle.getAttribute("aria-pressed") !== "false" || compiles)
     throw new Error("Leaving paper view did not restore the split");
+  const grip = document.querySelector<HTMLButtonElement>('[aria-label="Resize message input"]')!;
+  const field = document.querySelector<HTMLTextAreaElement>('[aria-label="Message Codex"]')!;
+  const composer = document.querySelector<HTMLElement>("[data-chat-composer]")!;
+  for (let i = 0; i < 28; i++) {
+    grip.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true }));
+    await new Promise(requestAnimationFrame);
+  }
+  const expanded = field.offsetHeight;
+  document.querySelector<HTMLButtonElement>('button[title="Show LaTeX code"]')!.click();
+  await pause(100);
+  const split = field.offsetHeight;
+  if (split >= expanded || composer.scrollHeight > composer.clientHeight + 1 ||
+      composer.getBoundingClientRect().bottom > innerHeight + 1)
+    throw new Error(`Composer did not fit the editor split: ${expanded} → ${split}, ${composer.scrollHeight}/${composer.clientHeight}`);
+  document.querySelector<HTMLButtonElement>('button[title="Hide LaTeX code"]')!.click();
+  await pause(100);
+  if (field.offsetHeight !== expanded) throw new Error("Preferred composer height was lost");
   return { ok: true, shellMs, readyMs, reads, maximum, compiles, visibility: document.visibilityState };
 };

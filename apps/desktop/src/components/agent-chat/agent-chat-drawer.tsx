@@ -500,13 +500,13 @@ export function AgentChatDrawer({
           <div
             ref={composer}
             data-chat-composer="true"
-            className="max-h-[70%] shrink-0 overflow-auto px-3 pb-3 pt-1"
+            className="flex min-h-0 max-h-[70%] flex-col overflow-auto px-3 pb-3 pt-1"
           >
             <button
               type="button"
               aria-label="Resize message input"
               title="Drag up to enlarge; use arrow keys to resize. Double-click to reset."
-              className={cn("group h-3 w-full touch-none cursor-ns-resize items-center justify-center rounded focus-visible:outline-2 focus-visible:outline-ring", awaitingAnswer ? "hidden" : "flex")}
+              className={cn("group h-3 w-full shrink-0 touch-none cursor-ns-resize items-center justify-center rounded focus-visible:outline-2 focus-visible:outline-ring", awaitingAnswer ? "hidden" : "flex")}
               onPointerDown={(e) => {
                 if (e.button !== 0) return;
                 e.preventDefault();
@@ -545,7 +545,7 @@ export function AgentChatDrawer({
             >
               <span className="h-1 w-8 rounded-full bg-border group-hover:bg-muted-foreground/60" />
             </button>
-            <div className="rounded-2xl border border-input bg-muted/20 p-2 shadow-xs transition-shadow focus-within:border-ring/50 focus-within:ring-2 focus-within:ring-ring/10">
+            <div className="flex min-h-0 flex-col overflow-auto rounded-2xl border border-input bg-muted/20 p-2 shadow-xs transition-shadow focus-within:border-ring/50 focus-within:ring-2 focus-within:ring-ring/10">
               {questionRequests.map(request => (
                 <div
                   key={`${typeof request.id}:${request.id}:${request.params.threadId}`}
@@ -560,7 +560,7 @@ export function AgentChatDrawer({
                   />
                 </div>
               ))}
-              <div hidden={awaitingAnswer}>
+              <div hidden={awaitingAnswer} className={awaitingAnswer ? undefined : "flex min-h-0 flex-col"}>
                 {s.pendingAttachments.length > 0 && (
                   <div className="flex max-h-24 flex-wrap gap-1.5 overflow-auto px-1 pb-2">
                     {s.pendingAttachments.map((a) => (
@@ -665,7 +665,7 @@ export function AgentChatDrawer({
                     }
                   }}
                 />
-                <div className="flex flex-wrap items-center gap-1 pt-1">
+                <div className="flex shrink-0 flex-wrap items-center gap-1 pt-1">
                   <Popover open={filePicker} onOpenChange={setFilePicker}>
                     <PopoverTrigger asChild>
                       <Button
@@ -815,7 +815,7 @@ export function AgentChatDrawer({
                 </div>
               </div>
             </div>
-            <div className="flex min-h-5 items-center justify-between gap-2 px-1 pt-1.5 text-[10px] text-muted-foreground">
+            <div className="flex min-h-5 shrink-0 items-center justify-between gap-2 px-1 pt-1.5 text-[10px] text-muted-foreground">
               <ActivityLine attaching={attaching} onConnect={openConnection} />
               <span className="shrink-0">
                 <span
