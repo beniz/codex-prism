@@ -13,6 +13,8 @@ import {
   clearPdfBytesCache,
   type ProjectFile,
 } from "@/stores/document-store";
+import { publishEditorBuild } from "@/lib/latex-compiler";
+import { usePdfNavigationStore } from "@/stores/pdf-navigation-store";
 import { useProjectStore } from "@/stores/project-store";
 
 import { backend } from "@/lib/backend";
@@ -160,6 +162,27 @@ describe("useDocumentStore", () => {
         .getState()
         .files.find((f) => f.id === "main.tex")!;
       expect(file.content).toBe("Hello World");
+    });
+  });
+
+  it("navigates to the edited line only for the build containing the latest edit", () => {
+    const chapter = makeFile({ id: "chapter.tex", relativePath: "chapter.tex" });
+    useDocumentStore.setState({
+      activeFileId: chapter.id,
+      files: [makeFile({ content: "\\documentclass{article}\n\\input{chapter}" }), chapter],
+    });
+    usePdfNavigationStore.setState({ request: null });
+    const edit = (text: string) => useDocumentStore.getState()
+      .setContent("first\n" + text, { line: 2, sourceLine: text });
+    edit("original edit");
+    const first = useDocumentStore.getState();
+    edit("later edit");
+    publishEditorBuild(first, "main.tex", new Uint8Array([1]));
+    expect(usePdfNavigationStore.getState().request).toBeNull();
+    publishEditorBuild(useDocumentStore.getState(), "main.tex", new Uint8Array([2]));
+    expect(usePdfNavigationStore.getState().request).toMatchObject({
+      filePath: "chapter.tex", line: 2, sourceLine: "later edit", origin: "recompile",
+      pdfRevision: useDocumentStore.getState().pdfRevision,
     });
   });
 

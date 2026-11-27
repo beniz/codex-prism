@@ -5,6 +5,8 @@ and detailed release notes are in [docs/releases](docs/releases/README.md).
 
 ## Unreleased
 
+- After compiling a manual LaTeX edit, the PDF preview follows the most recently edited line when SyncTeX can locate it.
+
 - Drag across lines in the PDF preview to select and copy a sentence.
 
 - Drag the Changes ready panel’s horizontal grip to give expanded diffs more room. Double-click it to restore automatic sizing.

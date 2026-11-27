@@ -5,7 +5,9 @@ export interface PdfSourceRequest {
   filePath: string;
   line: number;
   sourceLine: string;
-  origin?: "editor";
+  origin?: "editor" | "recompile";
+  pdfRevision?: number;
+  openingGeneration?: number;
   chatId?: string;
   sourceContent?: string;
 }

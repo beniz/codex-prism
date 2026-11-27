@@ -1,4 +1,6 @@
 import { useSettingsStore } from "@/stores/settings-store";
+import { usePdfNavigationStore } from "@/stores/pdf-navigation-store";
+import { useAgentChatStore } from "@/stores/agent-chat-store";
 import { invoke } from "@/lib/backend";
 import {
   resolveTexRoot,
@@ -68,6 +70,32 @@ export async function compileLatex(
     `Compiled ${mainFile} in ${(performance.now() - start).toFixed(0)}ms (${(result.byteLength / 1024).toFixed(0)} KB)`,
   );
   return result;
+}
+
+/** Publish only to the checkout that started this build. A newer edit belongs
+ * to the next build, so it cannot provide a destination in these PDF bytes. */
+export function publishEditorBuild(
+  started: ReturnType<typeof useDocumentStore.getState>,
+  rootId: string,
+  data: Uint8Array,
+) {
+  const current = useDocumentStore.getState();
+  if (!started.projectRoot || current.projectRoot !== started.projectRoot ||
+      current.openingGeneration !== started.openingGeneration) return;
+  current.setPdfData(data, rootId, true, started.contentGeneration);
+  const edit = started.manualEdit;
+  if (!edit || edit.generation !== current.contentGeneration ||
+      edit.generation === started.lastCompiledGenerations.get(rootId) ||
+      current.activeFileId !== edit.filePath ||
+      useAgentChatStore.getState().activeTabId !== edit.chatId ||
+      resolveTexRoot(edit.filePath, started.files) !== rootId) return;
+  usePdfNavigationStore.getState().navigate({
+    projectRoot: started.projectRoot, filePath: edit.filePath, line: edit.line,
+    sourceLine: edit.sourceLine, sourceContent: started.files.find(f => f.id === edit.filePath)?.content, origin: "recompile",
+    pdfRevision: useDocumentStore.getState().pdfRevision,
+    openingGeneration: started.openingGeneration,
+    chatId: edit.chatId,
+  });
 }
 
 export interface TexliveStatus {

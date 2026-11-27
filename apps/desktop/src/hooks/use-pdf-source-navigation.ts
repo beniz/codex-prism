@@ -10,6 +10,7 @@ export function usePdfSourceNavigation({
   projectId,
   mainFile,
   activeFilePath,
+  pdfRevision,
   data,
   artifactId,
   enabled,
@@ -18,16 +19,18 @@ export function usePdfSourceNavigation({
   projectId: string | null;
   mainFile?: string;
   activeFilePath?: string;
+  pdfRevision?: number;
   data: ArrayBuffer | null;
   artifactId?: string;
   enabled: boolean;
 }) {
   const chatId = useAgentChatStore(s => s.activeTabId);
   const request = usePdfNavigationStore((s) => s.request);
-  const [location, setLocation] = useState<SourceBox | null>(null);
+  const [located, setLocated] = useState<{ request: typeof request; data: typeof data; box: SourceBox | null }>();
   useEffect(() => {
     let cancelled = false;
-    setLocation(null);
+    setLocated(undefined);
+    if (request?.origin === "recompile" && request.pdfRevision !== pdfRevision) return;
     if (request?.chatId && request.chatId !== chatId) return;
     const unavailable = () => {
       if (!cancelled && request?.origin === "editor") toast.info("No matching position in the current PDF; compile the document and try again.");
@@ -78,7 +81,7 @@ export function usePdfSourceNavigation({
         });
       }
       if (!cancelled) {
-        setLocation(result);
+        setLocated({ request, data, box: result });
         if (!result && request?.origin === "editor") toast.info("No matching position in the current PDF; compile the document and try again.");
       }
     }
@@ -95,9 +98,10 @@ export function usePdfSourceNavigation({
     projectId,
     mainFile,
     activeFilePath,
+    pdfRevision,
     data,
     artifactId,
     enabled,
   ]);
-  return location;
+  return located && located.request === request && located.data === data ? located.box : null;
 }

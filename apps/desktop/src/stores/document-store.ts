@@ -126,6 +126,7 @@ interface DocumentState {
     data: Uint8Array | null,
     rootFileId?: string,
     compiled?: boolean,
+    compiledGeneration?: number,
   ) => void;
   setCompileError: (error: string | null, rootFileId?: string) => void;
   setIsCompiling: (isCompiling: boolean) => void;
@@ -161,7 +162,8 @@ interface DocumentState {
   get fileName(): string;
   get content(): string;
   setFileName: (name: string) => void;
-  setContent: (content: string) => void;
+  manualEdit?: { filePath: string; line: number; sourceLine: string; chatId: string; generation: number };
+  setContent: (content: string, edit?: { line: number; sourceLine: string }) => void;
 }
 
 function getActiveFile(state: { files: ProjectFile[]; activeFileId: string }) {
@@ -303,7 +305,7 @@ export const useDocumentStore = create<DocumentState>()((set, get) => ({
     const current = () => generation === openingGeneration;
     const mark = (stage: string) => log.info("Project opening", { stage, elapsedMs: Math.round(performance.now() - started) });
     clearPdfBytesCache();
-    set({ openingGeneration: generation, projectRoot: rootPath, projectId: null, files: [], folders: [],
+    set({ manualEdit: undefined, openingGeneration: generation, projectRoot: rootPath, projectId: null, files: [], folders: [],
       activeFileId: "", initialized: false, openingError: null, openingPhase: "registering", previewReady: false,
       compileError: null, isCompiling: false, pendingRecompile: false,
       pdfRevision: 0, compileErrorCache: new Map(), lastCompiledGenerations: new Map(),
@@ -692,7 +694,7 @@ export const useDocumentStore = create<DocumentState>()((set, get) => ({
 
   setThreadOpen: (open) => set({ isThreadOpen: open }),
 
-  setPdfData: (data, rootFileId?, compiled = true) => {
+  setPdfData: (data, rootFileId?, compiled = true, compiledGeneration?: number) => {
     if (data) {
       const key = rootFileId ?? "__default__";
       _pdfBytesCache.set(key, data);
@@ -710,7 +712,7 @@ export const useDocumentStore = create<DocumentState>()((set, get) => ({
         const lastCompiledGenerations = new Map(s.lastCompiledGenerations);
         compileErrorCache.delete(rootFileId);
         if (compiled)
-          lastCompiledGenerations.set(rootFileId, s.contentGeneration);
+          lastCompiledGenerations.set(rootFileId, compiledGeneration ?? s.contentGeneration);
         else lastCompiledGenerations.delete(rootFileId);
         set((prev) => ({
           pdfRevision: prev.pdfRevision + 1,
@@ -1218,11 +1220,15 @@ export const useDocumentStore = create<DocumentState>()((set, get) => ({
     });
   },
 
-  setContent: (content) => {
+  setContent: (content, edit) => {
     if (!get().initialized || useAgentChatStore.getState().locked) return;
     const state = get();
-    if (state.files.find(f => f.id === state.activeFileId)?.content === undefined) return;
+    const file = state.files.find(f => f.id === state.activeFileId);
+    if (file?.content === undefined) return;
     set({
+      manualEdit: edit && file.type === "tex"
+        ? { ...edit, filePath: file.relativePath, chatId: useAgentChatStore.getState().activeTabId, generation: state.contentGeneration + 1 }
+        : undefined,
       files: state.files.map((f) =>
         f.id === state.activeFileId ? { ...f, content, isDirty: true } : f,
       ),

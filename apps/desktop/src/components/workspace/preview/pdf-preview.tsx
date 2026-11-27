@@ -53,6 +53,7 @@ import {
 import { HistoryPanel } from "@/components/workspace/history-panel";
 import {
   compileLatex,
+  publishEditorBuild,
   loadExistingPdf,
   synctexEdit,
   resolveCompileTarget,
@@ -192,6 +193,8 @@ export function PdfPreview() {
   const artifact = chatPdf.artifact;
   const changePageTarget = useFirstChangedPage(artifact, projectId);
   const shownChanges = useRef(new Set<string>());
+  const lastManualJump = useRef<string | undefined>(undefined);
+  const markManualJump = useCallback((key: string) => { lastManualJump.current = key; }, []);
   const markChangeShown = useCallback((key: string) => { shownChanges.current.add(key); }, []);
   useEffect(() => { shownChanges.current.clear(); }, [projectId]);
   const artifactRef = useRef(artifact);
@@ -298,6 +301,7 @@ export function PdfPreview() {
     projectId: useDocumentStore((state) => state.projectId),
     mainFile,
     activeFilePath: activeFile?.relativePath,
+    pdfRevision: visual.active || artifact ? undefined : pdfRevision,
     data: visual.active
       ? visual.bytes.current
       : pdfData
@@ -317,7 +321,7 @@ export function PdfPreview() {
   useEffect(() => {
     let cancelled = false;
     setChatSourceLocation(null);
-    if (artifact && navigation && (!navigation.chatId || navigation.chatId === navigationChatId) && navigation.projectRoot === projectRoot) {
+    if (artifact && navigation && navigation.origin !== "recompile" && (!navigation.chatId || navigation.chatId === navigationChatId) && navigation.projectRoot === projectRoot) {
       void chatHeadingLocation(artifact, navigation)
         .then((box) => {
           if (!cancelled) {
@@ -331,7 +335,16 @@ export function PdfPreview() {
       cancelled = true;
     };
   }, [artifact, navigation, navigationChatId, projectRoot, contentGeneration]);
-  const sourceLocation = artifact ? chatSourceLocation : mainSourceLocation;
+  const manualBuildNavigation = navigation?.origin === "recompile";
+  const manualPageTarget =
+    manualBuildNavigation && mainSourceLocation && navigation.openingGeneration === openingGeneration && navigation.pdfRevision === pdfRevision &&
+    !visual.active && !artifact && navigation.chatId === navigationChatId
+      ? { key: JSON.stringify(["edit", openingGeneration, currentRootFileId, pdfRevision]), page: mainSourceLocation.page }
+      : undefined;
+  const pageTarget = changePageTarget && !shownChanges.current.has(changePageTarget.key)
+    ? changePageTarget
+    : manualPageTarget?.key !== lastManualJump.current ? manualPageTarget : undefined;
+  const sourceLocation = artifact ? chatSourceLocation : manualBuildNavigation ? null : mainSourceLocation;
   const locateDisplayedSource = useCallback(
     async (page: number, x: number, y: number) => {
       if (!artifact) {
@@ -770,8 +783,7 @@ export function PdfPreview() {
     try {
       await saveAllFiles();
       const data = await compileLatex(state.projectRoot, targetFile);
-      if (useDocumentStore.getState().projectRoot === state.projectRoot)
-        setPdfData(data, rootId);
+      publishEditorBuild(state, rootId, data);
     } catch (error) {
       if (useDocumentStore.getState().projectRoot === state.projectRoot)
         setCompileError(formatCompileError(error), rootId);
@@ -1006,8 +1018,8 @@ export function PdfPreview() {
                       ? visual.bytes.current!
                       : getPdfArrayBuffer(data)
                   }
-                  changePageTarget={isActive && changePageTarget && !shownChanges.current.has(changePageTarget.key) ? changePageTarget : undefined}
-                  onChangePageShown={markChangeShown}
+                  changePageTarget={isActive ? pageTarget : undefined}
+                  onChangePageShown={manualPageTarget ? markManualJump : markChangeShown}
                   sourceLocation={isActive ? sourceLocation : null}
                   selectedRegion={
                     isActive && visual.active

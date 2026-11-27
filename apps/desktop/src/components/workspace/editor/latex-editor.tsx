@@ -67,6 +67,7 @@ import {
 } from "@/stores/agent-chat-store";
 import { useHistoryStore, type FileDiff } from "@/stores/history-store";
 import {
+  publishEditorBuild,
   compileLatex,
   resolveCompileTarget,
   formatCompileError,
@@ -132,7 +133,6 @@ export function LatexEditor() {
   const clearJumpRequest = useDocumentStore((s) => s.clearJumpRequest);
 
   const setIsCompiling = useDocumentStore((s) => s.setIsCompiling);
-  const setPdfData = useDocumentStore((s) => s.setPdfData);
   const setCompileError = useDocumentStore((s) => s.setCompileError);
   const saveAllFiles = useDocumentStore((s) => s.saveAllFiles);
 
@@ -428,7 +428,7 @@ export function LatexEditor() {
     try {
       await saveAllFiles();
       const data = await compileLatex(projectRoot, targetPath);
-      setPdfData(data, rootId);
+      publishEditorBuild(state, rootId, data);
     } catch (error) {
       setCompileError(formatCompileError(error), rootId);
     } finally {
@@ -503,7 +503,17 @@ export function LatexEditor() {
         }
         return;
       }
-      if (update.docChanged) setContent(update.state.doc.toString());
+      if (update.docChanged) {
+        let edit: { line: number; sourceLine: string } | undefined;
+        if (!update.transactions.some(tr => tr.annotation(backendReload))) {
+          update.changes.iterChangedRanges((_from, _to, from) => {
+            if (edit) return;
+            const line = update.state.doc.lineAt(from);
+            edit = { line: line.number, sourceLine: line.text };
+          });
+        }
+        setContent(update.state.doc.toString(), edit);
+      }
       if (update.selectionSet) {
         const { from, to, head } = update.state.selection.main;
         setCursorPosition(head);

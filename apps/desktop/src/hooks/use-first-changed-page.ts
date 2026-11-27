@@ -14,7 +14,7 @@ export function clearFirstChangedPageCache() {
 }
 export interface ChangePageTarget {
   key: string;
-  artifactId: string;
+  artifactId?: string;
   page: number;
 }
 
